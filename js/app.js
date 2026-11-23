@@ -10,7 +10,7 @@ import { getClientId, setClientId, hasToken, signIn, tokenMinutesLeft } from './
 import { getConfig, seedLocal } from './setup.js';
 import { newId } from './ids.js';
 
-export const APP_VERSION = 's1-0.1.0';
+export const APP_VERSION = 's1-0.1.1';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 

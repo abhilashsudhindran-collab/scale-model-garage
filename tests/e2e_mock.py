@@ -19,6 +19,7 @@ class FakeGoogle:
         self.n = 0
         self.calls = []
         self.fail_next_upload_after_store = False
+        self.fail_first_header_write = False
 
     def nid(self, p='f'):
         self.n += 1
@@ -66,6 +67,9 @@ class FakeGoogle:
                     out.append({'range': rng, 'values': [list(r) for r in book.get(tab, [])]})
                 return ok({'valueRanges': out})
             if method == 'POST' and rest == '/values:batchUpdate':
+                if self.fail_first_header_write:
+                    self.fail_first_header_write = False
+                    return route.abort('connectionreset')  # simulate setup cut off before headers were written
                 for d in json.loads(body)['data']:
                     tab, row = self.a1(d['range'])
                     rows = book.setdefault(tab, [])
@@ -234,8 +238,17 @@ def main():
         # 6. Sign in + sync (fake Google)
         page.goto(base + '#/settings'); page.wait_for_selector('text=Google account')
         page.fill('input[placeholder^="OAuth Client ID"]', 'test-client.apps.googleusercontent.com')
+        fake.fail_first_header_write = True
+        page.get_by_role('button', name='Sign in & set up').click()
+        page.wait_for_timeout(2500)
+        sid0 = next(k for k in fake.sheets)
+        check(sum(1 for c in fake.calls if c.endswith('values:batchUpdate')) >= 2, 'header write was cut off once and then resumed (simulated)')
+        page.reload(); page.wait_for_selector('text=Google account')  # like the phone reloading the tab
         page.get_by_role('button', name='Sign in & set up').click()
         page.wait_for_selector('text=Synced:', timeout=30000)
+        check(len(fake.sheets) == 1, 'retry reuses the same sheet (no second workbook)')
+        check(len(fake.sheets[sid0]['SETTINGS']) == 7, 'retry finishes SETTINGS rows')
+        check(len([f for f in fake.files.values() if f.get('name') == 'SCALE GARAGE']) == 1, 'retry reuses the same SCALE GARAGE folder')
         msg = page.inner_text('#syncMsg')
         print('   sync message:', msg)
         sid = next(k for k in fake.sheets)

@@ -49,6 +49,13 @@ export async function ensureSetup(progress = () => {}) {
     await writeHeadersAndSeeds(workbookId);
     created = true;
   } else {
+    // Resume a setup that was interrupted (e.g. the phone reloaded the page mid-setup):
+    // make sure the workbook sits in 00_DATABASE and has its headers + SETTINGS rows.
+    progress('Checking your SCALE_GARAGE_MASTER sheet…');
+    const f = await drive.get(workbookId, 'id,parents');
+    if (!(f.parents || []).includes(folders['00_DATABASE'])) await drive.move(workbookId, folders['00_DATABASE'], (f.parents || []).join(','));
+    const probe = await sheets.batchGet(workbookId, [`${SETTINGS_TAB.name}!A1:A1`]);
+    const settingsEmpty = !probe.valueRanges?.[0]?.values?.length;
     // Add any tabs missing from an older workbook (never delete).
     const m = await sheets.meta(workbookId);
     const have = new Set(m.sheets.map(s => s.properties.title));
@@ -57,6 +64,7 @@ export async function ensureSetup(progress = () => {}) {
       await sheets.addTabs(workbookId, missing);
       await sheets.batchUpdate(workbookId, missing.map(t => ({ range: `${t}!A1`, values: [t === SETTINGS_TAB.name ? SETTINGS_TAB.cols : headersFor(t)] })));
     }
+    if (settingsEmpty) { progress('Finishing sheet setup…'); await writeHeadersAndSeeds(workbookId); }
   }
   const config = { rootId, folders, workbookId, created, setupAt: nowIso() };
   await meta.set('config', config);
