@@ -1,0 +1,11 @@
+# Never commit data, secrets or local files
+*.env
+.env*
+*.key
+*.pem
+secrets*
+data/
+results/
+*.json.local
+.DS_Store
+node_modules/
