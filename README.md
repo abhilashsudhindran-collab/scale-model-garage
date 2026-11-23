@@ -2,6 +2,23 @@
 
 A personal, mobile-first app for cataloguing a scale model collection. First app in the Collection Vault family.
 
-- Runs as an installable web app (PWA) hosted on GitHub Pages.
-- **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive and Google Sheet.
-- Status: Stage 1 (quick-capture slice) in development.
+- Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
+- **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
+
+## Status: Stage 1 (quick-capture slice), version s1-0.1.0
+
+| Works in this version | Not yet (later stages) |
+|---|---|
+| Quick capture: box front + rear photos (phone camera), box art for sealed boxes, brand, scale, barcode scan/typing, name, optional product code | Shop-check screen (Stage 2) |
+| Exact duplicate check on the phone (brand + exact code), possible matches (barcode, similar code, similar name) | Cropping/straightening, OCR (Stage 3) |
+| Offline capture; batched, idempotent sync to Drive + Sheet; clash handling | Full identification, AI copy-paste helper (Stage 4) |
+| Garage list with search and filters; item page to add details later; copy details (price/date "unknown" allowed) | Orders, transactions, analytics, backups, valuation (Stages 5–9) |
+
+## Developer tests (not acceptance tests)
+- `node tests/rules.test.mjs` — identity rules, barcode standardisation, check digits, IDs.
+- `node tests/md5.test.mjs` — md5 against node:crypto.
+- `python3 tests/e2e_mock.py` — headless Chrome against a **fake** in-memory Google Drive/Sheets.
+
+**A feature counts as passed only after testing on the owner's phone with the real Google account.**
+
+Licences of bundled libraries: `vendor/barcode/` (MIT).
