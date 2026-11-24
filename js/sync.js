@@ -137,25 +137,31 @@ async function doSync({ interactive = false, progress = () => {} } = {}) {
     summary.rowsAppended += items.length;
     done.push(...items);
   }
-  for (const { rec, obj } of done) {
-    const fresh = await records.get(rec.entity, rec.id);
-    // If B edited it again while we were syncing, keep it dirty; the base still moves forward.
-    const editedMeanwhile = fresh && fresh.data.updated_at !== rec.data.updated_at;
-    const data = editedMeanwhile ? { ...fresh.data, version: obj.version } : { ...obj };
-    await records.put({ ...(fresh || rec), data, dirty: editedMeanwhile ? 1 : 0, sync: { base: { ...obj } }, lastError: undefined, conflict: undefined });
+  // Mark written rows as synced in ONE database transaction (perf: one per row took ~1 min for 1,500 cars).
+  if (done.length) {
+    const current = new Map();
+    for (const ent of new Set(done.map(d => d.rec.entity))) for (const r of await records.byEntity(ent)) current.set(r.key, r);
+    const puts = done.map(({ rec, obj }) => {
+      const fresh = current.get(rec.key);
+      // If B edited it again while we were syncing, keep it dirty; the base still moves forward.
+      const editedMeanwhile = fresh && fresh.data.updated_at !== rec.data.updated_at;
+      const data = editedMeanwhile ? { ...fresh.data, version: obj.version } : { ...obj };
+      return { ...(fresh || rec), data, dirty: editedMeanwhile ? 1 : 0, sync: { base: { ...obj } }, lastError: undefined, conflict: undefined };
+    });
+    await records.putMany(puts);
   }
 
   // 5. Pull rows changed elsewhere (e.g. laptop) into the phone's copy.
   const local = new Map();
   for (const ent of SYNCED_ENTITIES) for (const r of await records.byEntity(ent)) local.set(r.key, r);
   const pulls = [];
+  const writtenKeys = new Set(done.map(d => d.rec.key));
   for (const tab of tabs) {
     const entity = TABS[tab].entity;
     for (const [id, { obj }] of remote[tab].byId) {
       const key = `${entity}:${id}`;
       const l = local.get(key);
-      const justWritten = done.find(d => d.rec.key === key);
-      if (justWritten) continue;
+      if (writtenKeys.has(key)) continue;
       if (!l) { pulls.push({ key, entity, id, data: obj, dirty: 0, sync: { base: { ...obj } } }); continue; }
       if (!l.dirty && (Number(obj.version) || 0) > (Number(l.data.version) || 0)) pulls.push({ ...l, data: obj, sync: { base: { ...obj } } });
     }
@@ -182,10 +188,12 @@ async function doSync({ interactive = false, progress = () => {} } = {}) {
 
   // 6. Free phone storage: once a photo row is safely in the Sheet, drop the local original
   //    (and display copy, except box fronts kept for the offline shop check). Thumbnails stay.
+  // Only touches photos that still have a big file here (perf: trying every photo on every sync grew with the collection).
+  const stillHere = new Set(await blobs.keys());
   for (const r of await records.byEntity('photos')) {
     if (r.dirty || !r.data.original_file_id || !r.data.thumb_file_id) continue;
-    await blobs.remove(`${r.id}:original`);
-    if (r.data.shot_role !== 'box_front') await blobs.remove(`${r.id}:display`);
+    if (stillHere.has(`${r.id}:original`)) await blobs.remove(`${r.id}:original`);
+    if (r.data.shot_role !== 'box_front' && stillHere.has(`${r.id}:display`)) await blobs.remove(`${r.id}:display`);
   }
 
   summary.ms = Date.now() - t0;
