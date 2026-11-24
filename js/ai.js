@@ -4,7 +4,9 @@
 // only to pre-fill fields as suggestions that B confirms or corrects. Nothing is saved automatically.
 
 export const PROMPT_VERSION = 'names-v2';
-export const MAX_BATCH = 10;
+// 5 boxes = 10 photos per share. B's phone (24 Nov 21:39) refused to share 20 photos at once (2 worked);
+// Chrome on Android appears to cap a share at about 10 files (not confirmed in its docs), so batches stay at 10 photos.
+export const MAX_BATCH = 5;
 
 // boxes: [{ brand, scale }] in the order their photos are shared (front, then rear, for each box).
 export function buildPrompt(boxes) {

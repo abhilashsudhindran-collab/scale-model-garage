@@ -5,7 +5,11 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.16.2
+## Status: Stage 1 (quick-capture slice), version s1-0.17.0
+
+**s1-0.17.0 (24 Nov 2026): from B's first real 20-box session.** (1) Car page: **Move box** next to Edit details and Remove: pick an existing box (with its name and count), ＋ New box, or No box; one row per copy; asks first if the box is set for another brand or scale; logged in CHANGE_LOG. (2) **Sync now is greyed out ("Syncing…")** while a sync runs. (3) Sync stopped at photo 21 of 43 when B left the app: the screen is now kept awake during a sync (where Chrome allows), a dropped connection or failed items are **retried once by itself**, and coming back to the app **carries on** syncing. (4) "Photos not uploaded yet" now drops as each photo reaches Drive. (5) The Settings Sync card refreshes after a sync (it kept showing old counts). Includes s1-0.16.3: names in batches of 5.
+
+**s1-0.16.3 (24 Nov 2026): names in batches of 5.** B's phone refused to share 10 boxes (20 photos) to Gemini at once ("This phone can't share photos from here"), while 1 box (2 photos) worked earlier. Batches are now 5 boxes = 10 photos per share. Cause believed to be Chrome on Android's limit of about 10 files per share (not confirmed in its documentation).
 
 **s1-0.16.2 (24 Nov 2026): any brand, anywhere.** Every brand list (Photo run, mixed-box question, Box settings, Quick capture, car page) shows your brands, then "More brands" (about 40 well-known die-cast brands, created when picked), then "＋ Type a new brand…". B's choice: a new brand is trusted at once (no "Needs review"; duplicate check works); a name that looks like one already stored ("Burago" / "Bburago", "Mini-GT" / "Mini GT") asks "Did you mean …?" first. Each new brand is logged in CHANGE_LOG and goes to the front of the recent-brand shortcuts.
 

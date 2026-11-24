@@ -266,7 +266,7 @@ def main():
         page.fill('input[placeholder^="OAuth Client ID"]', 'test-client.apps.googleusercontent.com')
         fake.fail_first_header_write = True
         page.get_by_role('button', name='Sign in & set up').click()
-        page.wait_for_timeout(2500)
+        page.wait_for_timeout(7000)  # s1-0.17.0: a dropped write is retried once by itself after ~4 s
         sid0 = next(k for k in fake.sheets)
         check(sum(1 for c in fake.calls if c.endswith('values:batchUpdate')) >= 2, 'header write was cut off once and then resumed (simulated)')
         page.reload(); page.wait_for_selector('text=Google account')  # like the phone reloading the tab
