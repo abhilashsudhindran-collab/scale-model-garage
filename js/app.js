@@ -10,10 +10,11 @@ import { getClientId, setClientId, hasToken, signIn, tokenMinutesLeft, drive } f
 import { getConfig, seedLocal } from './setup.js';
 import { newId } from './ids.js';
 import { newTimer, touch, seconds } from './timing.js';
+import { straighten, validQuad } from './crop.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.14.1';
+export const APP_VERSION = 's1-0.15.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -58,7 +59,8 @@ const collectionEstimate = () => Number(localStorage.getItem('smg.collectionEsti
 const urlCache = new Map();
 async function photoUrl(photo, prefer = 'thumb') {
   if (!photo) return null;
-  for (const v of [prefer, 'thumb', 'display', 'original']) {
+  const order = photo.crop_corners ? (prefer === 'thumb' ? ['cropthumb', 'cropped'] : ['cropped', 'cropthumb']) : [];
+  for (const v of [...order, prefer, 'thumb', 'display', 'original']) {
     const key = `${photo.photo_id}:${v}`;
     if (urlCache.has(key)) return urlCache.get(key);
     const b = await blobs.get(key);
@@ -147,6 +149,7 @@ async function route() {
     else if (hash.startsWith('#/name')) await renderName(v);
     else if (hash.startsWith('#/dash')) await renderDash(v);
     else if (hash.startsWith('#/item/')) await renderItem(v, decodeURIComponent(hash.slice(7)));
+    else if (hash.startsWith('#/crop/')) await renderCrop(v, decodeURIComponent(hash.slice(7)));
     else if (hash.startsWith('#/settings')) await renderSettings(v);
     else await renderGarage(v);
   } catch (e) {
@@ -993,6 +996,7 @@ async function saveRunBox() {
 // Name them: one nameless box at a time, big photo first (fills in after a Photo run).
 // =====================================================================
 const nameSkipped = new Set();
+
 // ---------- names from Gemini or Claude (D2; security doc §2.3–2.4) ----------
 // Only display copies (no location data) are shared; originals never leave Drive. The pasted answer is
 // untrusted text: parsed and validated in ai.js, used only to pre-fill fields; B saves each one himself.
@@ -1239,7 +1243,7 @@ async function renderItem(v, modelId) {
     const main = p.photo_id === m.primary_photo_id;
     gal.append(h('button', { type: 'button', class: `fig ${selectedPhoto.id === p.photo_id ? 'sel' : ''}`, 'aria-label': `Photo options: ${SHOT_ROLES[p.shot_role]?.label || p.shot_role}`,
       onclick: () => { selectedPhoto.id = selectedPhoto.id === p.photo_id ? null : p.photo_id; route(); } }, img,
-      h('span', { class: 'cap' }, `${main ? '★ ' : ''}${SHOT_ROLES[p.shot_role]?.label || p.shot_role}${p.original_file_id ? '' : ' · waiting'}`)));
+      h('span', { class: 'cap' }, `${main ? '★ ' : ''}${SHOT_ROLES[p.shot_role]?.label || p.shot_role}${p.crop_corners ? ' · straightened' : ''}${p.original_file_id ? '' : ' · waiting'}`)));
   }
   v.append(gal);
   const sp = photos.find(p => p.photo_id === selectedPhoto.id);
@@ -1258,7 +1262,15 @@ async function renderItem(v, modelId) {
           if (isMain) { const next = photos.find(p => p.photo_id !== sp.photo_id && p.shot_role === 'box_front') || photos.find(p => p.photo_id !== sp.photo_id); await store.update('models', modelId, { primary_photo_id: next?.photo_id || '' }); }
           await store.logChange('photos', sp.photo_id, 'deleted_at', '', 'removed', 'photo removed in app');
           selectedPhoto.id = null; toast('Photo removed'); route(); autoSyncSoon();
-        } }, 'Remove photo'))));
+        } }, 'Remove photo')),
+      h('div', { class: 'row', style: 'margin-top:10px' },
+        h('a', { class: 'btn quiet', href: `#/crop/${encodeURIComponent(sp.photo_id)}` }, sp.crop_corners ? 'Adjust straightening' : 'Crop / straighten'),
+        sp.crop_corners ? h('button', { type: 'button', class: 'ghost', onclick: async () => {
+          await store.update('photos', sp.photo_id, { crop_corners: '', cropped_file_id: '' });
+          await store.logChange('photos', sp.photo_id, 'crop_corners', sp.crop_corners, '', 'straightening undone in app');
+          for (const k of ['cropped', 'cropthumb']) { await blobs.remove(`${sp.photo_id}:${k}`); urlCache.delete(`${sp.photo_id}:${k}`); }
+          toast('Back to the original photo'); route(); autoSyncSoon();
+        } }, 'Undo straightening') : null)));
   }
   const roleSel = h('select', { style: 'flex:2' }, Object.entries(SHOT_ROLES).map(([k, r]) => h('option', { value: k }, r.label)));
   v.append(h('div', { class: 'row', style: 'margin-top:8px' }, roleSel, h('button', { class: 'quiet', style: 'flex:1', onclick: async () => {
@@ -1383,6 +1395,84 @@ async function renderItem(v, modelId) {
     h('dt', {}, 'ID'), h('dd', { class: 'muted' }, m.model_id))));
   v.append(m.deleted_at ? h('button', { class: 'wide', onclick: restore }, 'Restore to garage')
     : h('button', { class: 'ghost wide', onclick: async () => { if (confirm('Archive this model? It is hidden from your garage, never deleted, and can be restored from Garage → Archived.')) { await store.archive('models', modelId); toast('Archived. Restore it from Garage → Archived.', 3500); location.hash = '#/'; autoSyncSoon(); } } }, 'Archive'));
+}
+
+// =====================================================================
+// Crop / straighten (D14, D19): drag four corners onto the box; the app makes a straight copy.
+// The original is never changed; the copy is stored as `cropped` (uploaded) + `cropthumb` (phone only).
+// =====================================================================
+async function renderCrop(v, photoId) {
+  const p = (await store.list('photos')).find(x => x.photo_id === photoId);
+  if (!p) { v.append(h('p', {}, 'Photo not found.'), h('a', { href: '#/' }, '← Garage')); return; }
+  const back = `#/item/${encodeURIComponent(p.model_id)}`;
+  v.append(h('a', { href: back, class: 'back' }, '← Back'), h('h2', {}, 'Straighten photo'),
+    h('p', { class: 'muted' }, 'Drag the four corners onto the corners of the box. A magnifier helps you place them exactly.'));
+  // Source: the display copy (1600 px). After a sync the phone may only have the thumbnail, so fetch it from Drive.
+  let src = await blobs.get(`${p.photo_id}:display`);
+  if (!src && p.display_file_id && navigator.onLine) {
+    try { if (!hasToken()) await signIn(); src = await drive.download(p.display_file_id); await blobs.put(`${p.photo_id}:display`, src); } catch (e) { console.warn('display download', e); }
+  }
+  if (!src) src = await blobs.get(`${p.photo_id}:original`);
+  if (!src) { v.append(h('div', { class: 'banner warn' }, 'The full photo is not on this phone. Connect to the internet and sign in, then try again.')); return; }
+  const url = URL.createObjectURL(src);
+  const img = h('img', { src: url, alt: 'Photo to straighten', draggable: 'false' });
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg'); svg.setAttribute('class', 'cropsvg'); svg.setAttribute('viewBox', '0 0 1 1'); svg.setAttribute('preserveAspectRatio', 'none');
+  const poly = document.createElementNS(NS, 'polygon'); poly.setAttribute('class', 'cropq'); svg.append(poly);
+  const stage = h('div', { class: 'cropstage' }, img, svg);
+  const mag = h('canvas', { class: 'cropmag', width: '240', height: '240', 'aria-hidden': 'true' });
+  stage.append(mag);
+  let q = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]];
+  try { const saved = JSON.parse(p.crop_corners || 'null'); if (Array.isArray(saved) && saved.length === 4) q = saved; } catch { /* use defaults */ }
+  const start = q.map(x => [...x]);
+  const handles = q.map((_, i) => { const d = h('button', { type: 'button', class: 'croph', 'aria-label': ['Top-left corner', 'Top-right corner', 'Bottom-right corner', 'Bottom-left corner'][i] }); stage.append(d); return d; });
+  const draw = () => {
+    poly.setAttribute('points', q.map(([x, y]) => `${x},${y}`).join(' '));
+    handles.forEach((d, i) => { d.style.left = `${q[i][0] * 100}%`; d.style.top = `${q[i][1] * 100}%`; });
+    stage.classList.toggle('bad', !validQuad(q.map(([x, y]) => [x * (img.naturalWidth || 1), y * (img.naturalHeight || 1)])));
+  };
+  const magDraw = (i) => {
+    const c = mag.getContext('2d'), W = img.naturalWidth, H = img.naturalHeight;
+    const cx = q[i][0] * W, cy = q[i][1] * H;
+    c.clearRect(0, 0, 240, 240); c.save(); c.beginPath(); c.arc(120, 120, 118, 0, Math.PI * 2); c.clip();
+    const span = (W / img.clientWidth) * 80; // ~80 css px of photo around the corner, shown 3x
+    c.drawImage(img, cx - span / 2, cy - span / 2, span, span, 0, 0, 240, 240);
+    c.restore(); c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.moveTo(120, 96); c.lineTo(120, 144); c.moveTo(96, 120); c.lineTo(144, 120); c.stroke();
+    c.strokeStyle = 'rgba(31,29,26,.8)'; c.lineWidth = 1.5; c.stroke();
+    mag.classList.add('on'); mag.classList.toggle('right', q[i][0] < 0.5);
+  };
+  handles.forEach((d, i) => {
+    d.addEventListener('pointerdown', (e) => { e.preventDefault(); d.setPointerCapture(e.pointerId); d.classList.add('drag'); magDraw(i); });
+    d.addEventListener('pointermove', (e) => {
+      if (!d.hasPointerCapture(e.pointerId)) return;
+      const r = img.getBoundingClientRect();
+      q[i] = [Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), Math.max(0, Math.min(1, (e.clientY - r.top) / r.height))];
+      draw(); magDraw(i);
+    });
+    const end = (e) => { if (d.hasPointerCapture?.(e.pointerId)) d.releasePointerCapture(e.pointerId); d.classList.remove('drag'); mag.classList.remove('on'); };
+    d.addEventListener('pointerup', end); d.addEventListener('pointercancel', end);
+  });
+  img.addEventListener('load', draw);
+  v.append(stage);
+  const saveBtn = h('button', { class: 'wide', style: 'margin-top:14px', onclick: async () => {
+    const W = img.naturalWidth, H = img.naturalHeight, quad = q.map(([x, y]) => [x * W, y * H]);
+    if (!validQuad(quad)) { toast('The corners cross over. Put them in order: top-left, top-right, bottom-right, bottom-left.', 4500, 'warn'); return; }
+    saveBtn.disabled = true; saveBtn.textContent = 'Straightening…';
+    try {
+      const out = await straighten(src, quad);
+      await blobs.put(`${p.photo_id}:cropped`, out.cropped); await blobs.put(`${p.photo_id}:cropthumb`, out.cropthumb);
+      for (const k of ['cropped', 'cropthumb']) urlCache.delete(`${p.photo_id}:${k}`);
+      const corners = JSON.stringify(q.map(([x, y]) => [Math.round(x * 10000) / 10000, Math.round(y * 10000) / 10000]));
+      await store.update('photos', p.photo_id, { crop_corners: corners, cropped_file_id: '' });
+      await store.logChange('photos', p.photo_id, 'crop_corners', p.crop_corners || '', corners, 'straightened in app');
+      toast('Straightened ✓ The original is kept.'); location.hash = back; autoSyncSoon();
+    } catch (e) { toast(`Couldn't straighten: ${e.message}`, 4000, 'bad'); saveBtn.disabled = false; saveBtn.textContent = 'Save straightened copy'; }
+  } }, 'Save straightened copy');
+  v.append(saveBtn, h('div', { class: 'row', style: 'margin-top:8px' },
+    h('button', { type: 'button', class: 'quiet', onclick: () => { q = start.map(x => [...x]); draw(); } }, 'Reset corners'),
+    h('a', { class: 'btn ghost', href: back }, 'Cancel')));
+  v.append(h('p', { class: 'muted', style: 'margin-top:10px' }, 'Your original photo is never changed. You can undo this later from the photo\'s options.'));
+  draw();
 }
 
 function renderConflict(v, rec) {

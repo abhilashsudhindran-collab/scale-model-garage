@@ -169,6 +169,9 @@ async function doSync({ interactive = false, progress = () => {} } = {}) {
   const haveBlobs = new Set(await blobs.keys());
   for (const r of await records.byEntity('photos')) {
     if (summary.thumbsFetched >= 60) break;
+    if (r.data.crop_corners && r.data.cropped_file_id && !haveBlobs.has(`${r.id}:cropped`) && !haveBlobs.has(`${r.id}:cropthumb`)) {
+      try { await blobs.put(`${r.id}:cropped`, await drive.download(r.data.cropped_file_id)); summary.thumbsFetched++; } catch (e) { console.warn('cropped download', r.id, e.message); }
+    }
     if (r.data.deleted_at || !r.data.thumb_file_id || haveBlobs.has(`${r.id}:thumb`)) continue;
     try {
       progress(`Fetching photo previews… ${summary.thumbsFetched + 1}`);
@@ -196,9 +199,11 @@ async function uploadPhoto(rec, config, summary) {
   const up = rec.upload || {};
   const folderId = config.folders[SHOT_ROLES[d.shot_role]?.folder || '01_MODEL_IMAGES'];
   const variants = [['original', 'original_file_id'], ['display', 'display_file_id'], ['thumb', 'thumb_file_id']];
+  if (d.crop_corners) variants.push(['cropped', 'cropped_file_id']); // straightened copy (D14), when there is one
   for (const [variant, col] of variants) {
     if (d[col]) continue;
     const blob = await blobs.get(`${rec.id}:${variant}`);
+    if (!blob && variant === 'cropped') continue; // made on another device and not here: nothing to upload
     if (!blob) throw new ApiError(`Photo file missing on phone (${variant})`, 0, false);
     const localMd5 = variant === 'original' ? d.original_md5 : await md5Blob(blob);
     let fileId = null;

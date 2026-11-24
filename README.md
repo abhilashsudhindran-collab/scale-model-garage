@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.14.1
+## Status: Stage 1 (quick-capture slice), version s1-0.15.0
+
+**s1-0.15.0 (24 Nov 2026): crop / straighten (D14).** On a car's page, tap a photo → Crop / straighten: drag four corners onto the box (magnifier while dragging; crossed corners shown in red and refused). The app makes a straight copy with a perspective transform written in plain JavaScript (₹0, no OpenCV): `cropped` (≤1600 px, uploaded to Drive as its own file) and a small copy for tiles. The original is never changed; corners are saved (crop_corners) so it can be adjusted or undone. If the full photo was freed from the phone after sync, it is fetched from Drive. Other devices download the straightened copy.
 
 **s1-0.14.1 (24 Nov 2026): app icon.** New icon redrawn as vector art from B's reference (green garage with a car on warm paper): home-screen icons 192/512 (plain and maskable, design inside the safe zone), Apple touch icon 180, favicon 32 and SVG; also shown beside the name in the header. Manifest colours now warm paper.
 
@@ -61,6 +63,8 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - `node tests/release_check.mjs` — offline file complete and in step with the app version (run before every release).
 - `python3 tests/e2e_restore.py` — restore from a backup, end to end (refusal, safety backup, old sheet kept, second device).
 - `python3 tests/e2e_offline.py` — the app opens with the network cut.
+- `node tests/crop.test.mjs` — straightening maths (homography, corner order, warp).
+- `python3 tests/e2e_crop.py` — crop / straighten end to end.
 - `node tests/ai.test.mjs` — AI answer parser (copy-paste names).
 - `python3 tests/e2e_p5.py` — headless checks for s1-0.7.0 (Dashboard, Name tab).
 - `python3 tests/e2e_p4.py` — headless checks for s1-0.6.0 (share sheet and clipboard simulated).
