@@ -1,6 +1,6 @@
 // Unit tests for identity rules (run: node tests/rules.test.mjs). These test code logic only;
 // they are NOT phone acceptance tests.
-import { codeCmp, barcodeCmp, gtinCheckOk, assignNamespace, duplicateCheckStatus, checkDuplicate } from '../js/rules.js';
+import { codeCmp, barcodeCmp, gtinCheckOk, assignNamespace, duplicateCheckStatus, checkDuplicate, searchMatch } from '../js/rules.js';
 import { newId, isId, timePart, seedId } from '../js/ids.js';
 
 let fails = 0, n = 0;
@@ -71,5 +71,12 @@ eq(many.size, 5000, 'ids unique');
 eq(seedId('brands','Mini GT'), seedId('brands','Mini GT'), 'seed id deterministic');
 eq(isId(seedId('brands','Mini GT')), true, 'seed id valid format');
 eq(seedId('brands','Mini GT') !== seedId('brands','Tarmac Works'), true, 'seed ids differ');
+// searchMatch (audit G1): queries that returned 0 in the audit now match
+const hay = 'Nissan Skyline GT-R R34 PR64-0161 Pop Race 1:64 0194735359103 194735359103';
+for (const q of ['skyline', 'gt-r skyline', 'skyline gtr', 'pop race skyline', 'PR64-0161', 'pr64 0161', 'pr640161', '1:64', '1 94735 35910 3']) eq(searchMatch(q, hay), true, 'search finds: ' + q);
+eq(searchMatch('ferrari', hay), false, 'search: unrelated word does not match');
+eq(searchMatch('skyline ferrari', hay), false, 'search: every word must match');
+eq(searchMatch('', hay), true, 'search: empty query matches all');
+
 console.log(fails ? `${fails} of ${n} FAILED` : `All ${n} rule tests passed`);
 process.exit(fails ? 1 : 0);

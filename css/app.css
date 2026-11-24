@@ -9,12 +9,12 @@
 html { font-size: 18px; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.45; }
 header.top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 10px 14px;
-  background: rgba(20,20,19,.96); border-bottom: 1px solid var(--line); }
+  background: var(--bg); border-bottom: 1px solid var(--line); } /* opaque: nothing shows through behind the title (V8) */
 header.top h1 { font-size: .95rem; margin: 0; flex: 1; min-width: 0; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 header.top h1 span { color: var(--accent); }
 main { max-width: 760px; margin: 0 auto; padding: 12px 14px 110px; }
 nav.bottom { position: fixed; bottom: 0; left: 0; right: 0; z-index: 5; display: flex; justify-content: space-around;
-  background: rgba(20,20,19,.97); border-top: 1px solid var(--line); padding: 6px 0 calc(6px + env(safe-area-inset-bottom)); }
+  background: var(--bg); border-top: 1px solid var(--line); padding: 6px 0 calc(6px + env(safe-area-inset-bottom)); }
 nav.bottom a { flex: 1; text-align: center; color: var(--muted); text-decoration: none; font-weight: 600; font-size: .85rem; padding: 6px 0; }
 nav.bottom a .ico { display: block; font-size: 1.35rem; line-height: 1.2; }
 nav.bottom a.on { color: var(--accent); }
@@ -49,7 +49,7 @@ label.f { display: block; font-weight: 700; margin: 12px 0 4px; }
 .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 @media (min-width: 640px) { .grid { grid-template-columns: repeat(3, 1fr); } }
 .tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; color: inherit; text-decoration: none; display: block; }
-.tile .ph { aspect-ratio: 4/3; background: var(--surface2); display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.tile .ph { aspect-ratio: 3/4; background: var(--surface2); display: flex; align-items: center; justify-content: center; color: var(--muted); }
 .tile .ph img { width: 100%; height: 100%; object-fit: cover; }
 .tile .tx { padding: 8px 10px; }
 .tile .nm { font-weight: 700; font-size: .95rem; line-height: 1.25; }
@@ -86,6 +86,25 @@ video.scan { width: 100%; border-radius: 12px; background: #000; max-height: 50v
 dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: .92rem; }
 dl.kv dt { color: var(--muted); } dl.kv dd { margin: 0; word-break: break-word; }
 .hide { display: none !important; }
+/* One scrolling row of filter chips (G5) */
+.chips.scroll { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.chips.scroll::-webkit-scrollbar { display: none; }
+.chips.scroll .chip { flex: 0 0 auto; white-space: nowrap; }
+/* Always-visible save bar on quick capture (C3), just above the bottom navigation */
+.savebar { position: sticky; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 4; display: flex; gap: 10px; align-items: center;
+  margin: 16px -14px 0; padding: 10px 14px; background: var(--bg); border-top: 1px solid var(--line); }
+.savebar .need { flex: 1; color: var(--muted); font-size: .85rem; line-height: 1.3; }
+.savebar .save { flex: 0 0 auto; }
+/* Item-page photos are buttons: tap for options (I2) */
+.gallery .fig { all: unset; display: block; cursor: pointer; border-radius: 10px; }
+.gallery .fig img { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 10px; background: var(--surface2); display: block; }
+.gallery .fig .cap { display: block; font-size: .72rem; color: var(--muted); margin-top: 2px; }
+.gallery .fig.sel img { outline: 3px solid var(--accent); outline-offset: -3px; }
+.gallery .fig:focus-visible img { outline: 3px solid var(--info); outline-offset: -3px; }
+a.back { display: inline-block; padding: 12px 0; }
 a.btn { display: inline-flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; }
 .btn.ghost { background: transparent; color: var(--accent); }
 .btn.small { min-height: 38px; padding: 6px 12px; font-size: .9rem; }
+
+/* With a long status in the pill, the wordmark shortens to "Garage" instead of being cut off */
+header.top.compact h1 .sm { display: none; }

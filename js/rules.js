@@ -103,3 +103,15 @@ export function checkDuplicate(candidate, models, identifiers = [], candidateBar
   else result = status; // not_checkable | needs_review
   return { status: result, exact, possible: possibleList };
 }
+
+// Garage search (audit G1): every word must match, in any order; punctuation and spaces are ignored
+// ("skyline gtr" finds "Skyline GT-R"); a run of 8–14 digits is also compared as a standardised barcode.
+const squash = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+export function searchMatch(query, hay) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return true;
+  const low = String(hay || '').toLowerCase(), flat = squash(hay);
+  const digits = q.replace(/[\s-]/g, '');
+  if (/^\d{8,14}$/.test(digits) && flat.includes(barcodeCmp(digits))) return true;
+  return q.split(/\s+/).every(w => low.includes(w) || (squash(w) !== '' && flat.includes(squash(w))));
+}

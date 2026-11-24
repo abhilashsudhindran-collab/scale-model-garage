@@ -84,7 +84,11 @@ async function doSync({ interactive = false, progress = () => {} } = {}) {
   const dirty = (await records.dirty()).filter(r => SYNCED_ENTITIES.includes(r.entity));
   const appends = {}; const updates = []; const done = [];
   for (const rec of dirty) {
-    if (rec.entity === 'photos' && !rec.data.original_file_id) continue; // files not up yet
+    if (rec.entity === 'photos' && !rec.data.original_file_id) {
+      // Removed before it was ever uploaded: nothing to write to the Sheet; stop counting it as waiting.
+      if (rec.data.deleted_at) await records.put({ ...rec, dirty: 0 });
+      continue; // otherwise its files are not up yet
+    }
     const tab = tabOfEntity(rec.entity);
     const R = remote[tab];
     const hit = R.byId.get(rec.id);
