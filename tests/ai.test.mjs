@@ -153,5 +153,24 @@ Additional Packaging Notes
   eq(r.items[3].colour, 'Rosso Diablo', 'colour column kept for later');
 }
 
+// B's 2nd REAL Gemini reply (24 Nov 23:01): "Item" column, assortment codes
+{
+  const r = parseAnswer(`| Item | Brand / Series | Car Name / Team | Scale / Set No. | Product Code |
+|---|---|---|---|---|
+| Box 1 | Hot Wheels Silver Series — Vintage Club 1968 | Custom '70 Honda N600 (Orange, Motul #2) | 1:64 (2/5) | HRT81 |
+| Box 2 | Hot Wheels Silver Series — Vintage Club 1968 | '65 Ford Galaxie (Red/Gold, #65) | 1:64 (4/5) | HRT81 |
+| Box 3 | Hot Wheels Premium — Formula 1 (2025) | Aston Martin Aramco Formula One Team (#18) | 1:64 | JKD87 (Asst. HRV11) |
+| Box 4 | Hot Wheels Premium — Formula 1 (2025) | Oracle Red Bull Racing (#1) | 1:64 | JKD83 (Asst. HRV11) |
+| Box 5 | WERK83 | Ferrari 250 Testa Rossa (#6) | 1:18 | W1800902 |`, 5, ['Hot Wheels', 'Mini GT']);
+  eq(r.items.map(i => [i.n, i.name, i.code]), [
+    [1, "Custom '70 Honda N600 (Orange, Motul #2)", ''],
+    [2, "'65 Ford Galaxie (Red/Gold, #65)", ''],
+    [3, 'Aston Martin Aramco Formula One Team (#18)', 'JKD87'],
+    [4, 'Oracle Red Bull Racing (#1)', 'JKD83'],
+    [5, 'Ferrari 250 Testa Rossa (#6)', 'W1800902']], '"Item" is the box column; Product Code column used');
+  eq(r.items[0].notes[0].includes('same code (HRT81)'), true, 'same code on two boxes = assortment code: not pre-filled, explained');
+  eq(r.items[2].code, 'JKD87', '"(Asst. HRV11)" left out of the code');
+}
+
 console.log(fails ? `${fails} of ${n} AI parser tests FAILED` : `All ${n} AI parser tests passed`);
 process.exit(fails ? 1 : 0);
