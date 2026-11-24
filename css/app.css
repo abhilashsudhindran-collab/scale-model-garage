@@ -363,3 +363,15 @@ details.more.inner { border-top: 1px solid var(--line); margin-top: 18px; paddin
 .restore { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 6px; }
 header.top h1 { display: flex; align-items: center; gap: 0; white-space: pre; }
 header.top h1 img.logo { width: 26px; height: 26px; border-radius: 7px; flex: 0 0 auto; margin-right: 8px; }
+/* Crop / straighten (D14) */
+.cropstage { position: relative; touch-action: none; user-select: none; -webkit-user-select: none; border-radius: 16px; overflow: hidden; background: var(--surface); }
+.cropstage img { display: block; width: 100%; height: auto; pointer-events: none; }
+.cropsvg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.cropq { fill: color-mix(in srgb, var(--accent) 14%, transparent); stroke: var(--accent); stroke-width: .006; vector-effect: non-scaling-stroke; }
+.cropstage.bad .cropq { stroke: var(--bad); fill: rgba(179,38,30,.12); }
+.croph { position: absolute; width: 44px; height: 44px; min-height: 0; margin: -22px 0 0 -22px; padding: 0; border-radius: 999px; background: transparent; border: 0; touch-action: none; }
+.croph::after { content: ""; position: absolute; inset: 11px; border-radius: 999px; background: #fff; box-shadow: 0 0 0 3px var(--accent), 0 2px 6px rgba(0,0,0,.3); }
+.croph.drag::after { inset: 8px; }
+.cropmag { position: absolute; top: 10px; left: 10px; width: 120px; height: 120px; border-radius: 999px; box-shadow: 0 0 0 3px #fff, 0 4px 14px rgba(0,0,0,.35); opacity: 0; pointer-events: none; transition: opacity .1s; }
+.cropmag.right { left: auto; right: 10px; }
+.cropmag.on { opacity: 1; }
