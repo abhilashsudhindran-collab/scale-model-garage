@@ -147,6 +147,10 @@ def main():
         page.fill('input[type=search]', 'box 3'); page.wait_for_selector('.boxcard')
         page.fill('input[aria-label="Box name"]', 'Mini GT JDM'); page.get_by_role('button', name='Save name').click(); page.wait_for_timeout(500)
         check(sync_all(), 'sync after app update completes')
+        for _ in range(50):
+            left = page.evaluate("(async () => (await (await import('./js/idb.js')).records.dirty()).filter(r => !r.seed).length)()")
+            if not left: break
+            page.wait_for_timeout(200)
         rows = book.get('STORAGE_BOXES', [])
         check(len(rows) >= 2 and rows[0][:3] == ['storage_box_id', 'created_at', 'updated_at'] and any('Mini GT JDM' in r for r in rows), f'older sheet: STORAGE_BOXES tab added with headers, new name synced ({len(rows)} rows)')
         check('MODELS' in book and len(book['MODELS']) > 1, 'existing tabs untouched')
