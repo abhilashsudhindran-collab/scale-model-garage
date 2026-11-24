@@ -36,12 +36,19 @@ export function validCode(code) { return /^[A-Za-z0-9#][A-Za-z0-9#\-/. ]{1,39}$/
 // Which part of a reply line is which (B, 24 Nov: Gemini put the brand first, the car name in the code
 // slot and the livery as brand). Each part is judged by what it looks like, not only by its position.
 const sqz = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+// A catalogue code: short, every word code-like (digits, or a few capital letters), never a plain word
+// ("1995 Presentation" is a year + a word, not a code), never a year or a barcode on its own.
+const isBarcode = (w) => /^\d{11,14}$/.test(w);
 export function looksLikeCode(f) {
   const t = String(f || '').trim();
-  if (!t || !validCode(t) || /^(19|20)\d{2}$/.test(t)) return false;
+  if (!t || !validCode(t)) return false;
   const words = t.split(/\s+/);
-  return words.length <= 2 && t.length >= 4 && t.length <= 24 && (t.match(/\d/g) || []).length >= 2;
+  if (words.length > 2 || t.length < 4 || t.length > 24 || (t.match(/\d/g) || []).length < 2) return false;
+  if (words.some(w => /^(19|20)\d{2}$/.test(w) || isBarcode(w))) return false;
+  return words.every(w => /\d/.test(w) ? !/[a-z]{4,}/i.test(w.replace(/[^a-z]/gi, ' ').split(' ').sort((a, b) => b.length - a.length)[0] || '') || /^[A-Z]{1,6}\d/.test(w) : /^[A-Z]{1,4}$/.test(w));
 }
+// How code-like (higher = more): letters+digits mix like MGT00988 or KHMG197 beats digits-only like 18-38322.
+const codeScore = (f) => (looksLikeCode(f) ? 1 + (/[A-Z]{2,}\d/i.test(f) ? 1 : 0) : 0);
 export function looksLikeBrand(f, brandNames = []) {
   const t = String(f || '').trim();
   if (!t || t.split(/\s+/).length > 6) return false;
@@ -54,12 +61,14 @@ export function looksLikeBrand(f, brandNames = []) {
   return rest !== bare && rest.replace(/x/g, '').length <= 2;
 }
 function sortFields(fields, brandNames) {
-  const parts = fields.map(f => clean(f, 120)).filter(f => !blank(f) && !/^[=+@]/.test(f)); // formula-like parts never become text
-  let code = '', brand = '';
+  // Barcode digits are dropped (the app already has the barcode); a part like "MGT00988 840456393666" keeps the code.
+  const parts = fields.map(f => clean(f, 120).split(/\s+/).filter(w => !isBarcode(w)).join(' ')).filter(f => !blank(f) && !/^[=+@]/.test(f)); // formula-like parts never become text
+  let code = '', brand = '', best = 0;
+  for (const f of parts) { const sc = codeScore(f); if (sc > best) { best = sc; code = f; } }
   const name = [];
   for (const f of parts) {
-    if (!code && looksLikeCode(f)) code = f;
-    else if (!brand && looksLikeBrand(f, brandNames)) brand = f;
+    if (f === code) continue;
+    if (looksLikeBrand(f, brandNames)) { if (!brand) brand = f; } // a brand repeated is not part of the name
     else name.push(f);
   }
   return { name: name.join(' ').slice(0, 120), code, brand };
@@ -93,6 +102,7 @@ export function parseAnswer(text, expected = MAX_BATCH, brandNames = []) {
     const wordy = (f) => f.split(/\s+/).length >= 3 && /[a-z]{3}/i.test(f); // a car name, not a code
     const shifted = (name && looksLikeBrand(name, brandNames))
       || (code && wordy(code))
+      || (code && !looksLikeCode(code) && fields.some(f => codeScore(clean(f, 60)) === 2))
       || (brand && looksLikeCode(brand) && !looksLikeCode(code))
       || (fields.length > 3 && !looksLikeCode(code) && fields.slice(3).some(f => looksLikeCode(clean(f, 60))));
     if (shifted) ({ name, code, brand } = sortFields(fields, brandNames));

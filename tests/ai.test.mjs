@@ -102,5 +102,18 @@ eq(parseAnswer('Box 1 | Supra | 64-1 | Mini GT\nCar Name: Other', 1).items[0].na
   eq([y.name, y.code].join(' / '), 'Chevrolet Corvette Z06 GT3.R #4 / MGT00999-L', 'brand | car | code order sorted');
 }
 
+// B's phone, 24 Nov 22:38: "1995 Presentation" was taken as the code; the real code + barcode went into the name
+{
+  const B = ['Hot Wheels', 'Mini GT', 'Tarmac Works', 'Pop Race', 'Bburago', 'Kaido House', 'Inno64'];
+  const x = parseAnswer('Box 3 | Mini GT (TSM Model) | McLaren F1 GTR | 1995 Presentation | MGT00988 840456393666', 5, B).items[0];
+  eq(x.code, 'MGT00988', 'real code chosen, barcode digits dropped');
+  eq(x.name, 'McLaren F1 GTR 1995 Presentation', 'year + word stays in the name');
+  eq(x.brand, 'Mini GT (TSM Model)', 'brand recognised');
+  const y = parseAnswer('Box 1 | Mini GT | McLaren F1 GTR 1995 Presentation | MGT00988 | Mini GT', 5, B).items[0];
+  eq([y.name, y.code].join(' / '), 'McLaren F1 GTR 1995 Presentation / MGT00988', 'five parts with brand twice');
+  const z = parseAnswer('Box 1 | McLaren F1 GTR 1995 Presentation | MGT00988 | Mini GT', 5, B).items[0];
+  eq([z.name, z.code, z.brand].join(' / '), 'McLaren F1 GTR 1995 Presentation / MGT00988 / Mini GT', 'requested order still works');
+}
+
 console.log(fails ? `${fails} of ${n} AI parser tests FAILED` : `All ${n} AI parser tests passed`);
 process.exit(fails ? 1 : 0);

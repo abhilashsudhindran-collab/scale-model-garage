@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.17.1
+## Status: Stage 1 (quick-capture slice), version s1-0.17.2
+
+**s1-0.17.2 (24 Nov 2026): stricter code reading.** B's phone: for a Mini GT McLaren F1 GTR, "1995 Presentation" was taken as the code and the real code MGT00988 plus the barcode went into the name. A code now has only code-like words (a year + a plain word is not a code), barcode digits are dropped from the answer, a letters+digits code (MGT00988) wins over others, and a repeated brand is left out of the name. Unsaved suggestions are read again once.
 
 **s1-0.17.1 (24 Nov 2026): AI answers with parts out of order.** B's phone: for a Kaido House × Mini GT box, Gemini put the brand where the name goes, the car name where the code goes and the livery as the brand, so the suggested name was only the brand. The reader now recognises each part by what it looks like (a code has digits and is short; a brand is made of known brand names) when there is clear evidence the parts are out of order, and says "no car name in the answer" when only a brand came back. Prompt `names-v3` adds an example line, "the car name is the real car, never the brand", and where the product code is. Suggestions made by the old reader are read again from AI_LOG when the Name tab opens; each suggestion has "Discard suggestion".
 
