@@ -103,7 +103,7 @@ export async function pendingSummary() {
     if (r.entity === 'models') boxes.add(r.id);
     else if (['inventory', 'photos', 'product_identifiers'].includes(r.entity) && r.data.model_id) boxes.add(r.data.model_id);
     else other++;
-    if (r.entity === 'photos') photos++;
+    if (r.entity === 'photos' && !r.data.original_file_id) photos++; // drops as each photo reaches Drive
   }
   return { boxes: boxes.size, photos, other };
 }

@@ -16,7 +16,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.16.3';
+export const APP_VERSION = 's1-0.17.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -143,27 +143,51 @@ async function refreshStatus() {
 }
 
 let lastSyncMsg = '';
+let moveBoxFor = null; // car page: the model whose "Move box" panel is open
+// Sync button state (B, 24 Nov): greyed out with "Syncing…" while a sync runs.
+function syncButtons() {
+  const busy = isSyncing() || syncBusy;
+  document.querySelectorAll('.syncbtn').forEach(b => { b.disabled = busy; b.setAttribute('aria-busy', busy ? 'true' : 'false'); b.textContent = busy ? 'Syncing…' : 'Sync now'; });
+}
+let syncBusy = false;
 async function runSync(interactive) {
-  if (isSyncing()) return;
+  if (isSyncing() || syncBusy) return;
+  syncBusy = true; syncButtons();
+  // Keep the screen on while syncing (B, 24 Nov: a sync stopped when the phone left the app). Chrome may refuse; that is fine.
+  let lock = null;
+  try { lock = await navigator.wakeLock?.request('screen'); } catch {}
+  try { for (let attempt = 1; attempt <= 2; attempt++) { const again = await runSyncOnce(interactive, attempt); if (!again) break; await new Promise(r => setTimeout(r, 4000)); } }
+  finally { try { await lock?.release(); } catch {} syncBusy = false; syncButtons(); }
+  refreshStatus();
+  // Re-draw lists after a sync, but never redraw a page the user is in the middle of editing (I1).
+  if (location.hash.startsWith('#/item') ? !itemDirty() : (location.hash === '' || location.hash === '#/' || location.hash === '#/settings')) route(); // Settings too: its Sync card shows what is waiting
+}
+// Returns true when a dropped connection should be retried once (still online, app in front).
+async function runSyncOnce(interactive, attempt) {
   // The status pill re-reads what's waiting; at most once a second during a sync (perf: once per photo grew with the backlog).
   let lastPill = 0;
   const setMsg = (m) => { lastSyncMsg = m; const el = $('#syncMsg'); if (el) el.textContent = m; const t = Date.now(); if (t - lastPill > 1000) { lastPill = t; refreshStatus(); } };
   try {
     const s = await syncNow({ interactive, progress: setMsg });
     setMsg(`Synced: ${s.photosUploaded} photo(s), ${s.rowsAppended} new row(s), ${s.rowsUpdated} update(s), ${s.pulled} pulled${s.conflicts ? `, ${s.conflicts} clash(es) to review` : ''}${s.errors.length ? `, ${s.errors.length} error(s) — will retry` : ''} · ${(s.ms / 1000).toFixed(1)} s`);
+    if (s.errors.length && attempt === 1 && navigator.onLine && !document.hidden) { setMsg(`${s.errors.length} item(s) didn't go through · trying again…`); return true; }
     if (interactive) toast(s.errors.length ? 'Synced with some errors — will retry' : 'Synced ✓', 1800, s.errors.length ? 'warn' : 'ok');
     refreshStatus();
     // Daily/monthly sheet backup (D25) once a sync has succeeded; a failure here never affects the sync.
     try { const cfg = await getConfig(); if (cfg && !s.errors.length) { const b = await backupIfDue(cfg); if (b.daily || b.monthly) setMsg(`${lastSyncMsg} · backup made`); } }
     catch (e) { console.warn('backup', e); setMsg(`${lastSyncMsg} · backup failed: ${e.message}`); }
   } catch (e) {
-    setMsg(e.message);
+    if (e.retryable && e.status !== 401 && attempt === 1 && navigator.onLine && !document.hidden) { setMsg(`${e.message} · trying again…`); return true; }
+    setMsg(document.hidden && e.retryable ? `${e.message} · it carries on when you come back to the app` : e.message);
     if (interactive) toast(e.message, 3500, (e.retryable || e.status === 401) ? 'warn' : 'bad');
   }
-  refreshStatus();
-  // Re-draw lists after a sync, but never redraw a page the user is in the middle of editing (I1).
-  if (location.hash.startsWith('#/item') ? !itemDirty() : (location.hash === '' || location.hash === '#/')) route();
+  return false;
 }
+// Coming back to the app with things still waiting: carry on syncing by itself (signed in, online).
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden || isSyncing() || syncBusy || !navigator.onLine || !hasToken()) return;
+  const p = await store.pendingSummary(); if (p.boxes || p.other) autoSyncSoon();
+});
 let autoTimer = null;
 function autoSyncSoon() { clearTimeout(autoTimer); autoTimer = setTimeout(() => { if (navigator.onLine && hasToken()) runSync(false); }, 2500); }
 
@@ -1333,10 +1357,40 @@ async function renderItem(v, modelId) {
     h('h2', {}, m.display_name || '(no name yet)'),
     m.product_code ? h('div', { class: 'pdp-code' }, m.product_code) : null));
   // Edit and Remove at the top (B, 24 Nov: "no options to delete or modify this entry" - they were below the fold).
+  const owned = inv.filter(i => i.ownership_status === 'Owned');
   const archiveModel = async () => { if (confirm('Remove this car from your garage?\n\nIt is archived, not deleted: you can bring it back any time from Garage → Archived.')) { await store.archive('models', modelId); toast('Removed. Bring it back from Garage → Archived.', 3500); location.hash = '#/'; autoSyncSoon(); } };
   if (!m.deleted_at) v.append(h('div', { class: 'pdp-actions' },
     h('button', { type: 'button', class: 'quiet small', onclick: () => { const d = $('#pdpDetails'); if (d) { d.scrollIntoView({ behavior: 'smooth', block: 'start' }); setTimeout(() => d.querySelector('input')?.focus({ preventScroll: true }), 450); } } }, icon('edit'), 'Edit details'),
+    owned.length ? h('button', { type: 'button', class: `quiet small ${moveBoxFor === modelId ? 'on' : ''}`, 'aria-expanded': moveBoxFor === modelId ? 'true' : 'false', onclick: () => { moveBoxFor = moveBoxFor === modelId ? null : modelId; route(); } }, icon('box'), 'Move box') : null,
     h('button', { type: 'button', class: 'ghost small', onclick: archiveModel }, icon('trash'), 'Remove')));
+  // Move to another storage box (B, 24 Nov): pick an existing box, a new one, or none. One row per copy when there are several.
+  if (!m.deleted_at && moveBoxFor === modelId && owned.length) {
+    const [used, names] = await Promise.all([boxesInUse(), boxNames()]);
+    const moveCard = h('div', { class: 'card movebox' }, h('div', { class: 'hd' }, owned.length > 1 ? 'Move which copy, to which box?' : 'Move to which box?'));
+    const moveCopy = async (c, label) => {
+      const old = c.storage_location || '';
+      if (label === old) { moveBoxFor = null; route(); return; }
+      const rec = label ? names.get(label.toLowerCase()) : null;
+      const brandName = (id) => ref.brands.find(b => b.brand_id === id)?.name;
+      const scaleName = (id) => ref.scales.find(x => x.scale_id === id)?.label;
+      const clash = [rec?.box_brand && rec.box_brand !== 'mixed' && m.brand_id && rec.box_brand !== m.brand_id ? `only ${brandName(rec.box_brand)}` : '',
+        rec?.box_scale && rec.box_scale !== 'mixed' && m.scale_id && rec.box_scale !== m.scale_id ? `only ${scaleName(rec.box_scale)}` : ''].filter(Boolean);
+      if (clash.length && !confirm(`${label} is set for ${clash.join(' and ')}. Move this car there anyway?`)) return;
+      await store.update('inventory', c.inventory_id, { storage_location: label });
+      await store.logChange('inventory', c.inventory_id, 'storage_location', old, label, 'moved to another box');
+      toast(label ? `Moved to ${label} ✓` : 'Taken out of its box ✓'); moveBoxFor = null; autoSyncSoon(); route();
+    };
+    owned.forEach((c, i) => {
+      if (owned.length > 1) moveCard.append(h('p', { class: 'muted small', style: 'margin:10px 0 0' }, `Copy ${i + 1} · now ${c.storage_location || 'no box'}`));
+      moveCard.append(h('div', { class: 'chips', style: 'margin:8px 0' },
+        used.map(([label, n]) => { const nm = names.get(label.toLowerCase())?.box_name; const on = label === c.storage_location;
+          return h('button', { type: 'button', class: `chip ${on ? 'on' : ''}`, 'aria-pressed': on ? 'true' : 'false', onclick: () => moveCopy(c, label) }, [label, nm].filter(Boolean).join(' · ') + ` (${n})`); }),
+        h('button', { type: 'button', class: 'chip', onclick: async () => moveCopy(c, await newBox()) }, '＋ New box'),
+        c.storage_location ? h('button', { type: 'button', class: 'chip', onclick: () => moveCopy(c, '') }, 'No box') : null));
+    });
+    moveCard.append(h('button', { type: 'button', class: 'ghost small', onclick: () => { moveBoxFor = null; route(); } }, 'Cancel'));
+    v.append(moveCard);
+  }
   if (m.deleted_at) v.append(h('div', { class: 'banner warn' }, h('div', { class: 'hd' }, 'Archived: hidden from your garage.'),
     h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: restore }, 'Restore to garage')));
   async function restore() { await store.update('models', modelId, { deleted_at: '' }); await store.logChange('models', modelId, 'deleted_at', m.deleted_at, '', 'restored in app'); toast('Restored ✓'); route(); autoSyncSoon(); }
@@ -1394,7 +1448,6 @@ async function renderItem(v, modelId) {
     await store.createMany(items);
     toast('Photo added'); route(); autoSyncSoon();
   } }, '＋ Photo')));
-  const owned = inv.filter(i => i.ownership_status === 'Owned');
   const facts = [plural(owned.length, 'copy', 'copies'), ...new Set(owned.map(i => ({ sealed: 'Sealed', opened: 'Opened', loose: 'Loose' }[i.packaging_state])).filter(Boolean)),
     ...new Set(owned.map(i => i.storage_location).filter(Boolean)), idfs.find(i => i.identifier_type === 'barcode')?.value_raw ? `Barcode ${idfs.find(i => i.identifier_type === 'barcode').value_raw}` : null,
     m.completeness_status === 'complete' ? 'Complete' : 'Quick entry'].filter(Boolean);
@@ -1667,8 +1720,8 @@ async function renderSettings(v) {
     h('p', {}, ps.boxes || ps.other ? `${ps.boxes ? plural(ps.boxes, 'box', 'boxes') : 'Some changes'} waiting · ${plural(ps.photos, 'photo', 'photos')} not uploaded yet${c.conflicts ? ` · ${plural(c.conflicts, 'clash', 'clashes')} to review` : ''}` : (c.conflicts ? `${plural(c.conflicts, 'clash', 'clashes')} to review` : 'Nothing waiting to sync.')),
     h('p', { class: 'muted', id: 'syncMsg' }, lastSyncMsg || (last ? `Last sync ${new Date(last.finishedAt).toLocaleString()} · ${last.errors.length ? last.errors.length + ' error(s)' : 'no errors'}` : 'Never synced.')),
     last?.errors?.length ? h('details', {}, h('summary', {}, 'Show errors'), h('pre', { style: 'white-space:pre-wrap;font-size:.8rem' }, last.errors.join('\n'))) : null,
-    h('button', { onclick: () => runSync(true) }, 'Sync now'));
-  v.append(sync);
+    h('button', { class: 'syncbtn', onclick: () => runSync(true) }, 'Sync now'));
+  v.append(sync); syncButtons();
 
   const where = h('div', { class: 'card' }, h('h3', {}, 'Your data'),
     config?.workbookId ? h('p', {}, h('a', { href: `https://docs.google.com/spreadsheets/d/${config.workbookId}`, target: '_blank', rel: 'noopener' }, 'Open SCALE_GARAGE_MASTER sheet ↗')) : h('p', { class: 'muted' }, 'Not set up yet — sign in above.'),
