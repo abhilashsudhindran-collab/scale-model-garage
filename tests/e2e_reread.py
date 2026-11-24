@@ -42,7 +42,7 @@ def main():
         check(name == 'Nissan Skyline GT-R Kaido Star Racing V1', 'old wrong suggestion re-read: car name, not the brand')
         sugg = page.evaluate("(async () => (await (await import('./js/idb.js')).meta.get('aiSuggest')))()")
         vals = sorted([(v['name'], v['code'], v['brand'], v.get('pv')) for v in sugg.values()])
-        check(all(v[3] == 4 for v in vals) and any(v[0].startswith('Chevrolet Corvette Z06') and v[1] == '' and v[2] == 'Mini GT (TSM Model)' for v in vals), f'second car re-read too ({vals[0][:3]})')
+        check(all(v[3] == 5 for v in vals) and any(v[0].startswith('Chevrolet Corvette Z06') and v[1] == '' and v[2] == 'Mini GT (TSM Model)' for v in vals), f'second car re-read too ({vals[0][:3]})')
         page.reload(); page.wait_for_timeout(1200)
         check(not page.is_visible('text=read again with the improved reader'), 're-read happens once, not on every visit')
         page.get_by_role('button', name='Discard suggestion').click(); page.wait_for_timeout(800)

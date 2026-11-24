@@ -16,7 +16,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.17.3';
+export const APP_VERSION = 's1-0.17.4';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -1134,7 +1134,7 @@ const nameSkipped = new Set();
 let aiPrep = null; // { batchId, ids, files, prompt } prepared in memory for the share tap
 // Suggestions read by an older version of the reader are read again from the raw answer kept in AI_LOG
 // (B, 24 Nov: wrong suggestions from out-of-order Gemini replies would otherwise stay on those cars).
-const READER_VERSION = 4; // 4: tables read by their headings (B's real Gemini reply, 24 Nov 22:47) // 3: "1995 Presentation" is not a code; barcode digits dropped (B, 24 Nov 22:38)
+const READER_VERSION = 5; // 5: "Item" = box column; same code on 2 boxes = assortment (B, 24 Nov 23:01) // 4: tables read by their headings (B's real Gemini reply, 24 Nov 22:47) // 3: "1995 Presentation" is not a code; barcode digits dropped (B, 24 Nov 22:38)
 async function rereadSuggestions(ref) {
   const sugg = await meta.get('aiSuggest', {});
   const old = Object.entries(sugg).filter(([, sg]) => (sg.pv || 1) < READER_VERSION && sg.logId);

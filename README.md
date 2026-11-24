@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.17.3
+## Status: Stage 1 (quick-capture slice), version s1-0.17.4
+
+**s1-0.17.4 (24 Nov 2026): Gemini's "Item" column and assortment codes.** B's second real reply named its first column "Item" (read as the code column, so no code was taken), and gave the Hot Wheels assortment code HRT81 for two different cars. "Item" is now the box column; "(Asst. …)" is left out of a code; a code given for two boxes in one answer is never pre-filled (it would make different cars look like duplicates) and is explained in a note. Prompt `names-v5` says not to use assortment or case codes. Unsaved suggestions are read again once.
 
 **s1-0.17.3 (24 Nov 2026): Gemini tables read by their headings.** B's real Gemini reply was a table with its own headings (Box, Brand, Scale, Car Name, Year, Product Code, Color / Livery, Barcode / UPC) and notes below; the app had read each row as one line, so names held colour, barcode and "sticker obscured". Tables are now read column by column by heading; scale and barcode columns ignored; a code the AI says it is unsure about ("or similar", "obscured") becomes a note, not a pre-filled code; the colour is kept for the coming colour feature. Prompt `names-v4` asks for one table with known headings (Box, Car name, Year, Product code, Brand, Colour). Unsaved suggestions are read again once.
 

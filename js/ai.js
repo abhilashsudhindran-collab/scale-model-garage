@@ -3,7 +3,7 @@
 // then pastes the answer back. The answer is UNTRUSTED TEXT: parsed as data only, validated, and used
 // only to pre-fill fields as suggestions that B confirms or corrects. Nothing is saved automatically.
 
-export const PROMPT_VERSION = 'names-v4';
+export const PROMPT_VERSION = 'names-v5';
 // 5 boxes = 10 photos per share. B's phone (24 Nov 21:39) refused to share 20 photos at once (2 worked);
 // Chrome on Android appears to cap a share at about 10 files (not confirmed in its docs), so batches stay at 10 photos.
 export const MAX_BATCH = 5;
@@ -20,7 +20,7 @@ export function buildPrompt(boxes) {
     ...lines,
     '',
     'Car name = the real car (make, model, version, livery), never the brand.',
-    'Product code = the maker\'s catalogue number exactly as printed (e.g. MGT00123-L, KHMG197, PR64-240, HYW58), usually on the box back or side. Not the barcode digits. If you cannot read it clearly, write -.',
+    'Product code = this car\'s own catalogue number exactly as printed (e.g. MGT00123-L, KHMG197, PR64-240, JKY27), usually on the box back or side. Not the barcode digits, and not an assortment or case code shared by a whole set (e.g. "Asst. HRT81" or the code at the top of a Hot Wheels card). If you cannot read it clearly, write -.',
     'Colour = the main colour of the car itself (not the box).',
     'Use - for anything you cannot read. Do not guess. No other text before or after the table.',
   ].join('\n');
@@ -79,11 +79,12 @@ function sortFields(fields, brandNames) {
 function colKind(hd) {
   const k = hd.toLowerCase();
   if (/barcode|upc|ean|gtin|jan\b/.test(k)) return 'barcode';
-  if (/^\s*(box|#|no\.?|n)\s*$/.test(k)) return 'box';
+  // "Item" is the box column (B's 2nd real reply, 24 Nov 23:01), not the code: "Item | Brand / Series | … | Product Code"
+  if (/^\s*(box|boxes|item|items|#|no\.?|n|sr\.?\s*no\.?|s\.?\s*no\.?)\s*$/.test(k)) return 'box';
   if (/scale/.test(k)) return 'scale';
   if (/colou?r|livery|paint/.test(k)) return 'colour';
   if (/year/.test(k)) return 'year';
-  if (/code|item|sku|catalog|ref|part\s*n/.test(k)) return 'code';
+  if (/code|item\s*(no|number|#)|sku|catalog|ref|part\s*n/.test(k)) return 'code';
   if (/brand|maker|manufacturer|make\b/.test(k)) return 'brand';
   if (/note|remark|comment/.test(k)) return 'notes';
   if (/name|model|car|vehicle|title/.test(k)) return 'name';
@@ -112,13 +113,23 @@ function parseTable(text, expected) {
     // Code: the first code-like word; if the AI says it is unsure, it becomes a note, never a pre-filled code.
     const codeCell = get('code');
     let code = '';
-    const cand = (codeCell.split(/[\s(]+/).find(w => looksLikeCode(w)) || '').replace(/[),.;]+$/, '');
+    // "(Asst. HRV11)" is the assortment, not the car: left out before picking the code
+    const codeText = codeCell.replace(/\(?\s*(asst|assortment|case|set)\.?[^)]*\)?/gi, ' ');
+    const cand = (codeText.split(/[\s(]+/).find(w => looksLikeCode(w)) || '').replace(/[),.;]+$/, '');
     if (cand && UNSURE.test(codeCell)) notes.push(`AI wasn't sure of the code (it said: "${codeCell.slice(0, 60)}"). Read it from the box.`);
     else code = cand;
     const colour = get('colour');
     if (colour && !blank(colour)) notes.push(`Colour: ${colour.slice(0, 60)}`);
     if (!name) notes.push('no car name in the answer: type it from the box');
     out.push({ n, name: name.slice(0, 120), code, brand: blank(get('brand')) ? '' : get('brand'), colour: blank(colour) ? '' : colour.slice(0, 60), notes });
+  }
+  // The same code for two boxes in one answer is a set/assortment code (e.g. Hot Wheels "HRT81" on two different
+  // cars), not either car's own code: never pre-filled, so it can't make two different cars look like duplicates.
+  const seen = new Map();
+  for (const it of out) if (it.code) seen.set(it.code.toUpperCase(), (seen.get(it.code.toUpperCase()) || 0) + 1);
+  for (const it of out) if (it.code && seen.get(it.code.toUpperCase()) > 1) {
+    it.notes.unshift(`AI gave the same code (${it.code}) for another box too: probably the set or assortment code, not this car's. Read the car's own code from the back.`);
+    it.code = '';
   }
   return kinds ? out : [];
 }
