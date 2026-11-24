@@ -13,9 +13,13 @@ import { newTimer, touch, seconds } from './timing.js';
 import { backupIfDue, backupNow, lastBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.11.0';
+export const APP_VERSION = 's1-0.12.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
+// Accent colour (DV-0.1): forest green, cobalt blue or burnt orange on a warm neutral base; B picks in Settings.
+const ACCENTS = [['forest', 'Forest green', '#2f6a4f'], ['cobalt', 'Cobalt blue', '#2b55c9'], ['burnt', 'Burnt orange', '#b4521f']];
+const applyAccent = () => { const a = localStorage.getItem('smg.accent') || 'forest'; document.documentElement.dataset.accent = ACCENTS.some(x => x[0] === a) ? a : 'forest'; };
+applyAccent();
 
 // ---------- small DOM helper (text only: never injects HTML from data) ----------
 function h(tag, attrs = {}, ...kids) {
@@ -255,6 +259,8 @@ function boxPicker(current, used, names, pick) {
 }
 // The shelf: each storage box as a SAMLA side view, count inside; size, number, name below.
 let brandNameCache = {}, scaleLabelCache = {};
+// Box settings stay as B left them (open while he's setting a box up), instead of folding mid-way.
+const boxSettingsOpen = new Map();
 function shelfEl(boxes, names, onTap, { selected = '', scroll = false, onNew = null } = {}) {
   return h('div', { class: `shelf${scroll ? ' scrollrow' : ''}` }, ...boxes.map(([k, n]) => {
     const r = names.get(k.toLowerCase()) || {};
@@ -419,18 +425,18 @@ async function renderGarage(v) {
     h('div', { class: 'ovtext' }, h('b', {}, plural(copies.length, 'box', 'boxes')), ' catalogued', boxesUsed ? ` · ${plural(boxesUsed, 'storage box', 'storage boxes')} in use` : ''),
     h('div', { class: 'bar', role: 'progressbar', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': 'rough progress' }, h('span', { style: `width:${Math.max(pct, copies.length ? 1 : 0)}%` }))));
   const nameless = active.filter(r => !String(r.data.display_name || '').trim()).length;
-  if (nameless) v.append(h('a', { href: '#/name', class: 'btn quiet wide', style: 'margin-bottom:10px' }, `✎ ${plural(nameless, 'box needs', 'boxes need')} a name: name them`));
+  const search = h('input', { type: 'search', placeholder: 'Search cars, codes, brands, boxes', value: garageSearch, oninput: (e) => { garageSearch = e.target.value; draw(); } });
+  v.append(search);
   // The shelf on the home screen (B, 24 Nov): tap a box to see what's inside; tap it again for everything.
   {
     const used = await boxesInUse();
     const sel = (garageSearch.trim().match(/^box\s*[a-z0-9-]+$/i) || [''])[0];
-    v.append(h('div', { class: 'shelfhome' }, h('div', { class: 'row' }, h('h3', {}, used.length ? 'Storage boxes · tap to open' : 'Storage boxes'), sel ? h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; route(); } }, 'Show all') : null),
+    v.append(h('div', { class: 'shelfhome' }, h('div', { class: 'row' }, h('h3', {}, 'Storage boxes'), sel ? h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; route(); } }, 'Show all') : null),
       shelfEl(used, names, (k, isSel) => { garageFilter = 'all'; garageSearch = isSel ? '' : k; route(); },
         { selected: sel, scroll: true, onNew: async () => { const label = await newBox(); garageFilter = 'all'; garageSearch = label; toast(`${label} added`); route(); } })));
     if (sel) setTimeout(() => document.querySelector('.shelfhome .boxtile.sel')?.scrollIntoView({ inline: 'center', block: 'nearest' }), 0);
   }
-  const search = h('input', { type: 'search', placeholder: 'Search name, code, barcode, brand, scale…', value: garageSearch, oninput: (e) => { garageSearch = e.target.value; draw(); } });
-  v.append(search);
+  if (nameless) v.append(h('a', { href: '#/name', class: 'namelink' }, `✎ ${plural(nameless, 'box needs', 'boxes need')} a name: name them`, h('span', { 'aria-hidden': 'true' }, ' ›')));
   const photosByModel = new Map();
   photos.forEach(p => { if (p.model_id) (photosByModel.get(p.model_id) || photosByModel.set(p.model_id, []).get(p.model_id)).push(p); });
   const isPending = (r) => r.dirty || (photosByModel.get(r.data.model_id) || []).some(p => !p.original_file_id);
@@ -482,6 +488,9 @@ async function renderGarage(v) {
         h('div', { class: 'row' }, h('h2', {}, `📦 ${label}${rec?.box_size ? ' · ' + rec.box_size : ''}`), h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; route(); } }, 'Close')),
         h('div', { class: 'muted' }, inBox.length ? `${plural(inBox.length, 'car', 'cars')} inside${byBrand ? ' · ' + byBrand : ''}` : 'Empty so far.'),
         h('button', { type: 'button', class: 'wide', style: 'margin-top:10px', onclick: () => fillBox(label) }, `📷 Fill ${label}`),
+        // Progressive disclosure (DV-0.1): settings stay open until the box knows its brands and scale, then fold away.
+        h('details', { class: 'more', open: (boxSettingsOpen.has(label) ? boxSettingsOpen.get(label) : !(rec?.box_brand && rec?.box_scale)) ? true : undefined, ontoggle: (e) => boxSettingsOpen.set(label, e.target.open) },
+        h('summary', {}, 'Box settings', h('span', { class: 'muted', style: 'font-weight:400' }, [rec?.box_brand === 'mixed' ? 'Mixed brands' : brandName[rec?.box_brand], rec?.box_scale === 'mixed' ? 'Mixed scales' : ref.scales.find(x => x.scale_id === rec?.box_scale)?.label, rec?.box_size].filter(Boolean).join(' · '))),
         h('label', { class: 'f' }, 'Which brands?'),
         (() => {
           const cur = rec?.box_brand || '';
@@ -505,7 +514,7 @@ async function renderGarage(v) {
         h('label', { class: 'f' }, 'Box size'),
         h('div', { class: 'chips' }, BOX_SIZES.map(sz => h('button', { type: 'button', class: `chip ${rec?.box_size === sz ? 'on' : ''}`, 'aria-pressed': rec?.box_size === sz ? 'true' : 'false', onclick: async () => { await saveBox(label, { box_size: rec?.box_size === sz ? '' : sz }); autoSyncSoon(); route(); } }, sz))),
         h('label', { class: 'f' }, rec?.box_name ? 'Box name' : 'Name this box? (optional)'), nameIn, h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: save }, 'Save name'),
-        h('button', { type: 'button', class: 'ghost small removebox', onclick: async () => { if (await removeBox(label)) { toast(`${label} removed. Restore it from Dashboard → Removed boxes.`, 4000); garageSearch = ''; route(); } } }, `Remove ${label}`)));
+        h('button', { type: 'button', class: 'ghost small removebox', onclick: async () => { if (await removeBox(label)) { toast(`${label} removed. Restore it from Dashboard → Removed boxes.`, 4000); garageSearch = ''; route(); } } }, `Remove ${label}`))));
     }
     if (!list.length) { grid.append(h('p', { class: 'muted' }, oneBox ? 'No cars in this box yet.' : active.length || archived.length ? 'Nothing matches.' : 'No models yet. Tap ＋ Add to catalogue your first box.')); return; }
     // Grouped views: by storage box (number order, no box last), by brand (A–Z), by scale (smallest scale number first).
@@ -1415,6 +1424,11 @@ async function renderSettings(v) {
     } }, 'Back up now')));
 
   // Collection size, for the Garage progress bar.
+  const curAccent = document.documentElement.dataset.accent;
+  v.append(h('div', { class: 'card' }, h('h3', {}, 'Look'),
+    h('p', { class: 'muted' }, 'Accent colour, used for the main buttons and where you are in the app.'),
+    h('div', { class: 'swatches' }, ACCENTS.map(([k, label, hex]) => h('button', { type: 'button', class: `swatch ${curAccent === k ? 'on' : ''}`, style: `background:${hex}`, 'aria-label': label, 'aria-pressed': curAccent === k ? 'true' : 'false', title: label, onclick: () => { localStorage.setItem('smg.accent', k); applyAccent(); route(); } }))),
+    h('p', { class: 'muted', style: 'margin-top:8px' }, ACCENTS.find(x => x[0] === curAccent)?.[1] || '')));
   const estIn = h('input', { inputmode: 'numeric', value: String(collectionEstimate()), 'aria-label': 'About how many boxes in your collection' });
   v.append(h('div', { class: 'card' }, h('h3', {}, 'Your collection'),
     h('label', { class: 'f' }, 'Rough guess: how many boxes in total?'), estIn,
