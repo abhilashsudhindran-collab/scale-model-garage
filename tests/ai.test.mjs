@@ -6,7 +6,7 @@ const eq = (a, b, msg) => { n++; const ok = JSON.stringify(a) === JSON.stringify
 
 const p = buildPrompt([{ brand: 'Mini GT', scale: '1:64' }, { brand: 'Pop Race' }]);
 eq(p.includes('Box 2: photo 3 = box front, photo 4 = box back'), true, 'prompt numbers the photos per box');
-eq(p.includes('Box 1 | car name'), true, 'prompt shows the reply format');
+eq(p.includes('| Box | Car name | Year | Product code | Brand | Colour |'), true, 'prompt asks for a table with known headings');
 
 // The format we ask for
 let r = parseAnswer('Box 1 | Nissan Skyline GT-R R34 | MGT00341-L | Mini GT\nBox 2 | Toyota AE86 | PR64-0161 | POP RACE', 2);
@@ -126,6 +126,31 @@ eq(parseAnswer('Box 1 | Supra | 64-1 | Mini GT\nCar Name: Other', 1).items[0].na
     eq([x.name, x.code].join(' / '), 'Toyota Supra VeilSide Combat V-II Red / MGT00999', 'no barcode in name or code: ' + line.slice(8, 60));
   }
   eq(parseAnswer('Box 1 | Ferrari 499P 2023 #51 | - | Bburago', 5, B).items[0].name, 'Ferrari 499P 2023 #51', 'years and race numbers kept');
+}
+
+// B's REAL Gemini reply (24 Nov 22:47): a table with its own headings, extra columns and notes below
+{
+  const r = parseAnswer(`| Box | Brand | Scale | Car Name | Year | Product Code | Color / Livery | Barcode / UPC |
+|---|---|---|---|---|---|---|---|
+| Box 1 | MINI GT (TSM Model) | 1:64 | Aston Martin DB10 (007 Spectre) | — | MGT00733 (or similar 007 release; sticker obscured) | Silver | 8 10152 14254 7 (partially blurred) |
+| Box 2 | Pop Race | 1:64 | Mazda RX-7 RE-Amemiya | — | PR64-240 | Pink / Dark Blue (RE-Amemiya livery) | PR640240 (internal SKU) |
+| Box 3 | Pop Race | 1:64 | Aston Martin Aramco AMR23 | 2023 (AMR23) | PR64-198 | British Racing Green (Aston Martin Aramco F1 Team) | 8 972027 000042 (partially blurred) |
+| Box 4 | PARA64 | 1:64 | Cizeta-Moroder V16T (Lights down, LHD) | 1991 | PA-55483 | Rosso Diablo | 0 092999 554839 |
+| Box 5 | PARA64 | 1:64 | De Tomaso Pantera (Lights down, LHD) | 1972 | PA-55644 | Red / Black | 0 092999 556446 |
+Additional Packaging Notes
+ * Box 1: Includes India import sticker (MRP: ₹1999.00, imported April 2026) and official Aston Martin hologram seal (0024727488).
+ * Box 4: Marked 2022 Release 3 on the bottom edge; includes India import sticker (MRP: ₹1499.00, imported July 2023).
+ * Box 5: Marked 2024 Release 2 on the bottom edge.
+`, 5, ['Mini GT', 'Pop Race', 'Para64']);
+  eq(r.items.map(i => [i.n, i.name, i.code, i.brand]), [
+    [1, 'Aston Martin DB10 (007 Spectre)', '', 'MINI GT (TSM Model)'],
+    [2, 'Mazda RX-7 RE-Amemiya', 'PR64-240', 'Pop Race'],
+    [3, 'Aston Martin Aramco AMR23 2023', 'PR64-198', 'Pop Race'],
+    [4, 'Cizeta-Moroder V16T (Lights down, LHD) 1991', 'PA-55483', 'PARA64'],
+    [5, 'De Tomaso Pantera (Lights down, LHD) 1972', 'PA-55644', 'PARA64']], 'real Gemini table: every column read by its heading');
+  eq(r.items[0].notes.some(n => n.includes("wasn't sure of the code")), true, 'unsure code ("or similar; sticker obscured") becomes a note, not a code');
+  eq(r.items.every(i => !/\d{6,}/.test(i.name)), true, 'no barcode digits in any name');
+  eq(r.items[3].colour, 'Rosso Diablo', 'colour column kept for later');
 }
 
 console.log(fails ? `${fails} of ${n} AI parser tests FAILED` : `All ${n} AI parser tests passed`);
