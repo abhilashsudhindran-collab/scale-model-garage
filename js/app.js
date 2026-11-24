@@ -9,13 +9,14 @@ import { syncNow, isSyncing } from './sync.js';
 import { getClientId, setClientId, hasToken, signIn, tokenMinutesLeft, drive } from './google.js';
 import { getConfig, seedLocal } from './setup.js';
 import { newId } from './ids.js';
+import { resolveName, moreBrands } from './brands.js';
 import { newTimer, touch, seconds } from './timing.js';
 import { straighten, validQuad } from './crop.js';
 import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.16.1';
+export const APP_VERSION = 's1-0.16.2';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -83,6 +84,37 @@ const recentBrands = () => JSON.parse(localStorage.getItem('smg.recentBrands') |
 const pushRecentBrand = (id) => localStorage.setItem('smg.recentBrands', JSON.stringify([id, ...recentBrands().filter(x => x !== id)].slice(0, 5)));
 const forgetRecentBrand = (id) => localStorage.setItem('smg.recentBrands', JSON.stringify(recentBrands().filter(x => x !== id)));
 // Quick-pick brands for a car: recent first, then the brands B owns most, then common ones. Up to 8.
+// ---------- brand lists everywhere (B, 24 Nov: many brands, some with one model) ----------
+// Every brand <select>: your brands A-Z, then "More brands" (well-known ones, created when picked), then "Type a new brand".
+function brandOptions(all, selected, placeholder) {
+  const more = moreBrands(all);
+  return [h('option', { value: '' }, placeholder),
+    ...all.map(b => h('option', { value: b.brand_id, selected: b.brand_id === selected ? true : undefined }, b.name + (b.record_status === 'needs_review' ? ' (needs review)' : ''))),
+    more.length ? h('optgroup', { label: 'More brands' }, more.map(n => h('option', { value: 'known:' + n }, n))) : null,
+    h('option', { value: '__new' }, '＋ Type a new brand…')].filter(Boolean);
+}
+// Turns a picked value into a brand_id, creating the brand when needed. A new brand is trusted at once (B's choice);
+// a name that looks like one already stored asks "Did you mean …?" first, so one brand never gets two records.
+async function pickedBrandId(value, all, sel = null) {
+  if (!value) return '';
+  if (!value.startsWith('known:') && value !== '__new') return value;
+  const name = value === '__new' ? (prompt('New brand name, as printed on the box:') || '') : value.slice(6);
+  const r = resolveName(name, all);
+  let id = '', label = '';
+  if (r.none) { if (sel) sel.value = ''; return ''; }
+  if (r.use) { id = r.use.brand_id; label = r.use.name; }
+  else if (r.ask && confirm(`Did you mean "${r.ask.name}"?\n\nOK = use ${r.ask.name}\nCancel = add "${r.name}" as a new brand`)) { id = r.ask.brand_id; label = r.ask.name; }
+  else {
+    label = r.create || r.name;
+    id = (await store.create('brands', { name: label, brand_kind: 'miniature', is_code_namespace: 'yes', record_status: 'confirmed' })).brand_id;
+    // History (B, 24 Nov): every new brand is logged, and goes to the front of the recent-brand shortcuts.
+    await store.logChange('brands', id, 'name', '', label, value === '__new' ? 'brand added (typed)' : 'brand added (from More brands)');
+    toast(`${label} added to your brands ✓`); autoSyncSoon();
+  }
+  pushRecentBrand(id);
+  if (sel) { if (![...sel.options].some(o => o.value === id)) sel.append(h('option', { value: id }, label)); sel.value = id; }
+  return id;
+}
 const COMMON_BRANDS = ['Hot Wheels', 'Mini GT', 'Tarmac Works', 'Bburago', 'Matchbox', 'Inno64', 'Pop Race', 'Kaido House'];
 async function quickBrands(all) {
   const ms = await store.list('models');
@@ -532,8 +564,8 @@ async function renderGarage(v) {
             h('div', { class: 'chips' },
               h('button', { type: 'button', class: `chip ${cur === 'mixed' ? 'on' : ''}`, 'aria-pressed': cur === 'mixed' ? 'true' : 'false', onclick: () => setB('mixed') }, 'Mixed brands'),
               quick.map(b => h('button', { type: 'button', class: `chip ${cur === b.brand_id ? 'on' : ''}`, 'aria-pressed': cur === b.brand_id ? 'true' : 'false', onclick: () => setB(b.brand_id) }, `Only ${b.name}`))),
-            h('select', { 'aria-label': 'Brand for this box', style: 'margin-top:6px', onchange: (e) => { if (e.target.value) setB(e.target.value); } },
-              h('option', { value: '' }, 'Only one brand: choose…'), ref.brands.map(b => h('option', { value: b.brand_id, selected: cur === b.brand_id ? true : undefined }, b.name))));
+            h('select', { 'aria-label': 'Brand for this box', style: 'margin-top:6px', onchange: async (e) => { const id = await pickedBrandId(e.target.value, ref.brands, e.target); if (id) setB(id); } },
+              brandOptions(ref.brands, cur === 'mixed' ? '' : cur, 'Only one brand: choose…')));
         })(),
         h('label', { class: 'f' }, 'Which scale?'),
         (() => {
@@ -688,17 +720,13 @@ async function renderAdd(v) {
   v.append(h('label', { class: 'f' }, 'Brand'));
   const recent = recentBrands().map(id => ref.brands.find(b => b.brand_id === id)).filter(Boolean);
   if (recent.length) v.append(h('div', { class: 'chips', style: 'margin-bottom:6px' }, recent.map(b => h('button', { type: 'button', class: `chip ${cap.brandId === b.brand_id ? 'on' : ''}`, onclick: () => { cap.brandId = b.brand_id; capTouch(); saveDraftSoon(); route(); } }, b.name))));
-  const brandSel = h('select', { onchange: async (e) => {
-    if (e.target.value === '__new') {
-      const name = (prompt('New brand name (as printed on the box):') || '').trim();
-      if (name) {
-        const existing = ref.brands.find(b => b.name.toLowerCase() === name.toLowerCase());
-        cap.brandId = existing ? existing.brand_id : (await store.create('brands', { name, brand_kind: 'miniature', is_code_namespace: 'yes', record_status: 'needs_review' })).brand_id;
-      }
-    } else cap.brandId = e.target.value;
+  const brandSel = h('select', { 'aria-label': 'Brand', onchange: async (e) => {
+    const id = await pickedBrandId(e.target.value, ref.brands, e.target);
+    if (!id && e.target.value) { route(); return; }
+    cap.brandId = id; if (id) pushRecentBrand(id);
     capTouch(); saveDraftSoon();
     route();
-  } }, h('option', { value: '' }, '— choose brand —'), ref.brands.map(b => h('option', { value: b.brand_id, selected: b.brand_id === cap.brandId ? true : undefined }, b.name + (b.record_status === 'needs_review' ? ' (needs review)' : ''))), h('option', { value: '__new' }, '＋ Add a new brand…'));
+  } }, brandOptions(ref.brands, cap.brandId, '— choose brand —'));
   v.append(brandSel);
 
   // --- Scale ---
@@ -938,8 +966,8 @@ async function renderRun(v) {
     h('button', { type: 'button', class: `chip ${perCar ? 'on' : ''}`, 'aria-pressed': perCar ? 'true' : 'false', onclick: () => setPerCar(true) }, 'Pick per car (mixed box)')));
   if (perCar) set.append(h('p', { class: 'muted' }, 'Take the photos, then tap the brand for each car.'));
   if (!perCar && recent.length) set.append(h('div', { class: 'chips', style: 'margin-bottom:6px' }, recent.map(b => h('button', { type: 'button', class: `chip ${cap.brandId === b.brand_id ? 'on' : ''}`, onclick: () => { cap.brandId = b.brand_id; pushRecentBrand(b.brand_id); saveDraftSoon(); route(); } }, b.name))));
-  if (!perCar) set.append(h('select', { 'aria-label': 'Brand', onchange: (e) => { cap.brandId = e.target.value; if (cap.brandId) pushRecentBrand(cap.brandId); saveDraftSoon(); route(); } },
-    h('option', { value: '' }, '— choose brand —'), ref.brands.map(b => h('option', { value: b.brand_id, selected: b.brand_id === cap.brandId ? true : undefined }, b.name))));
+  if (!perCar) set.append(h('select', { 'aria-label': 'Brand', onchange: async (e) => { const id = await pickedBrandId(e.target.value, ref.brands, e.target); if (!id && e.target.value) { route(); return; } cap.brandId = id; if (cap.brandId) pushRecentBrand(cap.brandId); saveDraftSoon(); route(); } },
+    brandOptions(ref.brands, cap.brandId, '— choose brand —')));
   set.append(h('label', { class: 'f' }, 'Scale'));
   set.append(h('div', { class: 'chips', style: 'margin-bottom:6px' },
     h('button', { type: 'button', class: `chip ${scalePer ? '' : 'on'}`, 'aria-pressed': scalePer ? 'false' : 'true', onclick: () => setScalePer(false) }, 'Same scale for all'),
@@ -1028,7 +1056,7 @@ async function renderRun(v) {
           ? h('span', { class: 'chipx' }, h('button', { type: 'button', class: 'chip big', onclick: () => pickBrand(b.brand_id) }, b.name),
               h('button', { type: 'button', class: 'x', 'aria-label': `Remove ${b.name} from recent brands`, onclick: () => { forgetRecentBrand(b.brand_id); route(); } }, '×'))
           : h('button', { type: 'button', class: 'chip big', onclick: () => pickBrand(b.brand_id) }, b.name))) : null,
-        h('select', { 'aria-label': 'Brand for this car', onchange: (e) => pickBrand(e.target.value) }, h('option', { value: '' }, quick.length ? '— another brand —' : '— choose brand —'), all.map(b => h('option', { value: b.brand_id }, b.name))));
+        h('select', { 'aria-label': 'Brand for this car', onchange: async (e) => pickBrand(await pickedBrandId(e.target.value, all, e.target)) }, brandOptions(all, '', quick.length ? '— another brand, or a new one —' : '— choose brand —')));
     }
     if (scalePer) {
       card.append(h('div', { class: 'hd', style: perCar ? 'margin-top:14px' : '' }, cap.scaleId ? `Scale: ${ref.scales.find(x => x.scale_id === cap.scaleId)?.label}` : 'Which scale?'));
@@ -1382,7 +1410,7 @@ async function renderItem(v, modelId) {
   const form = h('div', { class: 'card', id: 'pdpDetails' }, h('h3', {}, 'Details'));
   const field = (label, el) => form.append(h('label', { class: 'f' }, label), el);
   field('Name', h('input', { value: f.display_name, oninput: set('display_name') }));
-  field('Brand', h('select', { onchange: set('brand_id') }, h('option', { value: '' }, '—'), ref.brands.map(b => h('option', { value: b.brand_id, selected: b.brand_id === f.brand_id ? true : undefined }, b.name + (b.record_status === 'needs_review' ? ' (needs review)' : '')))));
+  field('Brand', h('select', { onchange: async (e) => { const v = e.target.value; const id = v.startsWith('known:') || v === '__new' ? await pickedBrandId(v, ref.brands, e.target) : v; if (v && !id) { e.target.value = f.brand_id; return; } f.brand_id = id; productDirty = true; } }, brandOptions(ref.brands, f.brand_id, '—')));
   field('Scale', h('select', { onchange: set('scale_id') }, h('option', { value: '' }, '—'), ref.scales.map(s => h('option', { value: s.scale_id, selected: s.scale_id === f.scale_id ? true : undefined }, s.label))));
   field('Product code (exactly as printed)', h('input', { value: f.product_code, autocapitalize: 'characters', oninput: set('product_code') }));
   // Progressive disclosure: the less-used fields fold away while empty; anything already filled stays visible.

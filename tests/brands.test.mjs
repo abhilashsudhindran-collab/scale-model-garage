@@ -1,0 +1,25 @@
+import { normName, looksLike, resolveName, moreBrands, KNOWN_BRANDS } from '../js/brands.js';
+let n = 0, f = 0;
+const ok = (c, m) => { n++; if (!c) { f++; console.log('FAIL', m); } };
+const ex = ['Hot Wheels', 'Mini GT', 'Tarmac Works', 'Bburago', 'Inno64', 'Pop Race', 'KK', 'BBR', 'LCD', 'GCD', 'Tomica'].map((name, i) => ({ brand_id: 'b' + i, name }));
+ok(normName(' Mini-GT ') === 'minigt', 'normalise');
+ok(resolveName('mini gt', ex).use?.name === 'Mini GT', 'same name, other spelling → existing');
+ok(resolveName('MINI-GT', ex).use?.name === 'Mini GT', 'dash and caps → existing');
+ok(resolveName('Burago', ex).ask?.name === 'Bburago', 'one letter off → ask');
+ok(resolveName('Hotwheel', ex).ask?.name === 'Hot Wheels', 'missing s → ask');
+ok(resolveName('Tarmac', ex).ask?.name === 'Tarmac Works', 'start of a name → ask');
+ok(resolveName('Majorette', ex).create === 'Majorette', 'new brand → create');
+ok(resolveName('Matchbox', ex).create === 'Matchbox', 'Matchbox is new');
+ok(resolveName('Maisto', ex).create === 'Maisto', 'Maisto not mistaken for anything');
+ok(resolveName('KKK', ex).ask?.name === 'KK', 'short names: one letter off asks');
+ok(resolveName('GCD', ex).use?.name === 'GCD', 'GCD exact');
+ok(!looksLike('LCD', 'GCD') === false, 'LCD vs GCD look alike (asks, does not merge)');
+ok(resolveName('   ', ex).none, 'blank → nothing');
+ok(resolveName('Spark', ex).create === 'Spark', 'Spark new');
+ok(resolveName('Welly', ex).create === 'Welly', 'Welly new');
+const more = moreBrands([...ex, { name: 'majorette' }]);
+ok(!more.includes('Majorette') && more.includes('Matchbox'), 'More brands hides ones already added');
+ok(new Set(KNOWN_BRANDS.map(normName)).size === KNOWN_BRANDS.length, 'known list has no repeats');
+// No known brand silently equals a starter brand
+ok(KNOWN_BRANDS.every(k => !ex.some(b => normName(b.name) === normName(k))), 'known list does not repeat starter brands');
+console.log(f ? `${f} of ${n} FAILED` : `All ${n} brand tests passed`); process.exit(f ? 1 : 0);

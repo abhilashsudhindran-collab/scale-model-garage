@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.16.1
+## Status: Stage 1 (quick-capture slice), version s1-0.16.2
+
+**s1-0.16.2 (24 Nov 2026): any brand, anywhere.** Every brand list (Photo run, mixed-box question, Box settings, Quick capture, car page) shows your brands, then "More brands" (about 40 well-known die-cast brands, created when picked), then "＋ Type a new brand…". B's choice: a new brand is trusted at once (no "Needs review"; duplicate check works); a name that looks like one already stored ("Burago" / "Bburago", "Mini-GT" / "Mini GT") asks "Did you mean …?" first. Each new brand is logged in CHANGE_LOG and goes to the front of the recent-brand shortcuts.
 
 **s1-0.16.1 (24 Nov 2026): Edit and Remove at the top of a car page.** B's phone: "no options to delete or modify this entry". They existed but sat below the fold, pushed down by a wide box photo padded into a tall portrait frame. Now "Edit details" (jumps to the fields) and "Remove" (archives, restorable from Garage → Archived) sit under the name, and the photo frame follows the photo's shape.
 
