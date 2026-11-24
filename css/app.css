@@ -379,3 +379,7 @@ header.top h1 img.logo { width: 26px; height: 26px; border-radius: 7px; flex: 0 
 .shotsel { background: var(--surface); border-radius: 16px; padding: 12px 14px; margin: 10px 0; }
 .shotsel .row { margin-top: 8px; }
 .shot.sel { box-shadow: 0 0 0 3px var(--accent); }
+/* Recent-brand chip with an × to forget it */
+.chipx { display: inline-flex; align-items: center; background: var(--surface2); border-radius: 999px; }
+.chipx .chip { background: transparent; padding-right: 6px; }
+.chipx .x { min-height: 40px; width: 40px; padding: 0; border-radius: 999px; background: transparent; color: var(--muted); font-size: 1.3rem; line-height: 1; }
