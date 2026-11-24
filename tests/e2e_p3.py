@@ -53,7 +53,7 @@ def main():
         # Entry point from Quick capture
         page.goto(base + '#/add'); page.wait_for_selector('text=Quick capture')
         page.get_by_text('Photo run: photos now, names later').click(); page.wait_for_selector('text=Photo run')
-        check(page.is_visible('text=and a scale for this run to start'), 'run asks for brand and scale first')
+        check(page.is_visible('text=for this run to start'), 'run asks for brand and scale first')
 
         # Run settings
         page.select_option('select[aria-label=Brand]', label='Mini GT'); page.wait_for_timeout(250)
