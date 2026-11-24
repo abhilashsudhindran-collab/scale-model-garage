@@ -17,7 +17,7 @@ export function buildPrompt(boxes) {
     fmt,
     'Example: Box 1 | Toyota Supra (A80) 1997 Castrol | MGT00123-L | Mini GT',
     'The car name is the real car (make, model, version, livery), never the brand. Keep the 4 parts in this order.',
-    'The product code is the maker\'s catalogue number (letters + digits, e.g. MGT00123-L, KHMG197, HKT123), usually on the box back or side near the barcode. It is not the barcode digits.',
+    'The product code is the maker\'s catalogue number (letters + digits, e.g. MGT00123-L, KHMG197, HYW58), usually on the box back or side near the barcode. It is not the barcode digits.',
     '',
     `I'm cataloguing my die-cast model car boxes. There are ${boxes.length} box${boxes.length === 1 ? '' : 'es'}, ${boxes.length * 2} photos, in this order:`,
     ...lines,
