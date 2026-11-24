@@ -10,10 +10,10 @@ import { getClientId, setClientId, hasToken, signIn, tokenMinutesLeft, drive } f
 import { getConfig, seedLocal } from './setup.js';
 import { newId } from './ids.js';
 import { newTimer, touch, seconds } from './timing.js';
-import { backupIfDue, backupNow, lastBackup } from './backup.js';
+import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.13.0';
+export const APP_VERSION = 's1-0.14.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -572,6 +572,7 @@ async function renderGarage(v) {
 // Quick capture (D17.1, D19, D20)
 // =====================================================================
 let cap = null;
+let restoreList = null; // Settings → Restore from a backup: the list, once fetched
 // In a photo run set to "Pick per car", each new car starts without a brand.
 const nextBrandId = () => (location.hash.startsWith('#/run') && localStorage.getItem('smg.brandPerCar') === '1') ? '' : cap.brandId;
 const nextScaleId = () => (location.hash.startsWith('#/run') && localStorage.getItem('smg.scalePerCar') === '1') ? '' : cap.scaleId;
@@ -1450,7 +1451,40 @@ async function renderSettings(v) {
       try { if (!hasToken()) await signIn(); await backupNow(await getConfig()); toast('Backup made ✓'); }
       catch (err) { toast(`Backup failed: ${err.message}`, 4000, 'bad'); }
       route();
-    } }, 'Back up now')));
+    } }, 'Back up now'),
+    // Restore (D25): pick a copy; the current sheet is kept and backed up first; nothing is deleted.
+    restoreList === null
+      ? h('button', { class: 'ghost', style: 'margin-top:10px', disabled: config?.workbookId ? undefined : true, onclick: async (e) => {
+          e.target.disabled = true; e.target.textContent = 'Finding backups…';
+          try { if (!hasToken()) await signIn(); restoreList = await listBackups(); } catch (err) { toast(`Couldn't list backups: ${err.message}`, 4000, 'bad'); }
+          route();
+        } }, 'Restore from a backup…')
+      : h('div', { class: 'restore' }, h('h3', {}, 'Restore from a backup'),
+          h('p', { class: 'muted' }, 'Pick a copy. Your current sheet is backed up first and kept in Drive, renamed "(replaced …)". Nothing is deleted. Photos are not affected.'),
+          restoreList.length ? restoreList.slice(0, 30).map(b => h('div', { class: 'row removed' },
+            h('div', {}, h('b', {}, b.at ? new Date(b.at.length > 10 ? b.at : b.at + 'T00:00').toLocaleString('en-IN', b.at.length > 10 ? { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' } : { day: 'numeric', month: 'short', year: 'numeric' }) : b.name),
+              h('div', { class: 'muted small' }, { manual: 'Made with "Back up now"', daily: 'Daily copy', monthly: 'Monthly copy' }[b.kind])),
+            h('button', { type: 'button', class: 'small quiet', onclick: (e) => doRestore(b, e.target) }, 'Restore'))) : h('p', { class: 'muted' }, 'No backups yet. They appear after your first sync.'),
+          h('button', { type: 'button', class: 'small ghost', style: 'margin-top:8px', onclick: () => { restoreList = null; route(); } }, 'Cancel'))));
+
+  async function doRestore(b, btn) {
+    const p = await store.pendingSummary();
+    if (p.boxes || p.other) { toast('Sync first: some changes on this phone are not in your sheet yet.', 4500, 'warn'); return; }
+    const label = btn.closest('.row').querySelector('b').textContent;
+    if (!confirm(`Restore the backup from ${label}?\n\n• Your current sheet is backed up first and kept in Drive, renamed "(replaced …)".\n• The app then shows the collection as it was in that backup.\n• Photos stay in Drive. Nothing is deleted.`)) return;
+    btn.disabled = true; btn.textContent = 'Restoring…';
+    try {
+      if (!hasToken()) await signIn();
+      await restoreBackup(await getConfig(), b, { pending: p });
+      await seedLocal();
+      restoreList = null;
+      await runSync(true);
+      await store.logChange('workbook', (await getConfig()).workbookId, 'restored_from', '', b.name, 'restored in app; previous sheet kept as "(replaced …)"');
+      autoSyncSoon();
+      toast(`Restored the backup from ${label} ✓`, 4500);
+      location.hash = '#/';
+    } catch (err) { toast(`Restore failed: ${err.message}`, 5000, 'bad'); btn.disabled = false; btn.textContent = 'Restore'; }
+  }
 
   // Collection size, for the Garage progress bar.
   const curAccent = document.documentElement.dataset.accent;

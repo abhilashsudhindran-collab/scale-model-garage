@@ -2,9 +2,9 @@
 // syncs and the last daily copy is over 24 h old (keep 7), plus one per calendar month (keep 12),
 // plus "Back up now" (kept until B deletes them). ₹0: Drive copies only, within drive.file scope.
 // Photos are NOT copied (D25: quarterly manual download, e.g. Google Takeout).
-// Restoring is manual for now: open a backup copy from Drive (06_BACKUPS) and use it; no in-app restore yet.
+// Restore (D25, s1-0.14.0): restoreBackup() makes a chosen copy the main sheet again; nothing is ever deleted.
 import { drive, sheets } from './google.js';
-import { meta } from './idb.js';
+import { meta, records } from './idb.js';
 import { SETTINGS_TAB, WORKBOOK_NAME } from './schema.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -67,4 +67,41 @@ export async function backupNow(config, now = Date.now()) {
   const at = new Date(now).toISOString();
   await meta.set('lastBackup', { ...(await lastBackup()), manualAt: at });
   await recordInSheet(config, at);
+}
+
+// ---------- Restore (D25: restore must work before the collection depends on backups) ----------
+// Lists backup copies newest first: [{ id, name, kind, at }]. The date comes from the copy's name.
+export async function listBackups() {
+  const out = [];
+  for (const kind of ['manual', 'daily', 'monthly']) {
+    const r = await drive.list(`appProperties has { key='${TAG}' and value='${kind}' } and trashed=false`, 'files(id,name,appProperties)');
+    for (const f of r.files || []) {
+      const m = f.name.match(/(\d{4}-\d{2}-\d{2})(?: (\d{2})(\d{2}))?$/);
+      out.push({ id: f.id, name: f.name, kind, at: m ? `${m[1]}${m[2] ? `T${m[2]}:${m[3]}` : ''}` : '' });
+    }
+  }
+  return out.sort((a, b) => b.at.localeCompare(a.at) || a.kind.localeCompare(b.kind));
+}
+
+// Makes `backup` the main sheet. Steps, safest first:
+//   1. refuse unless everything on this phone is synced (nothing unsynced can be lost);
+//   2. a fresh "manual" backup of the current sheet;
+//   3. copy the chosen backup into 00_DATABASE as the new main sheet (tagged as the workbook);
+//   4. the current main sheet is kept, renamed "(replaced …)" and untagged, never deleted;
+//   5. this phone's database is rebuilt from the restored sheet by the next sync (photos stay in Drive).
+export async function restoreBackup(config, backup, { pending, now = Date.now() } = {}) {
+  if (pending && (pending.boxes || pending.other)) throw new Error('Sync first: some changes on this phone have not reached your sheet yet.');
+  const stamp = new Date(now).toISOString();
+  await backupNow(config, now);
+  const fresh = await drive.copy(backup.id, WORKBOOK_NAME, config.folders['00_DATABASE'], { smgRole: 'workbook', [TAG]: null });
+  await drive.update(fresh.id, { appProperties: { smgRole: 'workbook', [TAG]: null } });
+  const d = new Date(now), pad = (n) => String(n).padStart(2, '0');
+  const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; // B's own clock
+  await drive.update(config.workbookId, { name: `${WORKBOOK_NAME} (replaced ${local})`, appProperties: { smgRole: 'replaced' } });
+  const lb = await lastBackup();
+  await records.clearAll();
+  const next = { ...config, workbookId: fresh.id, tabsVersion: undefined, restoredAt: stamp, restoredFrom: backup.name, replacedId: config.workbookId };
+  await meta.set('config', next);
+  await meta.set('lastBackup', lb);
+  return next;
 }
