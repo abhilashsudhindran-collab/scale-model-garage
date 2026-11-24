@@ -64,7 +64,7 @@ def main():
         page.get_by_role('button', name='Done: start shooting').click(); page.wait_for_timeout(200)
         for i, (f, r) in enumerate([('a', 'b'), ('b', 'c'), ('c', 'a')]):
             shoot('Box front', f'{tmp}/{f}.jpg'); page.wait_for_selector('button:has-text("📷 Box rear")')
-            shoot('Box rear', f'{tmp}/{r}.jpg'); page.wait_for_selector(f'text=Box {i + 2} of this run')
+            shoot('Box rear', f'{tmp}/{r}.jpg'); page.wait_for_selector(f'text=Car {i + 2} of this run')
         check(len(listm()) == 3, 'three nameless boxes to start')
 
         # Box 3 already has a code typed earlier (no name): it must survive naming

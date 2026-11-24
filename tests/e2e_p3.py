@@ -53,7 +53,7 @@ def main():
         # Entry point from Quick capture
         page.goto(base + '#/add'); page.wait_for_selector('text=Quick capture')
         page.get_by_text('Photo run: photos now, names later').click(); page.wait_for_selector('text=Photo run')
-        check(page.is_visible('text=Choose a brand and a scale'), 'run asks for brand and scale first')
+        check(page.is_visible('text=and a scale for this run to start'), 'run asks for brand and scale first')
 
         # Run settings
         page.select_option('select[aria-label=Brand]', label='Mini GT'); page.wait_for_timeout(250)
@@ -61,7 +61,7 @@ def main():
         page.fill('input.boxin', '3'); page.wait_for_timeout(100)
         page.get_by_role('button', name='Car visible', exact=True).click(); page.wait_for_timeout(250)
         page.get_by_role('button', name='Done: start shooting').click(); page.wait_for_timeout(300)
-        check(page.is_visible('text=Box 1 of this run'), 'run ready: "Box 1 of this run"')
+        check(page.is_visible('text=Car 1 of this run'), 'run ready: "Car 1 of this run"')
         vis = page.evaluate("(() => { const b = [...document.querySelectorAll('button')].find(x => x.textContent.includes('📷 Box front')); const r = b.getBoundingClientRect(); return r.bottom <= innerHeight - 84; })()")
         check(vis, 'camera button visible without scrolling once settings fold away')
         page.screenshot(path=f'{SHOTS}/01-run-ready.png')
@@ -69,7 +69,7 @@ def main():
         # Box 1: front + rear with barcode -> saves itself
         shoot('Box front', f'{tmp}/a.jpg'); page.wait_for_selector('button:has-text("📷 Box rear")')
         shoot('Box rear', f'{tmp}/rear_bc.jpg')
-        check(wait_for(lambda: page.is_visible('text=Box 2 of this run')), 'box 1 saved itself after the rear photo')
+        check(wait_for(lambda: page.is_visible('text=Car 2 of this run')), 'box 1 saved itself after the rear photo')
         ms = listm()
         check(len(ms) == 1 and ms[0]['display_name'] == '', f'box 1 saved without a name ({len(ms)} model)')
         inv = ev("(async () => (await (await import('./js/store.js')).list('inventory')).map(i => i.storage_location))()")
@@ -79,7 +79,7 @@ def main():
         # Box 2: no barcode
         shoot('Box front', f'{tmp}/c.jpg'); page.wait_for_selector('button:has-text("📷 Box rear")')
         shoot('Box rear', f'{tmp}/b.jpg')
-        check(wait_for(lambda: page.is_visible('text=Box 3 of this run')), 'box 2 saved itself')
+        check(wait_for(lambda: page.is_visible('text=Car 3 of this run')), 'box 2 saved itself')
 
         # Box 3: same barcode as box 1 -> run pauses, "Different model" saves new
         shoot('Box front', f'{tmp}/b.jpg'); page.wait_for_selector('button:has-text("📷 Box rear")')
@@ -87,13 +87,13 @@ def main():
         check(wait_for(lambda: page.is_visible('text=You may already own this')), 'same barcode pauses the run with a choice')
         page.screenshot(path=f'{SHOTS}/02-run-match.png')
         page.get_by_role('button', name='Different model: save new').click()
-        check(wait_for(lambda: page.is_visible('text=Box 4 of this run')), '"Different model" saves it as new')
+        check(wait_for(lambda: page.is_visible('text=Car 4 of this run')), '"Different model" saves it as new')
         check(len(listm()) == 3, 'three models after box 3')
 
-        # Undo last box
-        page.get_by_role('button', name='Undo last box (run box 3)').click(); page.wait_for_timeout(600)
+        # Undo last car
+        page.get_by_role('button', name='Undo last car (car 3)').click(); page.wait_for_timeout(600)
         active = [x for x in listm()]
-        check(len(active) == 2, f'"Undo last box" archives box 3 ({len(active)} active)')
+        check(len(active) == 2, f'"Undo last car" archives box 3 ({len(active)} active)')
 
         # Box 4: same barcode -> add as copy, no new model
         shoot('Box front', f'{tmp}/c.jpg'); page.wait_for_selector('button:has-text("📷 Box rear")')

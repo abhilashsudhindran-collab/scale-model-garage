@@ -152,17 +152,57 @@ def main():
         for label, f in [('Box front', 'f'), ('Box rear', 'r')]:
             with page.expect_file_chooser() as fc: page.get_by_role('button', name=f'📷 {label}').click()
             fc.value.set_files(f'{tmp}/{f}.jpg'); page.wait_for_timeout(700)
-        page.wait_for_selector('text=Box 2 of this run', timeout=8000)
+        page.wait_for_selector('text=Car 2 of this run', timeout=8000)
         page.get_by_role('button', name='Done with Box 31').click(); page.wait_for_selector('.boxcard')
         c31 = txt('.boxcard'); n31 = len(page.query_selector_all('.tile'))
         check('1 car inside · Hot Wheels 1' in c31 and n31 == 1, f'Done: Box 31 shows its new car ({c31[:60]!r}, {n31} tiles)')
         page.screenshot(path=f'{SHOTS}/09-box31.png')
 
+        # Brand boxes vs mixed boxes: the box decides the brand
+        page.goto(base + '#/'); page.wait_for_selector('.shelfhome'); page.fill('input[type=search]', ''); page.wait_for_timeout(200)
+        page.locator('.shelfhome .boxtile.newbox').click(); page.wait_for_selector('.boxcard')
+        check('📦 Box 32' in txt('.boxcard'), 'second new box = Box 32')
+        page.select_option('select[aria-label="Brand for this box"]', label='Mini GT'); page.wait_for_timeout(500)
+        check(page.locator('.boxcard .chip.on', has_text='Only Mini GT').count() == 1, 'Box 32 set to "Only Mini GT"')
+        page.get_by_role('button', name='📷 Fill Box 32').click(); page.wait_for_selector('text=📦 Filling Box 32')
+        check('Mini GT' in txt('.runsum') and not page.is_visible('text=Which brand is this car?'), 'brand box: run preset to Mini GT, no brand question')
+        nmod = lambda: page.evaluate("(async () => (await (await import('./js/store.js')).list('models')).length)()")
+        before = nmod()
+        for label, f in [('Box front', 'f'), ('Box rear', 'r')]:
+            with page.expect_file_chooser() as fc: page.get_by_role('button', name=f'📷 {label}').click()
+            fc.value.set_files(f'{tmp}/{f}.jpg'); page.wait_for_timeout(700)
+        if page.is_visible('text=Different model: save new'): page.get_by_role('button', name='Different model: save new').click(); page.wait_for_timeout(700)
+        for _ in range(40):
+            if nmod() > before: break
+            page.wait_for_timeout(200)
+        page.get_by_role('button', name='Done with Box 32').click(); page.wait_for_selector('.boxcard')
+        check('1 car inside · Mini GT 1' in txt('.boxcard'), 'brand box: car saved as Mini GT')
+        page.locator('.boxcard .chip', has_text='Mixed brands').click(); page.wait_for_timeout(500)
+        page.get_by_role('button', name='📷 Fill Box 32').click(); page.wait_for_selector('text=📦 Filling Box 32')
+        check('Mixed brands' in txt('.runsum'), 'mixed box: run shows "Mixed brands"')
+        brands_seen = []
+        for want in ['Bburago', 'Hot Wheels']:
+            for label, f in [('Box front', 'f'), ('Box rear', 'r')]:
+                with page.expect_file_chooser() as fc: page.get_by_role('button', name=f'📷 {label}').click()
+                fc.value.set_files(f'{tmp}/{f}.jpg'); page.wait_for_timeout(700)
+            page.wait_for_selector('text=Which brand is this car?', timeout=8000)
+            brands_seen.append(page.is_visible(".brandpick"))
+            if want == 'Bburago': page.screenshot(path=f'{SHOTS}/10-which-brand.png')
+            page.select_option('select[aria-label="Brand for this car"]', label=want); page.wait_for_timeout(900)
+            # a barcode/photo match may ask "same model?": treat as a different car
+            if page.is_visible('text=Different model: save new'): page.get_by_role('button', name='Different model: save new').click(); page.wait_for_timeout(700)
+        check(all(brands_seen), 'mixed box: after photos, asks the brand with the photo in view (each car)')
+        page.get_by_role('button', name='Done with Box 32').click(); page.wait_for_selector('.boxcard')
+        c32 = txt('.boxcard')
+        check('3 cars inside' in c32 and 'Bburago 1' in c32 and 'Hot Wheels 1' in c32 and 'Mini GT 1' in c32, f'mixed box: each car saved with its own brand ({c32[:70]!r})')
+        page.goto(base + '#/'); page.wait_for_selector('.shelfhome .boxtile')
+        check('Mixed' in page.locator('.shelfhome .boxtile', has_text='Box 32').inner_text(), 'unnamed mixed box tile says "Mixed"')
+
         # Grouped views in the Garage
         page.goto(base + '#/'); page.wait_for_selector('.tile'); page.fill('input[type=search]', ''); page.wait_for_timeout(200)
         page.get_by_role('button', name='By brand', exact=True).click(); page.wait_for_timeout(300)
         groups = [g.inner_text() for g in page.query_selector_all('h3.group')]
-        check(groups == ['BBURAGO · 3 MODELS', 'HOT WHEELS · 2 MODELS', 'MINI GT · 3 MODELS'], f'By brand groups A–Z ({groups})')
+        check(groups == ['BBURAGO · 4 MODELS', 'HOT WHEELS · 3 MODELS', 'MINI GT · 4 MODELS'], f'By brand groups A–Z ({groups})')
         page.get_by_role('button', name='By scale', exact=True).click(); page.wait_for_timeout(300)
         groups = [g.inner_text() for g in page.query_selector_all('h3.group')]
         check([g.split(' ·')[0] for g in groups] == ['1:64', '1:43', '1:18'], f'By scale groups in scale order ({groups})')

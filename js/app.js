@@ -177,6 +177,7 @@ async function saveBox(label, patch) {
   const clean = {};
   if ('box_name' in patch) clean.box_name = String(patch.box_name || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 60);
   if ('box_size' in patch) clean.box_size = BOX_SIZES.includes(patch.box_size) ? patch.box_size : '';
+  if ('box_brand' in patch) clean.box_brand = /^[A-Za-z0-9_-]{1,40}$/.test(patch.box_brand || '') ? patch.box_brand : '';
   if (rec) {
     const changed = Object.keys(clean).filter(k => String(rec[k] || '') !== clean[k]);
     if (!changed.length) return;
@@ -219,12 +220,23 @@ async function newBox() {
   return label;
 }
 // Start (or continue) a photo run straight into this box.
+// The box decides the brand (B, 24 Nov): a brand box presets the brand; a mixed box asks per car.
+async function applyBoxBrand(label) {
+  const rec = (await boxNames()).get(label.toLowerCase());
+  const bb = rec?.box_brand || '';
+  if (bb === 'mixed') { localStorage.setItem('smg.brandPerCar', '1'); if (cap && !Object.keys(cap.photos || {}).length) cap.brandId = ''; }
+  else if (bb) { localStorage.setItem('smg.brandPerCar', '0'); if (cap) cap.brandId = bb; pushRecentBrand(bb); }
+}
 async function fillBox(label) {
   const id = label.replace(/^Box\s*/i, '');
   localStorage.setItem('smg.lastBox', id);
   if (!cap) cap = await loadDraft();
-  if (cap) { cap.box = id; saveDraftSoon(); }
-  runSetOpen = !(cap && cap.brandId && cap.scaleId);
+  if (!cap) cap = freshCapture({ scaleId: localStorage.getItem('smg.lastScale') || '', brandId: recentBrands()[0] || '' });
+  cap.box = id;
+  await applyBoxBrand(`Box ${id}`);
+  saveDraftSoon();
+  const perCar = localStorage.getItem('smg.brandPerCar') === '1';
+  runSetOpen = !((cap.brandId || perCar) && cap.scaleId);
   location.hash = '#/run';
 }
 // One tap to put the next car in any box already in use (B: moving on shouldn't need "box full").
@@ -237,6 +249,7 @@ function boxPicker(current, used, names, pick) {
   }));
 }
 // The shelf: each storage box as a SAMLA side view, count inside; size, number, name below.
+let brandNameCache = {};
 function shelfEl(boxes, names, onTap, { selected = '', scroll = false, onNew = null } = {}) {
   return h('div', { class: `shelf${scroll ? ' scrollrow' : ''}` }, ...boxes.map(([k, n]) => {
     const r = names.get(k.toLowerCase()) || {};
@@ -244,7 +257,7 @@ function shelfEl(boxes, names, onTap, { selected = '', scroll = false, onNew = n
     return h('button', { type: 'button', class: `boxtile${sel ? ' sel' : ''}`, 'aria-pressed': sel ? 'true' : 'false', onclick: () => onTap(k, sel), 'aria-label': `${k}${r.box_name ? ', ' + r.box_name : ''}${r.box_size ? ', size ' + r.box_size : ''}: ${plural(n, 'car', 'cars')}` },
       boxShape(n),
       h('span', { class: 'bxl' }, r.box_size ? h('em', {}, r.box_size) : null, k),
-      r.box_name ? h('i', {}, r.box_name) : null);
+      (r.box_name || r.box_brand) ? h('i', {}, r.box_name || (r.box_brand === 'mixed' ? 'Mixed' : brandNameCache[r.box_brand] || '')) : null);
   }), onNew ? h('button', { type: 'button', class: 'boxtile newbox', onclick: onNew, 'aria-label': 'Add a new storage box' }, boxShape('＋'), h('span', { class: 'bxl' }, 'New box')) : null);
 }
 
@@ -263,6 +276,7 @@ const topN = (entries, n) => entries.length <= n + 1 ? entries : [...entries.sli
 async function renderDash(v) {
   const [models, inventory, photos, ref] = await Promise.all([store.listRecords('models'), store.list('inventory'), store.list('photos'), refData()]);
   const brandName = Object.fromEntries(ref.brands.map(b => [b.brand_id, b.name]));
+  brandNameCache = brandName;
   const scaleLabel = Object.fromEntries(ref.scales.map(s => [s.scale_id, s.label]));
   const active = models.filter(r => !r.data.deleted_at);
   const byId = new Map(active.map(r => [r.id, r.data]));
@@ -326,6 +340,7 @@ async function renderGarage(v) {
   const [models, inventory, photos, ids, ref] = await Promise.all([store.listRecords('models'), store.list('inventory'), store.list('photos'), store.list('product_identifiers'), refData()]);
   const names = await boxNames();
   const brandName = Object.fromEntries(ref.brands.map(b => [b.brand_id, b.name]));
+  brandNameCache = brandName;
   const scaleLabel = Object.fromEntries(ref.scales.map(s => [s.scale_id, s.label]));
   const active = models.filter(r => !r.data.deleted_at);
   const archived = models.filter(r => r.data.deleted_at);
@@ -403,6 +418,18 @@ async function renderGarage(v) {
         h('div', { class: 'row' }, h('h2', {}, `📦 ${label}${rec?.box_size ? ' · ' + rec.box_size : ''}`), h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; route(); } }, 'Close')),
         h('div', { class: 'muted' }, inBox.length ? `${plural(inBox.length, 'car', 'cars')} inside${byBrand ? ' · ' + byBrand : ''}` : 'Empty so far.'),
         h('button', { type: 'button', class: 'wide', style: 'margin-top:10px', onclick: () => fillBox(label) }, `📷 Fill ${label}`),
+        h('label', { class: 'f' }, "What's in this box?"),
+        (() => {
+          const cur = rec?.box_brand || '';
+          const setB = async (b) => { await saveBox(label, { box_brand: cur === b ? '' : b }); autoSyncSoon(); route(); };
+          const quick = [...new Set([...recentBrands(), ...(cur && cur !== 'mixed' ? [cur] : [])])].map(id => ref.brands.find(b => b.brand_id === id)).filter(Boolean).slice(0, 6);
+          return h('div', {},
+            h('div', { class: 'chips' },
+              h('button', { type: 'button', class: `chip ${cur === 'mixed' ? 'on' : ''}`, 'aria-pressed': cur === 'mixed' ? 'true' : 'false', onclick: () => setB('mixed') }, 'Mixed brands'),
+              quick.map(b => h('button', { type: 'button', class: `chip ${cur === b.brand_id ? 'on' : ''}`, 'aria-pressed': cur === b.brand_id ? 'true' : 'false', onclick: () => setB(b.brand_id) }, `Only ${b.name}`))),
+            h('select', { 'aria-label': 'Brand for this box', style: 'margin-top:6px', onchange: (e) => { if (e.target.value) setB(e.target.value); } },
+              h('option', { value: '' }, 'Only one brand: choose…'), ref.brands.map(b => h('option', { value: b.brand_id, selected: cur === b.brand_id ? true : undefined }, b.name))));
+        })(),
         h('label', { class: 'f' }, 'Box size'),
         h('div', { class: 'chips' }, BOX_SIZES.map(sz => h('button', { type: 'button', class: `chip ${rec?.box_size === sz ? 'on' : ''}`, 'aria-pressed': rec?.box_size === sz ? 'true' : 'false', onclick: async () => { await saveBox(label, { box_size: rec?.box_size === sz ? '' : sz }); autoSyncSoon(); route(); } }, sz))),
         h('label', { class: 'f' }, rec?.box_name ? 'Box name' : 'Name this box? (optional)'), nameIn, h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: save }, 'Save name')));
@@ -456,6 +483,8 @@ async function renderGarage(v) {
 // Quick capture (D17.1, D19, D20)
 // =====================================================================
 let cap = null;
+// In a photo run set to "Pick per car", each new car starts without a brand.
+const nextBrandId = () => (location.hash.startsWith('#/run') && localStorage.getItem('smg.brandPerCar') === '1') ? '' : cap.brandId;
 let runWork = Promise.resolve(); // the photo run's save in progress, so "Done with Box N" waits for it
 function freshCapture(keep = {}) {
   // "Sealed" is remembered like brand and scale (audit C1): most of the collection is sealed boxes.
@@ -724,6 +753,10 @@ async function renderRun(v) {
   const ref = await refData();
   const brand = ref.brands.find(b => b.brand_id === cap.brandId);
   const scale = ref.scales.find(x => x.scale_id === cap.scaleId);
+  // Mixed boxes (B, 24 Nov): photos first, then pick the brand for each car with its photo in view.
+  const perCar = localStorage.getItem('smg.brandPerCar') === '1';
+  const setPerCar = (on) => { localStorage.setItem('smg.brandPerCar', on ? '1' : '0'); if (on) cap.brandId = ''; else if (!cap.brandId) cap.brandId = recentBrands()[0] || ''; saveDraftSoon(); route(); };
+  const brandReady = perCar || !!brand;
   v.append(h('div', { class: 'row' }, h('h2', {}, 'Photo run'), h('a', { href: '#/add', class: 'btn ghost small', style: 'flex:0 0 auto' }, 'One box at a time')));
   if (cap.box) {
     const bn = (await boxNames()).get(`box ${cap.box}`.toLowerCase())?.box_name;
@@ -742,8 +775,12 @@ async function renderRun(v) {
   const set = h('div', { class: 'card runset' });
   const recent = recentBrands().map(id => ref.brands.find(b => b.brand_id === id)).filter(Boolean);
   set.append(h('label', { class: 'f' }, 'Brand'));
-  if (recent.length) set.append(h('div', { class: 'chips', style: 'margin-bottom:6px' }, recent.map(b => h('button', { type: 'button', class: `chip ${cap.brandId === b.brand_id ? 'on' : ''}`, onclick: () => { cap.brandId = b.brand_id; pushRecentBrand(b.brand_id); saveDraftSoon(); route(); } }, b.name))));
-  set.append(h('select', { 'aria-label': 'Brand', onchange: (e) => { cap.brandId = e.target.value; if (cap.brandId) pushRecentBrand(cap.brandId); saveDraftSoon(); route(); } },
+  set.append(h('div', { class: 'chips', style: 'margin-bottom:6px' },
+    h('button', { type: 'button', class: `chip ${perCar ? '' : 'on'}`, 'aria-pressed': perCar ? 'false' : 'true', onclick: () => setPerCar(false) }, 'Same brand for all'),
+    h('button', { type: 'button', class: `chip ${perCar ? 'on' : ''}`, 'aria-pressed': perCar ? 'true' : 'false', onclick: () => setPerCar(true) }, 'Pick per car (mixed box)')));
+  if (perCar) set.append(h('p', { class: 'muted' }, 'Take the photos, then tap the brand for each car.'));
+  if (!perCar && recent.length) set.append(h('div', { class: 'chips', style: 'margin-bottom:6px' }, recent.map(b => h('button', { type: 'button', class: `chip ${cap.brandId === b.brand_id ? 'on' : ''}`, onclick: () => { cap.brandId = b.brand_id; pushRecentBrand(b.brand_id); saveDraftSoon(); route(); } }, b.name))));
+  if (!perCar) set.append(h('select', { 'aria-label': 'Brand', onchange: (e) => { cap.brandId = e.target.value; if (cap.brandId) pushRecentBrand(cap.brandId); saveDraftSoon(); route(); } },
     h('option', { value: '' }, '— choose brand —'), ref.brands.map(b => h('option', { value: b.brand_id, selected: b.brand_id === cap.brandId ? true : undefined }, b.name))));
   set.append(h('label', { class: 'f' }, 'Scale'));
   set.append(h('div', { class: 'chips' }, ref.scales.filter(x => ['1:64', '1:43', '1:18', '1:12'].includes(x.label)).map(x => h('button', { type: 'button', class: `chip ${cap.scaleId === x.scale_id ? 'on' : ''}`, onclick: () => { cap.scaleId = x.scale_id; localStorage.setItem('smg.lastScale', x.scale_id); saveDraftSoon(); route(); } }, x.label))));
@@ -752,28 +789,28 @@ async function renderRun(v) {
   const boxRow = h('div', { class: 'row' }, h('input', { class: 'boxin', placeholder: 'Box number, e.g. 12', value: cap.box, 'aria-label': 'Storage box number', oninput: (e) => setBox(e.target.value) }));
   if (/^\d+$/.test(cap.box)) boxRow.append(h('button', { type: 'button', class: 'quiet', style: 'flex:0 0 auto', onclick: () => { setBox(Number(cap.box) + 1); toast(`Now filling Box ${cap.box}`); route(); } }, `Next box → ${Number(cap.box) + 1}`));
   set.append(boxRow);
-  { const used = await boxesInUse(); const pk = boxPicker(cap.box, used, await boxNames(), (id) => { setBox(id); route(); }); if (pk) set.append(pk); }
+  { const used = await boxesInUse(); const pk = boxPicker(cap.box, used, await boxNames(), async (id) => { setBox(id); await applyBoxBrand(`Box ${id}`); saveDraftSoon(); route(); }); if (pk) set.append(pk); }
   const setSealed = (yes) => { cap.sealed = yes; localStorage.setItem('smg.lastSealed', yes ? 'yes' : 'no'); saveDraftSoon(); route(); };
   set.append(h('div', { class: 'chips', style: 'margin-top:10px' },
     h('button', { type: 'button', class: `chip ${cap.sealed ? 'on' : ''}`, 'aria-pressed': cap.sealed ? 'true' : 'false', onclick: () => setSealed(true) }, 'Sealed box'),
     h('button', { type: 'button', class: `chip ${cap.sealed ? '' : 'on'}`, 'aria-pressed': cap.sealed ? 'false' : 'true', onclick: () => setSealed(false) }, 'Car visible')));
   // Once brand and scale are set, the settings fold into one line so the camera button stays at the top.
-  if (brand && scale && !runSetOpen) {
+  if (brandReady && scale && !runSetOpen) {
     v.append(h('div', { class: 'runsum' },
-      h('div', {}, h('b', {}, `${brand.name} · ${scale.label}`), ` · ${cap.box ? `Box ${cap.box}` : 'no storage box'} · ${cap.sealed ? 'Sealed' : 'Car visible'}`),
-      recent.length > 1 ? h('div', { class: 'chips scroll', style: 'margin:6px 0' }, recent.map(b => h('button', { type: 'button', class: `chip ${cap.brandId === b.brand_id ? 'on' : ''}`, 'aria-pressed': cap.brandId === b.brand_id ? 'true' : 'false', onclick: () => { cap.brandId = b.brand_id; pushRecentBrand(b.brand_id); saveDraftSoon(); route(); } }, b.name))) : null,
+      h('div', {}, h('b', {}, `${perCar ? 'Mixed brands' : brand.name} · ${scale.label}`), ` · ${cap.box ? `Box ${cap.box}` : 'no storage box'} · ${cap.sealed ? 'Sealed' : 'Car visible'}`),
+      !perCar && recent.length > 1 ? h('div', { class: 'chips scroll', style: 'margin:6px 0' }, recent.map(b => h('button', { type: 'button', class: `chip ${cap.brandId === b.brand_id ? 'on' : ''}`, 'aria-pressed': cap.brandId === b.brand_id ? 'true' : 'false', onclick: () => { cap.brandId = b.brand_id; pushRecentBrand(b.brand_id); saveDraftSoon(); route(); } }, b.name))) : null,
       h('button', { type: 'button', class: 'small ghost', onclick: () => { runSetOpen = true; route(); } }, 'Change')));
   } else {
     v.append(set);
-    if (brand && scale) v.append(h('button', { class: 'wide', style: 'margin-bottom:8px', onclick: () => { runSetOpen = false; route(); } }, 'Done: start shooting'));
+    if (brandReady && scale) v.append(h('button', { class: 'wide', style: 'margin-bottom:8px', onclick: () => { runSetOpen = false; route(); } }, 'Done: start shooting'));
   }
-  if (!brand || !scale) { v.append(h('div', { class: 'banner info' }, 'Choose a brand and a scale for this run to start.')); return; }
+  if (!brandReady || !scale) { v.append(h('div', { class: 'banner info' }, 'Choose a brand (or "Pick per car") and a scale for this run to start.')); return; }
 
   // --- the box in progress ---
   const steps = ['box_front', 'box_rear', ...(cap.sealed && !cap.artSkipped ? ['box_art'] : [])];
   const next = steps.find(r => !cap.photos[r]);
   const say = h('p', { class: 'muted', id: 'runSay' });
-  v.append(h('div', { class: 'runhead' }, h('b', {}, `Box ${cap.count + 1} of this run`), ` · ${brand.name} · ${scale.label}${cap.box ? ` · Box ${cap.box}` : ''}`));
+  v.append(h('div', { class: 'runhead' }, h('b', {}, `Car ${cap.count + 1} of this run`), ` · ${brand ? brand.name : 'brand after photos'} · ${scale.label}${cap.box ? ` · Box ${cap.box}` : ''}`));
   const strip = h('div', { class: 'shots' });
   for (const role of ['box_front', 'box_rear', ...(cap.sealed ? ['box_art'] : [])]) {
     const p = cap.photos[role];
@@ -798,33 +835,42 @@ async function renderRun(v) {
     }
     box.append(h('div', { class: 'row', style: 'margin-top:10px' },
       h('button', { type: 'button', class: 'quiet', onclick: async () => { cap.runDecision = null; await saveRunBox(); } }, 'Different model: save new'),
-      h('button', { type: 'button', class: 'ghost', onclick: async () => { cap.runDecision = null; for (const r of Object.keys(cap.photos)) await dropDraftPhoto(cap.photos[r].photoId); cap.photos = {}; cap.barcode = null; cap.artSkipped = false; await saveDraft(); route(); } }, 'Retake this box')));
+      h('button', { type: 'button', class: 'ghost', onclick: async () => { cap.runDecision = null; for (const r of Object.keys(cap.photos)) await dropDraftPhoto(cap.photos[r].photoId); cap.photos = {}; cap.barcode = null; cap.artSkipped = false; await saveDraft(); route(); } }, 'Retake this car')));
     v.append(box);
+  } else if (!next && perCar && !cap.brandId) {
+    // Photos done: which brand is this car? (front photo in view; one tap saves it)
+    const all = ref.brands;
+    const quick = [...recentBrands().map(id => all.find(b => b.brand_id === id)).filter(Boolean)].slice(0, 8);
+    const pickBrand = async (id) => { if (!id) return; cap.brandId = id; pushRecentBrand(id); saveDraftSoon(); await afterRunPhoto(); };
+    v.append(h('div', { class: 'card brandpick' }, h('div', { class: 'hd' }, 'Which brand is this car? (photos above)'),
+      quick.length ? h('div', { class: 'chips', style: 'margin:10px 0' }, quick.map(b => h('button', { type: 'button', class: 'chip big', onclick: () => pickBrand(b.brand_id) }, b.name))) : null,
+      h('select', { 'aria-label': 'Brand for this car', onchange: (e) => pickBrand(e.target.value) }, h('option', { value: '' }, quick.length ? '— another brand —' : '— choose brand —'), all.map(b => h('option', { value: b.brand_id }, b.name)))));
   } else if (next) {
     v.append(h('button', { class: 'wide runshot', onclick: async () => { runSetOpen = false; if (await takeCapPhoto(next, (t) => { say.textContent = t; })) await afterRunPhoto(); } }, `📷 ${SHOT_ROLES[next].label}`));
     if (next === 'box_art') v.append(h('button', { class: 'wide ghost', style: 'margin-top:8px', onclick: async () => { cap.artSkipped = true; await afterRunPhoto(); } }, 'Skip box art'));
   } else {
-    v.append(h('button', { class: 'wide', onclick: () => afterRunPhoto() }, 'Save this box'));
+    v.append(h('button', { class: 'wide', onclick: () => afterRunPhoto() }, 'Save this car'));
   }
   if (runLast) v.append(h('button', { class: 'wide ghost', style: 'margin-top:10px', onclick: async () => {
     if (!confirm(`Undo the last box (${runLast.label})? It is archived, not deleted, and can be restored from Garage → Archived.`)) return;
-    await store.archive('models', runLast.id); toast('Last box undone (archived)'); runLast = null; route(); autoSyncSoon();
-  } }, `Undo last box (${runLast.label})`));
+    await store.archive('models', runLast.id); toast('Last car undone (archived)'); runLast = null; route(); autoSyncSoon();
+  } }, `Undo last car (${runLast.label})`));
   v.append(h('p', { class: 'muted', style: 'margin-top:14px' }, h('a', { href: '#/name' }, 'Name the boxes from this run →')));
 
   async function afterRunPhoto() { runWork = afterRunPhotoInner(); await runWork; }
   async function afterRunPhotoInner() {
     const need = ['box_front', 'box_rear', ...(cap.sealed && !cap.artSkipped ? ['box_art'] : [])];
     if (need.some(r => !cap.photos[r])) { route(); return; }
+    if (perCar && !cap.brandId) { route(); return; } // ask for the brand first
     const [models, ids] = await Promise.all([store.list('models'), store.list('product_identifiers')]);
-    const ns = assignNamespace(brand, null);
+    const ns = assignNamespace(ref.brands.find(b => b.brand_id === cap.brandId) || brand, null);
     const r = checkDuplicate({ model_id: cap.modelId, brand_id: cap.brandId, code_namespace_id: ns.id, namespace_status: ns.status, product_code: '', display_name: '' }, models, ids, cap.barcode ? [cap.barcode.cmp] : []);
     if (r.possible.length) { cap.runDecision = r.possible; route(); return; }
     await saveRunBox();
   }
 }
 async function saveRunBox() {
-  const label = `run box ${cap.count + 1}`;
+  const label = `car ${cap.count + 1}`;
   const id = cap.modelId;
   await saveCapture();
   if (await store.get('models', id)) runLast = { id, label };
@@ -1015,8 +1061,8 @@ async function saveCapture() {
   const secs = seconds(touch(cap.timer));
   await logTiming(secs);
   await clearDraft();
-  cap = freshCapture({ brandId: cap.brandId, scaleId: cap.scaleId, count: cap.count + 1 });
-  toast(`Saved ✓ (${secs} s)${cap.box ? ` · Box ${cap.box}` : ''} — next box`);
+  cap = freshCapture({ brandId: nextBrandId(), scaleId: cap.scaleId, count: cap.count + 1 });
+  toast(`Saved ✓ (${secs} s)${cap.box ? ` · Box ${cap.box}` : ''} — next car`);
   window.scrollTo(0, 0);
   route();
   autoSyncSoon();
@@ -1031,7 +1077,7 @@ async function saveCopyOf(m) {
   const secs = seconds(touch(cap.timer));
   await logTiming(secs);
   await clearDraft();
-  cap = freshCapture({ brandId: cap.brandId, scaleId: cap.scaleId, count: cap.count + 1 });
+  cap = freshCapture({ brandId: nextBrandId(), scaleId: cap.scaleId, count: cap.count + 1 });
   toast(`Added as another copy ✓ (${secs} s)`);
   window.scrollTo(0, 0);
   route(); autoSyncSoon();

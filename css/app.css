@@ -190,3 +190,5 @@ h3.group a { color: inherit; text-decoration: none; }
 .shelf .boxtile.newbox b { color: var(--accent); }
 .shelf .boxtile.newbox .bxl { color: var(--accent); }
 .banner.fill { background: var(--surface); border: 1px solid var(--accent); border-radius: 14px; padding: 12px; margin: 8px 0; }
+.brandpick .hd { font-weight: 800; font-size: 1.1rem; margin-bottom: 8px; }
+.chip.big { font-size: 1rem; padding: 10px 14px; }
