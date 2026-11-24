@@ -345,8 +345,11 @@ h2 .ico-in svg.ic { width: .95em; height: .95em; }
 .pdp-kicker { color: var(--muted); font-weight: 600; font-size: .9rem; }
 .pdp-head h2 { margin: 2px 0 2px; font-size: 1.75rem; }
 .pdp-code { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--muted); font-size: .9rem; }
-.pdp-hero { background: var(--surface); border-radius: 22px; overflow: hidden; display: flex; align-items: center; justify-content: center; aspect-ratio: 4/5; max-height: 62vh; width: 100%; }
-.pdp-hero img { width: 100%; height: 100%; object-fit: contain; }
+.pdp-hero { background: var(--surface); border-radius: 22px; overflow: hidden; display: flex; align-items: center; justify-content: center; width: 100%; min-height: 120px; }
+.pdp-hero img { display: block; width: 100%; height: auto; max-height: 58vh; object-fit: contain; } /* frame follows the photo: a wide box is not padded into a tall frame */
+.pdp-actions { display: flex; gap: 8px; margin: 10px 0 14px; }
+.pdp-actions button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.pdp-actions svg.ic { width: 18px; height: 18px; }
 .pdp-hero.empty { flex-direction: column; gap: 8px; color: #b5ad9f; aspect-ratio: 16/9; }
 .pdp-hero.empty .ico-in svg.ic { width: 48px; height: 48px; stroke-width: 1.3; }
 .gallery.thumbs { display: flex; gap: 8px; overflow-x: auto; margin: 10px 0 4px; padding-bottom: 2px; }

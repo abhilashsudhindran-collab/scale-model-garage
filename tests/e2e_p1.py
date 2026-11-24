@@ -143,7 +143,7 @@ def main():
         check(page.locator('.gallery .fig').count() == n_photos - 1, 'I2 photo removed')
         check(page.locator('.gallery .fig', has_text='★ Box front').count() == 1, 'I2 removing the main photo falls back to the box front')
         page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
-        page.get_by_role('button', name='Archive').click(); page.wait_for_selector('.tile'); page.wait_for_timeout(400)
+        page.get_by_role('button', name='Remove', exact=True).click(); page.wait_for_selector('.tile'); page.wait_for_timeout(400)
         check(page.locator('.chips.scroll .chip', has_text='Archived (1)').count() == 1, 'I2 archived model listed under "Archived (1)"')
         page.locator('.chips.scroll .chip', has_text='Archived').click(); page.wait_for_timeout(300)
         page.locator('.tile').first.click(); page.wait_for_selector('text=Archived: hidden from your garage')
