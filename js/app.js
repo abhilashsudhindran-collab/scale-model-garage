@@ -15,11 +15,13 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.16.0';
+export const APP_VERSION = 's1-0.16.1';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
 const ICON = {
+  edit: '<path d="M4 20h4l10.5-10.5-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+  trash: '<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5.5M14 11v5.5"/>',
   camera: '<path d="M4 8.5h3.2l1.8-2.5h6l1.8 2.5H20V19H4z"/><circle cx="12" cy="13.2" r="3.4"/>',
   box: '<path d="M3.5 7.5 12 3.5l8.5 4v9L12 20.5l-8.5-4z"/><path d="M3.5 7.5 12 11.5l8.5-4M12 11.5v9"/>',
   car: '<path d="M3 15.5V12l2.2-4.5h13.6L21 12v3.5"/><path d="M3 15.5h18M6.5 18.5a1.5 1.5 0 1 0 0-.01M17.5 18.5a1.5 1.5 0 1 0 0-.01M5.5 11.5h13"/>',
@@ -1302,6 +1304,11 @@ async function renderItem(v, modelId) {
     h('div', { class: 'pdp-kicker' }, [brandN, scaleN].filter(Boolean).join(' · ') || 'Brand and scale not set'),
     h('h2', {}, m.display_name || '(no name yet)'),
     m.product_code ? h('div', { class: 'pdp-code' }, m.product_code) : null));
+  // Edit and Remove at the top (B, 24 Nov: "no options to delete or modify this entry" - they were below the fold).
+  const archiveModel = async () => { if (confirm('Remove this car from your garage?\n\nIt is archived, not deleted: you can bring it back any time from Garage → Archived.')) { await store.archive('models', modelId); toast('Removed. Bring it back from Garage → Archived.', 3500); location.hash = '#/'; autoSyncSoon(); } };
+  if (!m.deleted_at) v.append(h('div', { class: 'pdp-actions' },
+    h('button', { type: 'button', class: 'quiet small', onclick: () => { const d = $('#pdpDetails'); if (d) { d.scrollIntoView({ behavior: 'smooth', block: 'start' }); setTimeout(() => d.querySelector('input')?.focus({ preventScroll: true }), 450); } } }, icon('edit'), 'Edit details'),
+    h('button', { type: 'button', class: 'ghost small', onclick: archiveModel }, icon('trash'), 'Remove')));
   if (m.deleted_at) v.append(h('div', { class: 'banner warn' }, h('div', { class: 'hd' }, 'Archived: hidden from your garage.'),
     h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: restore }, 'Restore to garage')));
   async function restore() { await store.update('models', modelId, { deleted_at: '' }); await store.logChange('models', modelId, 'deleted_at', m.deleted_at, '', 'restored in app'); toast('Restored ✓'); route(); autoSyncSoon(); }
@@ -1372,7 +1379,7 @@ async function renderItem(v, modelId) {
   const f = { display_name: m.display_name || '', brand_id: m.brand_id || '', scale_id: m.scale_id || '', product_code: m.product_code || '', variant: m.variant || '', series: m.series || '', notes: m.notes || '', barcode: bc0?.value_raw || '' };
   let productDirty = false;
   const set = (k) => (e) => { f[k] = e.target.value; productDirty = true; };
-  const form = h('div', { class: 'card' }, h('h3', {}, 'Details'));
+  const form = h('div', { class: 'card', id: 'pdpDetails' }, h('h3', {}, 'Details'));
   const field = (label, el) => form.append(h('label', { class: 'f' }, label), el);
   field('Name', h('input', { value: f.display_name, oninput: set('display_name') }));
   field('Brand', h('select', { onchange: set('brand_id') }, h('option', { value: '' }, '—'), ref.brands.map(b => h('option', { value: b.brand_id, selected: b.brand_id === f.brand_id ? true : undefined }, b.name + (b.record_status === 'needs_review' ? ' (needs review)' : '')))));
@@ -1471,7 +1478,7 @@ async function renderItem(v, modelId) {
     h('dt', {}, 'Sync'), h('dd', {}, rec.dirty ? 'Waiting to sync' : 'Synced'),
     h('dt', {}, 'ID'), h('dd', { class: 'muted' }, m.model_id))));
   v.append(m.deleted_at ? h('button', { class: 'wide', onclick: restore }, 'Restore to garage')
-    : h('button', { class: 'ghost wide', onclick: async () => { if (confirm('Archive this model? It is hidden from your garage, never deleted, and can be restored from Garage → Archived.')) { await store.archive('models', modelId); toast('Archived. Restore it from Garage → Archived.', 3500); location.hash = '#/'; autoSyncSoon(); } } }, 'Archive'));
+    : h('button', { class: 'ghost wide', onclick: archiveModel }, 'Remove from garage'));
 }
 
 // ---------- Export downloads ----------
