@@ -189,7 +189,7 @@ def main():
             pick('Box front', front); page.wait_for_selector('text=Box front ✓')
             pick('Box rear', rear); page.wait_for_selector('text=Box rear ✓')
             if sealed:
-                page.get_by_text("Sealed box").click()
+                page.get_by_role('button', name='Sealed box', exact=True).click()
                 page.wait_for_selector('text=Box art (sealed box)')
                 pick('Box art (sealed box)', art); page.wait_for_selector('text=Box art (sealed box) ✓')
             page.wait_for_timeout(250)

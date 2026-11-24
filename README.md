@@ -5,7 +5,10 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.2.0
+## Status: Stage 1 (quick-capture slice), version s1-0.3.0
+
+**s1-0.3.0 (24 Nov 2026): experience-audit P1 fixes.** "Sealed box / Car visible" toggle is remembered; Save is always visible above the bottom menu; the barcode is read from the box-rear photo when possible; search matches words in any order and ignores punctuation (also searches scale, variant, series, notes, storage); pages open at the top and Back returns to the same place in the Garage; barcodes can be corrected, photos relabelled, made main or removed, and archived models restored; portrait 3:4 Garage tiles; one row of filters showing only those with items; header and bottom menu fully opaque.
+
 
 **s1-0.2.0 (24 Nov 2026): experience-audit P0 fixes.** Possible matches can be opened or added as another copy (never merged automatically); the header counts boxes and says "Sign in to sync" when needed; warnings and errors no longer look like success; typed edits on the item page are saved before leaving; the capture timer counts only time spent on each box; a box in progress survives a tab reload; a hidden box-art photo is no longer saved.
 
@@ -21,6 +24,7 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - `node tests/md5.test.mjs` — md5 against node:crypto.
 - `node tests/timing.test.mjs` — capture timer.
 - `python3 tests/e2e_p0.py` — headless checks for the s1-0.2.0 fixes (fake Google).
+- `python3 tests/e2e_p1.py` — headless checks for the s1-0.3.0 fixes (fake Google; needs `pip install python-barcode`).
 - `python3 tests/e2e_mock.py` — headless Chrome against a **fake** in-memory Google Drive/Sheets.
 
 **A feature counts as passed only after testing on the owner's phone with the real Google account.**

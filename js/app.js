@@ -3,7 +3,7 @@ import * as store from './store.js';
 import { blobs, meta, requestPersistentStorage, storageEstimate } from './idb.js';
 import { preparePhoto, pickPhoto } from './images.js';
 import { liveScan, scanPhoto } from './barcode.js';
-import { codeCmp, barcodeCmp, gtinCheckOk, assignNamespace, duplicateCheckStatus, checkDuplicate } from './rules.js';
+import { codeCmp, barcodeCmp, gtinCheckOk, assignNamespace, duplicateCheckStatus, checkDuplicate, searchMatch } from './rules.js';
 import { SHOT_ROLES, CONDITIONS, SCHEMA_VERSION } from './schema.js';
 import { syncNow, isSyncing } from './sync.js';
 import { getClientId, setClientId, hasToken, signIn, tokenMinutesLeft } from './google.js';
@@ -11,7 +11,7 @@ import { getConfig, seedLocal } from './setup.js';
 import { newId } from './ids.js';
 import { newTimer, touch, seconds } from './timing.js';
 
-export const APP_VERSION = 's1-0.2.0';
+export const APP_VERSION = 's1-0.3.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 
@@ -76,6 +76,7 @@ async function refreshStatus() {
   else { txt = 'Nothing to sync'; cls = 'muted'; }
   pill.textContent = txt; pill.style.color = `var(--${cls})`;
   pill.setAttribute('aria-label', `${txt}. Tap to sync.`);
+  $('header.top').classList.toggle('compact', txt.length > 16); // e.g. "Sign in to sync · 3 boxes"
 }
 
 let lastSyncMsg = '';
@@ -103,12 +104,18 @@ let routeSeq = 0;
 // redraw, so typed edits are never thrown away (audit finding I1).
 let leaveHooks = [];
 let itemDirty = () => false;
+// Scroll (audit I3): a new page opens at the top; coming back to the Garage restores where you were.
+let lastHash = null, garageScroll = 0;
+const isGarage = (hh) => hh === '#/' || hh === '' || hh === '#';
 async function route() {
+  const prevHash = lastHash;
   const hooks = leaveHooks; leaveHooks = []; itemDirty = () => false;
   for (const fn of hooks) {
     try { await fn(); } catch (e) { console.error(e); toast(`Could not save your changes: ${e.message}`, 4000, 'bad'); }
   }
   const hash = location.hash || '#/';
+  if (prevHash !== null && prevHash !== hash && isGarage(prevHash)) garageScroll = window.scrollY;
+  lastHash = hash;
   document.querySelectorAll('nav.bottom a').forEach(a => a.classList.toggle('on', hash.startsWith(a.getAttribute('href')) && (a.getAttribute('href') !== '#/' || hash === '#/')));
   // Render into a fresh container and swap it in only if no newer navigation started meanwhile
   // (prevents two overlapping renders from mixing their content).
@@ -123,7 +130,10 @@ async function route() {
     v.append(h('div', { class: 'banner bad' }, `Something went wrong: ${e.message}`));
     console.error(e);
   }
-  if (token === routeSeq) view().replaceChildren(v);
+  if (token === routeSeq) {
+    view().replaceChildren(v);
+    if (prevHash !== hash) window.scrollTo(0, isGarage(hash) && prevHash?.startsWith('#/item/') ? garageScroll : 0);
+  }
   refreshStatus();
 }
 
@@ -131,6 +141,8 @@ async function route() {
 // Garage list
 // =====================================================================
 let garageFilter = 'all', garageSearch = '';
+let selectedPhoto = { model: null, id: null };
+
 async function renderGarage(v) {
   const config = await getConfig();
   if (!getClientId() || !config) {
@@ -140,35 +152,43 @@ async function renderGarage(v) {
   const brandName = Object.fromEntries(ref.brands.map(b => [b.brand_id, b.name]));
   const scaleLabel = Object.fromEntries(ref.scales.map(s => [s.scale_id, s.label]));
   const active = models.filter(r => !r.data.deleted_at);
+  const archived = models.filter(r => r.data.deleted_at);
   const copies = inventory.filter(i => i.ownership_status === 'Owned');
-  v.append(h('div', { class: 'row' }, h('h2', {}, 'My Garage'), h('div', { class: 'muted', style: 'text-align:right' }, `${active.length} models · ${copies.length} copies`)));
-  const search = h('input', { type: 'search', placeholder: 'Search name, code, barcode, brand…', value: garageSearch, oninput: (e) => { garageSearch = e.target.value; draw(); } });
+  v.append(h('div', { class: 'row' }, h('h2', {}, 'My Garage'), h('div', { class: 'muted', style: 'text-align:right' }, `${plural(active.length, 'model', 'models')} · ${plural(copies.length, 'copy', 'copies')}`)));
+  const search = h('input', { type: 'search', placeholder: 'Search name, code, barcode, brand, scale…', value: garageSearch, oninput: (e) => { garageSearch = e.target.value; draw(); } });
   v.append(search);
-  const filters = [['all', 'All'], ['quick', 'Quick'], ['review', 'Needs review'], ['pending', 'Waiting to sync'], ['clash', 'Clashes']];
-  const chips = h('div', { class: 'chips', style: 'margin:10px 0' }, filters.map(([k, label]) => h('button', { class: `chip ${garageFilter === k ? 'on' : ''}`, onclick: () => { garageFilter = k; route(); } }, label)));
+  const photosByModel = new Map();
+  photos.forEach(p => { if (p.model_id) (photosByModel.get(p.model_id) || photosByModel.set(p.model_id, []).get(p.model_id)).push(p); });
+  const isPending = (r) => r.dirty || (photosByModel.get(r.data.model_id) || []).some(p => !p.original_file_id);
+  // One scrolling row of filters (audit G5); a filter only appears when it has something in it.
+  const n = { review: active.filter(r => r.data.namespace_status === 'needs_review').length, pending: active.filter(isPending).length, clash: active.filter(r => r.conflict).length, archived: archived.length };
+  if (n[garageFilter] === 0) garageFilter = 'all'; // e.g. after restoring the last archived model, don't leave an empty list
+  const filters = [['all', 'All'], ['quick', 'Quick'], ['review', `Needs review (${n.review})`, n.review], ['pending', `Waiting to sync (${n.pending})`, n.pending], ['clash', `Clashes (${n.clash})`, n.clash], ['archived', `Archived (${n.archived})`, n.archived]]
+    .filter(([k, , c]) => c === undefined || c > 0 || garageFilter === k);
+  const chips = h('div', { class: 'chips scroll', style: 'margin:10px 0' }, filters.map(([k, label]) => h('button', { class: `chip ${garageFilter === k ? 'on' : ''}`, onclick: () => { garageFilter = k; route(); } }, label)));
   v.append(chips);
   const grid = h('div', { class: 'grid' });
   v.append(grid);
-  const photosByModel = new Map();
-  photos.forEach(p => { if (p.model_id) (photosByModel.get(p.model_id) || photosByModel.set(p.model_id, []).get(p.model_id)).push(p); });
+  const storageByModel = new Map();
+  inventory.forEach(i => { if (i.storage_location) storageByModel.set(i.model_id, `${storageByModel.get(i.model_id) || ''} ${i.storage_location}`); });
   const barcodesByModel = new Map();
   ids.forEach(i => { if (i.identifier_type === 'barcode') (barcodesByModel.get(i.model_id) || barcodesByModel.set(i.model_id, []).get(i.model_id)).push(i.value_raw, i.value_cmp); });
 
   async function draw() {
     grid.replaceChildren();
     const q = garageSearch.trim().toLowerCase();
-    let list = active.slice().sort((a, b) => String(b.data.created_at).localeCompare(String(a.data.created_at)));
+    let list = (garageFilter === 'archived' ? archived : active).slice().sort((a, b) => String(b.data.created_at).localeCompare(String(a.data.created_at)));
     list = list.filter(r => {
       const m = r.data;
       if (garageFilter === 'quick' && m.completeness_status !== 'quick') return false;
       if (garageFilter === 'review' && m.namespace_status !== 'needs_review') return false;
-      if (garageFilter === 'pending' && !r.dirty && !(photosByModel.get(m.model_id) || []).some(p => !p.original_file_id)) return false;
+      if (garageFilter === 'pending' && !isPending(r)) return false;
       if (garageFilter === 'clash' && !r.conflict) return false;
       if (!q) return true;
-      const hay = [m.display_name, m.product_code, brandName[m.brand_id], m.printed_brand_text, ...(barcodesByModel.get(m.model_id) || [])].join(' ').toLowerCase();
-      return hay.includes(q) || (q.replace(/\D/g, '').length >= 8 && hay.includes(barcodeCmp(q)));
+      const hay = [m.display_name, m.product_code, brandName[m.brand_id], m.printed_brand_text, scaleLabel[m.scale_id], m.variant, m.series, m.notes, storageByModel.get(m.model_id), ...(barcodesByModel.get(m.model_id) || [])].filter(Boolean).join(' ');
+      return searchMatch(q, hay);
     });
-    if (!list.length) { grid.append(h('p', { class: 'muted' }, active.length ? 'Nothing matches.' : 'No models yet. Tap ＋ Add to catalogue your first box.')); return; }
+    if (!list.length) { grid.append(h('p', { class: 'muted' }, active.length || archived.length ? 'Nothing matches.' : 'No models yet. Tap ＋ Add to catalogue your first box.')); return; }
     for (const r of list.slice(0, 300)) {
       const m = r.data;
       const ph = (photosByModel.get(m.model_id) || []).find(p => p.photo_id === m.primary_photo_id) || (photosByModel.get(m.model_id) || [])[0];
@@ -181,7 +201,8 @@ async function renderGarage(v) {
           h('div', { class: 'nm' }, m.display_name || '(no name yet)'),
           h('div', { class: 'sub' }, [brandName[m.brand_id] || m.printed_brand_text || 'Brand?', scaleLabel[m.scale_id], m.product_code].filter(Boolean).join(' · ')),
           h('div', { class: 'badges' },
-            m.completeness_status === 'quick' ? h('span', { class: 'b mute' }, 'Quick') : h('span', { class: 'b ok' }, 'Complete'),
+            m.completeness_status === 'complete' ? h('span', { class: 'b ok' }, 'Complete') : null, // "Quick" is the normal case, so no badge (G6)
+            m.deleted_at ? h('span', { class: 'b mute' }, 'Archived') : null,
             nCopies > 1 ? h('span', { class: 'b info' }, `${nCopies} copies`) : null,
             m.namespace_status === 'needs_review' ? h('span', { class: 'b warn' }, 'Needs review') : null,
             (r.dirty || pendingPhotos) ? h('span', { class: 'b warn' }, 'Waiting to sync') : null,
@@ -198,7 +219,8 @@ async function renderGarage(v) {
 // =====================================================================
 let cap = null;
 function freshCapture(keep = {}) {
-  return { modelId: newId('models'), inventoryId: newId('inventory'), photos: {}, sealed: false, brandId: keep.brandId || '', scaleId: keep.scaleId || '', barcode: null, name: '', code: '', count: keep.count || 0, timer: newTimer() };
+  // "Sealed" is remembered like brand and scale (audit C1): most of the collection is sealed boxes.
+  return { modelId: newId('models'), inventoryId: newId('inventory'), photos: {}, sealed: localStorage.getItem('smg.lastSealed') === 'yes', brandId: keep.brandId || '', scaleId: keep.scaleId || '', barcode: null, name: '', code: '', count: keep.count || 0, timer: newTimer() };
 }
 const capTouch = () => { if (cap) touch(cap.timer); };
 
@@ -261,9 +283,11 @@ async function renderAdd(v) {
   }
   if (roles.length < 3) shots.append(h('div', {}));
   v.append(shots);
-  v.append(h('label', { class: 'row', style: 'margin-top:8px;font-weight:600' },
-    h('input', { type: 'checkbox', checked: cap.sealed, style: 'width:auto;min-height:auto;flex:0', onchange: (e) => { cap.sealed = e.target.checked; capTouch(); saveDraftSoon(); route(); } }),
-    h('span', {}, 'Sealed box — car can\'t be seen (adds a box-art photo)')));
+  const setSealed = (yes) => { cap.sealed = yes; localStorage.setItem('smg.lastSealed', yes ? 'yes' : 'no'); capTouch(); saveDraftSoon(); route(); };
+  v.append(h('div', { class: 'chips', style: 'margin-top:10px', role: 'group', 'aria-label': 'Box type' },
+    h('button', { type: 'button', class: `chip ${cap.sealed ? 'on' : ''}`, 'aria-pressed': cap.sealed ? 'true' : 'false', onclick: () => setSealed(true) }, 'Sealed box'),
+    h('button', { type: 'button', class: `chip ${cap.sealed ? '' : 'on'}`, 'aria-pressed': cap.sealed ? 'false' : 'true', onclick: () => setSealed(false) }, 'Car visible')));
+  v.append(h('div', { class: 'muted', style: 'margin-top:4px' }, cap.sealed ? 'Sealed: add a box-art photo showing the car (optional).' : 'Car visible through the box: no box-art photo needed.'));
   const busy = h('p', { class: 'muted', id: 'capBusy' });
   v.append(busy);
 
@@ -310,7 +334,7 @@ async function renderAdd(v) {
     const b = cap.barcode;
     if (!b) { bcInfo.textContent = ''; return; }
     if (b.source === 'typed' && b.checkOk === false) { bcInfo.textContent = '⚠ These digits don\'t add up (check digit). Please re-check, or scan instead.'; bcInfo.style.color = 'var(--warn)'; }
-    else { bcInfo.textContent = b.source === 'scan' ? `✓ Scanned ${b.format || ''}` : (b.checkOk ? '✓ Check digit OK' : ''); bcInfo.style.color = 'var(--ok)'; }
+    else { bcInfo.textContent = b.source === 'scan' ? `✓ Scanned ${b.format || ''}` : b.source === 'rear_photo' ? '✓ Read from the box rear photo. Check it matches the box.' : (b.checkOk ? '✓ Check digit OK' : ''); bcInfo.style.color = 'var(--ok)'; }
   }
   updateBc();
   async function doLiveScan() {
@@ -399,9 +423,11 @@ async function renderAdd(v) {
   updateDup();
 
   // --- Save ---
+  // Always-visible Save bar (audit C3): no scrolling down to save each box.
   const missing = [!cap.photos.box_front && 'box front photo', !cap.photos.box_rear && 'box rear photo', !cap.brandId && 'brand', !cap.scaleId && 'scale'].filter(Boolean);
-  v.append(h('div', { class: 'muted', style: 'margin-top:14px' }, missing.length ? `Still needed: ${missing.join(', ')}.` : 'Ready to save.'));
-  v.append(h('button', { class: 'wide', style: 'margin-top:8px', disabled: missing.length ? true : undefined, onclick: () => saveCapture() }, 'Save & next box'));
+  v.append(h('div', { class: 'savebar' },
+    h('div', { class: 'need' }, missing.length ? `Still needed: ${missing.join(', ')}` : 'Ready to save'),
+    h('button', { class: 'save', disabled: missing.length ? true : undefined, onclick: () => saveCapture() }, 'Save & next box')));
   v.append(h('button', { class: 'wide ghost', style: 'margin-top:8px', onclick: async () => { if (confirm('Discard this box?')) { await clearDraft(); cap = freshCapture({ brandId: cap.brandId, scaleId: cap.scaleId, count: cap.count }); route(); } } }, 'Discard'));
 
   async function takePhoto(role) {
@@ -416,6 +442,15 @@ async function renderAdd(v) {
       if (old?.url) URL.revokeObjectURL(old.url);
       if (old?.draftStored) await dropDraftPhoto(old.photoId);
       cap.photos[role] = { photoId: newId('photos'), prep, url: URL.createObjectURL(prep.thumb), capturedAt: new Date().toISOString() };
+      // The rear of the box usually carries the barcode: try to read it from the photo just taken (audit C2).
+      // A scanned or typed barcode is never overwritten.
+      if (role === 'box_rear' && (!cap.barcode || cap.barcode.source === 'rear_photo')) {
+        busy.textContent = 'Looking for a barcode in the photo…';
+        try {
+          const r = await scanPhoto(f);
+          if (r) { const raw = String(r.value).trim(); cap.barcode = { raw, cmp: barcodeCmp(raw), format: r.format, source: 'rear_photo', checkOk: gtinCheckOk(raw) }; }
+        } catch (e) { console.warn('barcode from rear photo:', e); }
+      }
       await saveDraft();
     } catch (e) { busy.textContent = `Could not read that photo: ${e.message}`; return; }
     route();
@@ -495,18 +530,44 @@ async function renderItem(v, modelId) {
   const inv = (await store.list('inventory')).filter(i => i.model_id === modelId);
   const photos = (await store.list('photos')).filter(p => p.model_id === modelId);
   const idfs = (await store.list('product_identifiers')).filter(i => i.model_id === modelId);
-  v.append(h('a', { href: '#/' }, '← Garage'));
+  v.append(h('a', { href: '#/', class: 'back' }, '← Garage'));
   v.append(h('h2', {}, m.display_name || '(no name yet)'));
+  if (m.deleted_at) v.append(h('div', { class: 'banner warn' }, h('div', { class: 'hd' }, 'Archived: hidden from your garage.'),
+    h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: restore }, 'Restore to garage')));
+  async function restore() { await store.update('models', modelId, { deleted_at: '' }); await store.logChange('models', modelId, 'deleted_at', m.deleted_at, '', 'restored in app'); toast('Restored ✓'); route(); autoSyncSoon(); }
   if (rec.conflict) renderConflict(v, rec);
   if (rec.lastError) v.append(h('div', { class: 'banner bad' }, `Last sync error: ${rec.lastError}`));
 
+  // Photos (audit I2): tap a photo to change its label, make it the main photo, or remove it.
+  if (selectedPhoto.model !== modelId) selectedPhoto = { model: modelId, id: null };
   const gal = h('div', { class: 'gallery' });
   for (const p of photos.sort((a, b) => Object.keys(SHOT_ROLES).indexOf(a.shot_role) - Object.keys(SHOT_ROLES).indexOf(b.shot_role))) {
-    const img = h('img', { alt: '' });
+    const img = h('img', { alt: SHOT_ROLES[p.shot_role]?.label || 'Photo' });
     photoUrl(p, 'display').then(u => { if (u) img.src = u; });
-    gal.append(h('figure', {}, img, h('figcaption', {}, `${SHOT_ROLES[p.shot_role]?.label || p.shot_role}${p.original_file_id ? '' : ' · waiting'}`)));
+    const main = p.photo_id === m.primary_photo_id;
+    gal.append(h('button', { type: 'button', class: `fig ${selectedPhoto.id === p.photo_id ? 'sel' : ''}`, 'aria-label': `Photo options: ${SHOT_ROLES[p.shot_role]?.label || p.shot_role}`,
+      onclick: () => { selectedPhoto.id = selectedPhoto.id === p.photo_id ? null : p.photo_id; route(); } }, img,
+      h('span', { class: 'cap' }, `${main ? '★ ' : ''}${SHOT_ROLES[p.shot_role]?.label || p.shot_role}${p.original_file_id ? '' : ' · waiting'}`)));
   }
   v.append(gal);
+  const sp = photos.find(p => p.photo_id === selectedPhoto.id);
+  if (sp) {
+    const isMain = sp.photo_id === m.primary_photo_id;
+    v.append(h('div', { class: 'card' }, h('h3', {}, 'This photo'),
+      h('label', { class: 'f' }, 'Label'),
+      h('select', { onchange: async (e) => { const role = e.target.value; await store.update('photos', sp.photo_id, { shot_role: role, photo_type: SHOT_ROLES[role].type }); await store.logChange('photos', sp.photo_id, 'shot_role', sp.shot_role, role, 'relabelled in app'); toast('Label changed ✓'); route(); autoSyncSoon(); } },
+        Object.entries(SHOT_ROLES).map(([k, r]) => h('option', { value: k, selected: k === sp.shot_role ? true : undefined }, r.label))),
+      h('div', { class: 'row', style: 'margin-top:12px' },
+        h('button', { type: 'button', class: 'quiet', disabled: isMain ? true : undefined, onclick: async () => { await store.update('models', modelId, { primary_photo_id: sp.photo_id }); await store.logChange('models', modelId, 'primary_photo_id', m.primary_photo_id, sp.photo_id, 'main photo changed in app'); toast('Main photo set ✓'); route(); autoSyncSoon(); } }, isMain ? '★ Main photo' : 'Make main photo'),
+        h('button', { type: 'button', class: 'ghost', onclick: async () => {
+          if (!confirm('Remove this photo from the model? (It is hidden; a copy already in Drive stays there.)')) return;
+          await store.archive('photos', sp.photo_id);
+          if (!sp.original_file_id) for (const vv of ['original', 'display', 'thumb']) await blobs.remove(`${sp.photo_id}:${vv}`);
+          if (isMain) { const next = photos.find(p => p.photo_id !== sp.photo_id && p.shot_role === 'box_front') || photos.find(p => p.photo_id !== sp.photo_id); await store.update('models', modelId, { primary_photo_id: next?.photo_id || '' }); }
+          await store.logChange('photos', sp.photo_id, 'deleted_at', '', 'removed', 'photo removed in app');
+          selectedPhoto.id = null; toast('Photo removed'); route(); autoSyncSoon();
+        } }, 'Remove photo'))));
+  }
   const roleSel = h('select', { style: 'flex:2' }, Object.entries(SHOT_ROLES).map(([k, r]) => h('option', { value: k }, r.label)));
   v.append(h('div', { class: 'row', style: 'margin-top:8px' }, roleSel, h('button', { class: 'quiet', style: 'flex:1', onclick: async () => {
     const [f] = await pickPhoto({ camera: true }); if (!f) return;
@@ -520,7 +581,9 @@ async function renderItem(v, modelId) {
 
   // Editable product fields
   // Typed edits are saved before any navigation or redraw (audit I1): see leaveHooks in route().
-  const f = { display_name: m.display_name || '', brand_id: m.brand_id || '', scale_id: m.scale_id || '', product_code: m.product_code || '', variant: m.variant || '', series: m.series || '', notes: m.notes || '' };
+  const barcodes = idfs.filter(i => i.identifier_type === 'barcode');
+  const bc0 = barcodes[0];
+  const f = { display_name: m.display_name || '', brand_id: m.brand_id || '', scale_id: m.scale_id || '', product_code: m.product_code || '', variant: m.variant || '', series: m.series || '', notes: m.notes || '', barcode: bc0?.value_raw || '' };
   let productDirty = false;
   const set = (k) => (e) => { f[k] = e.target.value; productDirty = true; };
   const form = h('div', { class: 'card' }, h('h3', {}, 'Product'));
@@ -532,16 +595,33 @@ async function renderItem(v, modelId) {
   field('Variant / colour', h('input', { value: f.variant, oninput: set('variant') }));
   field('Series', h('input', { value: f.series, oninput: set('series') }));
   field('Notes', h('textarea', { oninput: set('notes') }, f.notes));
-  if (idfs.length) form.append(h('p', { class: 'muted' }, `Barcode: ${idfs.filter(i => i.identifier_type === 'barcode').map(i => i.value_raw).join(', ')}`));
+  // Barcode can be corrected (audit I2), with the same check-digit warning as quick capture.
+  const bcWarn = h('div', { class: 'muted' });
+  const bcCheck = () => { const ok = gtinCheckOk(f.barcode); bcWarn.textContent = f.barcode.trim() && ok === false ? '⚠ These digits don\'t add up (check digit). Please re-check.' : ''; bcWarn.style.color = 'var(--warn)'; };
+  field('Barcode', h('input', { inputmode: 'numeric', value: f.barcode, placeholder: 'None yet', oninput: (e) => { set('barcode')(e); bcCheck(); } }));
+  form.append(bcWarn); bcCheck();
+  if (barcodes.length > 1) form.append(h('p', { class: 'muted' }, `Other barcodes: ${barcodes.slice(1).map(i => i.value_raw).join(', ')}`));
+  async function saveBarcode() {
+    const nb = f.barcode.trim(), ob = bc0?.value_raw || '';
+    if (nb === ob) return;
+    const ck = gtinCheckOk(nb), fields = { value_raw: nb, value_cmp: barcodeCmp(nb), check_digit_ok: ck === null ? '' : (ck ? 'yes' : 'no'), barcode_format: '', source: 'typed' };
+    if (bc0 && nb) await store.update('product_identifiers', bc0.identifier_id, fields);
+    else if (bc0) await store.archive('product_identifiers', bc0.identifier_id);
+    else await store.create('product_identifiers', { model_id: modelId, identifier_type: 'barcode', ...fields });
+    await store.logChange('models', modelId, 'barcode', ob, nb, 'edited in app');
+  }
   async function saveProduct() {
+    await saveBarcode();
     const brand = ref.brands.find(b => b.brand_id === f.brand_id);
     const ns = assignNamespace(brand, null);
-    const patch = { ...f, product_code: f.product_code.trim(), product_code_cmp: codeCmp(f.product_code), printed_brand_text: m.printed_brand_text || brand?.name || '',
+    const { barcode: _bc, ...fields } = f;
+    const patch = { ...fields, product_code: f.product_code.trim(), product_code_cmp: codeCmp(f.product_code), printed_brand_text: m.printed_brand_text || brand?.name || '',
       code_namespace_type: ns.type, code_namespace_id: ns.id, namespace_status: ns.status };
     patch.duplicate_check_status = duplicateCheckStatus(patch);
     for (const k of ['brand_id', 'product_code']) if (String(m[k] || '') !== String(patch[k] || '')) await store.logChange('models', modelId, k, m[k], patch[k], 'edited in app');
     await store.update('models', modelId, patch);
     Object.assign(m, patch); productDirty = false;
+    if (bc0) bc0.value_raw = f.barcode.trim();
   }
   form.append(h('div', { class: 'row', style: 'margin-top:12px' },
     h('button', { onclick: async () => { await saveProduct(); toast('Saved ✓'); route(); autoSyncSoon(); } }, 'Save'),
@@ -599,7 +679,8 @@ async function renderItem(v, modelId) {
     h('dt', {}, 'Added'), h('dd', {}, new Date(m.created_at).toLocaleString()),
     h('dt', {}, 'Sync'), h('dd', {}, rec.dirty ? 'Waiting to sync' : 'Synced'),
     h('dt', {}, 'ID'), h('dd', { class: 'muted' }, m.model_id)));
-  v.append(h('button', { class: 'ghost wide', onclick: async () => { if (confirm('Archive this model? (It is hidden, never deleted.)')) { await store.archive('models', modelId); location.hash = '#/'; autoSyncSoon(); } } }, 'Archive'));
+  v.append(m.deleted_at ? h('button', { class: 'wide', onclick: restore }, 'Restore to garage')
+    : h('button', { class: 'ghost wide', onclick: async () => { if (confirm('Archive this model? It is hidden from your garage, never deleted, and can be restored from Garage → Archived.')) { await store.archive('models', modelId); toast('Archived. Restore it from Garage → Archived.', 3500); location.hash = '#/'; autoSyncSoon(); } } }, 'Archive'));
 }
 
 function renderConflict(v, rec) {

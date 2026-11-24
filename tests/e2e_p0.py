@@ -88,9 +88,9 @@ def main():
 
         # C6: box art taken then Sealed unticked -> box art not saved
         start_box(brand='Pop Race')
-        page.locator('input[type=checkbox]').click(); page.wait_for_selector('text=Box art (sealed box)')
+        page.get_by_role('button', name='Sealed box', exact=True).click(); page.wait_for_selector('text=Box art (sealed box)')
         pick('Box art (sealed box)', f'{tmp}/c.jpg'); page.wait_for_selector('text=Box art (sealed box) ✓')
-        page.locator('input[type=checkbox]').click(); page.wait_for_timeout(300)
+        page.get_by_role('button', name='Car visible', exact=True).click(); page.wait_for_timeout(300)
         page.fill('input[placeholder^="e.g. Range Rover"]', 'Unsealed after art')
         page.get_by_role('button', name='Save & next box').click(); page.wait_for_selector('.toast'); page.wait_for_timeout(400)
         roles = ev("""(async () => { const s = await import('./js/store.js'); const ms = await s.list('models');
