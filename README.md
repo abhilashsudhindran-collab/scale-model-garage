@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.17.4
+## Status: Stage 1 (quick-capture slice), version s1-0.17.5
+
+**s1-0.17.5 (24 Nov 2026): button look rule (B).** Greyed out = can't work right now (syncing, offline); quiet outline = works but not needed (Sync when all synced still pulls changes from another device; Save with nothing changed); bold = something for you to do ("Sync now · 3 boxes", Save after a change, Save & next once a name is typed). Settings has one Sync button (the second one in the Google account card is gone); signed in, the Client ID folds under "Change Client ID"; signed out, the page has one bold button, Sign in & set up. "0 photos not uploaded" is no longer shown.
 
 **s1-0.17.4 (24 Nov 2026): Gemini's "Item" column and assortment codes.** B's second real reply named its first column "Item" (read as the code column, so no code was taken), and gave the Hot Wheels assortment code HRT81 for two different cars. "Item" is now the box column; "(Asst. …)" is left out of a code; a code given for two boxes in one answer is never pre-filled (it would make different cars look like duplicates) and is explained in a note. Prompt `names-v5` says not to use assortment or case codes. Unsaved suggestions are read again once.
 
