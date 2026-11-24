@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.15.0
+## Status: Stage 1 (quick-capture slice), version s1-0.15.1
+
+**s1-0.15.1 (24 Nov 2026): fixes from B's first phone use of s1-0.15.0.** (1) In a mixed-brand box, after Chrome reloaded the page, a car carried an old brand and was not asked: now, in a per-car box, a brand or scale only counts once picked for that car after its photos. (2) Photo run: tap a taken photo to retake it; "Discard this car" drops the unsaved car; a note explains a car kept across a reload. (3) Straighten: bold accent crosshair with a white outline and a centre gap; the magnifier follows the finger, offset towards the middle of the photo, so it never covers another corner.
 
 **s1-0.15.0 (24 Nov 2026): crop / straighten (D14).** On a car's page, tap a photo → Crop / straighten: drag four corners onto the box (magnifier while dragging; crossed corners shown in red and refused). The app makes a straight copy with a perspective transform written in plain JavaScript (₹0, no OpenCV): `cropped` (≤1600 px, uploaded to Drive as its own file) and a small copy for tiles. The original is never changed; corners are saved (crop_corners) so it can be adjusted or undone. If the full photo was freed from the phone after sync, it is fetched from Drive. Other devices download the straightened copy.
 
@@ -64,6 +66,7 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - `python3 tests/e2e_restore.py` — restore from a backup, end to end (refusal, safety backup, old sheet kept, second device).
 - `python3 tests/e2e_offline.py` — the app opens with the network cut.
 - `node tests/crop.test.mjs` — straightening maths (homography, corner order, warp).
+- `python3 tests/e2e_runfix.py` — mixed box after a reload, retake, discard.
 - `python3 tests/e2e_crop.py` — crop / straighten end to end.
 - `node tests/ai.test.mjs` — AI answer parser (copy-paste names).
 - `python3 tests/e2e_p5.py` — headless checks for s1-0.7.0 (Dashboard, Name tab).
