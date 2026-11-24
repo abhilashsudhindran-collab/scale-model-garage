@@ -16,8 +16,11 @@ async function makeCopy(config, kind, now) {
   const stamp = d.toISOString().slice(0, 10) + (kind === 'manual' ? ` ${d.toTimeString().slice(0, 5).replace(':', '')}` : '');
   const folder = config.folders?.[`06_BACKUPS/${kind.toUpperCase()}`];
   if (!folder) throw new Error('Backup folder missing (run Sync once to finish setup)');
-  const f = await drive.copy(config.workbookId, `${WORKBOOK_NAME} backup ${kind} ${stamp}`, folder);
-  await drive.update(f.id, { appProperties: { [TAG]: kind } });
+  // Tagged as a backup in the copy request itself, and the main-sheet tag (smgRole) removed, so a copy
+  // can never be mistaken for the main sheet, even for a moment.
+  const tags = { [TAG]: kind, smgRole: null };
+  const f = await drive.copy(config.workbookId, `${WORKBOOK_NAME} backup ${kind} ${stamp}`, folder, tags);
+  await drive.update(f.id, { appProperties: tags });
   return f.id;
 }
 

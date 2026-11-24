@@ -69,7 +69,7 @@ def main():
         sc = [r.inner_text().replace('\n', ' ') for r in page.query_selector_all('.card:has(h3:text("By scale")) .barrow')]
         check(sc[0] == '1:64 4' and len(sc) == 3, f'by scale ({sc})')
         tiles = [t.inner_text().replace('\n', ' ') for t in page.query_selector_all('.boxtile')]
-        check(tiles == ['3 3 cars', '12 2 cars', '30 1 car'], f'storage boxes in number order ({tiles})')
+        check(tiles == ['3 Box 3', '2 Box 12', '1 Box 30'], f'storage boxes in number order, count inside ({tiles})')
         check(page.is_visible('text=1 box has no storage box yet'), 'boxes without a storage box are counted')
         check(not page.is_visible('text=Last 7 days'), 'no "last 7 days" chart (B: not useful)')
         st = [r.inner_text().replace('\n', ' ') for r in page.query_selector_all('.card:has(h3:text("Box state")) .barrow')]
@@ -79,16 +79,25 @@ def main():
 
         # Taps lead to the matching lists
         page.evaluate('window.scrollTo(0, 0)')
-        page.locator('.boxtile', has_text='12').click(); page.wait_for_selector('.tile')
+        page.locator('.boxtile', has_text='Box 12').click(); page.wait_for_selector('.tile')
         names = [t.inner_text() for t in page.query_selector_all('.tile')]
         check(len(names) == 2 and all('Box 12' in n for n in names), f'tapping Box 12 shows only what is in Box 12 ({len(names)} tiles)')
         card = txt('.boxcard')
         check('📦 Box 12' in card and '2 cars inside · Bburago 2' in card, f'box card: label, count, brands ({card[:60]!r})')
         page.fill('input[aria-label="Box name"]', 'Le Mans racers'); page.get_by_role('button', name='Save name').click(); page.wait_for_timeout(600)
         check('Le Mans racers' in page.input_value('input[aria-label="Box name"]'), 'box name saved and shown')
+        page.locator('.boxcard .chip', has_text='L').first.click(); page.wait_for_timeout(500)
+        check('📦 Box 12 · L' in txt('.boxcard') and page.locator('.boxcard .chip.on').inner_text() == 'L', 'box size L set')
+        page.locator('.boxcard .chip', has_text='XL').click(); page.wait_for_timeout(500)
+        check(page.locator('.boxcard .chip.on').inner_text() == 'XL', 'box size changed to XL')
+        page.locator('.boxcard .chip', has_text='XL').click(); page.wait_for_timeout(500)
+        check(page.query_selector('.boxcard .chip.on') is None, 'tapping the chosen size again clears it')
+        page.locator('.boxcard .chip', has_text='L').first.click(); page.wait_for_timeout(500)
         page.screenshot(path=f'{SHOTS}/03-box12.png')
         page.goto(base + '#/dash'); page.wait_for_selector('.boxtile')
-        check('Le Mans racers' in page.locator('.boxtile', has_text='12').inner_text(), 'dashboard tile shows the box name')
+        t12 = page.locator('.boxtile', has_text='Box 12').inner_text().replace('\n', ' ')
+        check(t12.replace(' ', '') == '2LBox12LeMansracers', f'dashboard tile: count inside, size, number, name ({t12!r})')
+        page.locator('.card:has(.shelf)').screenshot(path=f'{SHOTS}/05-shelf.png')
         page.goto(base + '#/dash'); page.wait_for_selector('.boxtile')
         page.locator('.boxtile').first.click(); page.wait_for_selector('.tile')
         t3 = [t.inner_text() for t in page.query_selector_all('.tile')]
@@ -114,7 +123,7 @@ def main():
         check([g.split(' ·')[0] for g in groups] == ['1:64', '1:43', '1:18'], f'By scale groups in scale order ({groups})')
         page.get_by_role('button', name='By box', exact=True).click(); page.wait_for_timeout(300)
         groups = [g.inner_text() for g in page.query_selector_all('h3.group')]
-        check(groups[1].startswith('BOX 12 · LE MANS RACERS · 2 MODELS') and groups[-1].startswith('NO BOX YET'), f'By box headers carry box names ({groups})')
+        check(groups[1].startswith('BOX 12 · L · LE MANS RACERS · 2 MODELS') and groups[-1].startswith('NO BOX YET'), f'By box headers carry box names ({groups})')
         page.screenshot(path=f'{SHOTS}/04-bybox.png')
         page.locator('h3.group a', has_text='BOX 30').click(); page.wait_for_selector('.boxcard')
         check('Box 30' in txt('.boxcard') and len(page.query_selector_all('.tile')) == 1, 'tapping a box header opens that box')
@@ -130,7 +139,8 @@ def main():
             return False
         check(sync_all(), 'first sync completes')
         sid = next(iter(fake.sheets)); book = fake.sheets[sid]
-        check(len(book.get('STORAGE_BOXES', [])) == 2 and 'Le Mans racers' in book['STORAGE_BOXES'][1], 'box name synced to STORAGE_BOXES')
+        sb = book.get('STORAGE_BOXES', [])
+        check(len(sb) == 2 and 'Le Mans racers' in sb[1] and sb[1][sb[0].index('box_size')] == 'L', 'box name and size synced to STORAGE_BOXES')
         del book['STORAGE_BOXES']
         page.evaluate("(async () => { const i = await import('./js/idb.js'); const c = await i.meta.get('config'); c.tabsVersion = 1; await i.meta.set('config', c); })()")
         page.goto(base + '#/'); page.wait_for_selector('.tile')

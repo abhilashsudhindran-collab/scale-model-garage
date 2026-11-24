@@ -13,7 +13,7 @@ import { newTimer, touch, seconds } from './timing.js';
 import { backupIfDue, backupNow, lastBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.8.0';
+export const APP_VERSION = 's1-0.9.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 
@@ -171,12 +171,32 @@ async function boxNames() {
   for (const r of await store.list('storage_boxes')) if (!r.deleted_at && r.box_label) m.set(String(r.box_label).toLowerCase(), r);
   return m;
 }
-async function saveBoxName(label, name) {
+async function saveBox(label, patch) {
   const names = await boxNames();
   const rec = names.get(label.toLowerCase());
-  const clean = String(name || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 60);
-  if (rec) { if (rec.box_name !== clean) { await store.update('storage_boxes', rec.storage_box_id, { box_name: clean }); await store.logChange('storage_boxes', rec.storage_box_id, 'box_name', rec.box_name, clean, 'renamed in app'); } }
-  else if (clean) await store.create('storage_boxes', { box_label: label, box_name: clean });
+  const clean = {};
+  if ('box_name' in patch) clean.box_name = String(patch.box_name || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 60);
+  if ('box_size' in patch) clean.box_size = BOX_SIZES.includes(patch.box_size) ? patch.box_size : '';
+  if (rec) {
+    const changed = Object.keys(clean).filter(k => String(rec[k] || '') !== clean[k]);
+    if (!changed.length) return;
+    await store.update('storage_boxes', rec.storage_box_id, clean);
+    for (const k of changed) await store.logChange('storage_boxes', rec.storage_box_id, k, rec[k], clean[k], 'edited in app');
+  } else if (Object.values(clean).some(Boolean)) await store.create('storage_boxes', { box_label: label, ...clean });
+}
+const BOX_SIZES = ['S', 'M', 'L', 'XL'];
+// A storage box drawn like the real see-through box (B's sketch, 24 Nov): count big inside; size, number and name below.
+const BOX_SVG = '<svg viewBox="0 0 100 66" aria-hidden="true">'
+  + '<path class="rim" d="M2 11 L5 5 H95 L98 11 Z" />'            // wide lip, like the SAMLA lid edge
+  + '<path d="M8 11 L13 57 H87 L92 11" />'                          // gently tapering body
+  + '<path class="rib" d="M19 14 L22 50 M81 14 L78 50" />'          // vertical ribs near each end
+  + '<path d="M16 57 V61 H27 V57 M73 57 V61 H84 V57" />'            // small feet
+  + '</svg>';
+function boxShape(count) {
+  const el = h('span', { class: 'boxshape' });
+  el.innerHTML = BOX_SVG; // fixed markup, no user data
+  el.append(h('b', {}, count.toLocaleString('en-IN')));
+  return el;
 }
 
 // Dashboard (B, 24 Nov: "get this dashboard up"). Counts are physical boxes (owned copies of
@@ -238,8 +258,11 @@ async function renderDash(v) {
   const boxes = tally(copies, i => i.storage_location || '').filter(([k]) => k).sort((a, b) => (parseInt(a[0].replace(/\D/g, ''), 10) || 0) - (parseInt(b[0].replace(/\D/g, ''), 10) || 0));
   const names = await boxNames();
   const noBox = copies.filter(i => !i.storage_location).length;
-  v.append(h('div', { class: 'card' }, h('h3', {}, 'Storage boxes · tap one to see inside'),
-    boxes.length ? h('div', { class: 'boxgrid' }, boxes.map(([k, n]) => h('button', { type: 'button', class: 'boxtile', onclick: () => goGarage('all', k) }, h('b', {}, k.replace(/^Box\s*/i, '')), names.get(k.toLowerCase())?.box_name ? h('i', {}, names.get(k.toLowerCase()).box_name) : null, h('span', {}, plural(n, 'car', 'cars'))))) : h('p', { class: 'muted' }, 'No storage boxes recorded yet.'),
+  v.append(h('div', { class: 'card' }, h('h3', {}, 'Storage boxes · tap to open'),
+    boxes.length ? h('div', { class: 'shelf' }, boxes.map(([k, n]) => { const r = names.get(k.toLowerCase()) || {}; return h('button', { type: 'button', class: 'boxtile', onclick: () => goGarage('all', k), 'aria-label': `${k}${r.box_name ? ', ' + r.box_name : ''}${r.box_size ? ', size ' + r.box_size : ''}: ${plural(n, 'car', 'cars')}` },
+      boxShape(n),
+      h('span', { class: 'bxl' }, r.box_size ? h('em', {}, r.box_size) : null, k),
+      r.box_name ? h('i', {}, r.box_name) : null); })) : h('p', { class: 'muted' }, 'No storage boxes recorded yet.'),
     noBox ? h('p', { class: 'muted' }, `${plural(noBox, 'box has', 'boxes have')} no storage box yet.`) : null));
 
   // Box state (sealed / opened / loose), when recorded
@@ -317,11 +340,13 @@ async function renderGarage(v) {
       const inBox = inventory.filter(i => i.ownership_status === 'Owned' && activeIds.has(i.model_id) && String(i.storage_location || '').toLowerCase() === label.toLowerCase());
       const byBrand = tally(inBox, i => brandName[active.find(r => r.id === i.model_id)?.data.brand_id] || 'Brand not set').map(([k, c]) => `${k} ${c}`).join(' · ');
       const nameIn = h('input', { value: rec?.box_name || '', placeholder: 'Name this box, e.g. Le Mans racers', 'aria-label': 'Box name', maxlength: '60' });
-      const save = async () => { await saveBoxName(label, nameIn.value); toast('Box name saved ✓'); autoSyncSoon(); route(); };
+      const save = async () => { await saveBox(label, { box_name: nameIn.value }); toast('Box name saved ✓'); autoSyncSoon(); route(); };
       nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
       boxHead.append(h('div', { class: 'card boxcard' },
-        h('div', { class: 'row' }, h('h2', {}, `📦 ${label}`), h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; location.hash = '#/dash'; } }, 'All boxes')),
+        h('div', { class: 'row' }, h('h2', {}, `📦 ${label}${rec?.box_size ? ' · ' + rec.box_size : ''}`), h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; location.hash = '#/dash'; } }, 'All boxes')),
         h('div', { class: 'muted' }, `${plural(inBox.length, 'car', 'cars')} inside${byBrand ? ' · ' + byBrand : ''}`),
+        h('label', { class: 'f' }, 'Box size'),
+        h('div', { class: 'chips' }, BOX_SIZES.map(sz => h('button', { type: 'button', class: `chip ${rec?.box_size === sz ? 'on' : ''}`, 'aria-pressed': rec?.box_size === sz ? 'true' : 'false', onclick: async () => { await saveBox(label, { box_size: rec?.box_size === sz ? '' : sz }); autoSyncSoon(); route(); } }, sz))),
         h('label', { class: 'f' }, 'Box name (optional)'), nameIn, h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: save }, 'Save name')));
     }
     if (!list.length) { grid.append(h('p', { class: 'muted' }, active.length || archived.length ? 'Nothing matches.' : 'No models yet. Tap ＋ Add to catalogue your first box.')); return; }
@@ -331,7 +356,7 @@ async function renderGarage(v) {
     const grouping = { box: true, brand: true, scale: true }[garageFilter] ? garageFilter : null;
     const gkey = (r) => grouping === 'box' ? (boxesOf(r.data.model_id)[0] || '') : grouping === 'brand' ? (brandName[r.data.brand_id] || '') : grouping === 'scale' ? (r.data.scale_id || '') : '';
     const gnum = (k) => grouping === 'box' ? ((k.match(/\d+/) || [])[0] ? Number(k.match(/\d+/)[0]) : Infinity) : grouping === 'scale' ? (scaleOrder[k] ?? Infinity) : 0;
-    const glabel = (k) => grouping === 'box' ? (k ? `${k}${names.get(k.toLowerCase())?.box_name ? ' · ' + names.get(k.toLowerCase()).box_name : ''}` : 'No box yet') : grouping === 'brand' ? (k || 'Brand not set') : (scaleLabel[k] || 'Scale not set');
+    const glabel = (k) => grouping === 'box' ? (k ? [k, names.get(k.toLowerCase())?.box_size, names.get(k.toLowerCase())?.box_name].filter(Boolean).join(' · ') : 'No box yet') : grouping === 'brand' ? (k || 'Brand not set') : (scaleLabel[k] || 'Scale not set');
     if (grouping) list.sort((a, b) => { const ka = gkey(a), kb = gkey(b); if (!ka !== !kb) return ka ? -1 : 1; return gnum(ka) - gnum(kb) || ka.localeCompare(kb) || String(b.data.created_at).localeCompare(String(a.data.created_at)); });
     const gcount = new Map(); if (grouping) list.forEach(r => gcount.set(gkey(r), (gcount.get(gkey(r)) || 0) + 1));
     let lastGroup = null;

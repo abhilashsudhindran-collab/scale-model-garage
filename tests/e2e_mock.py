@@ -128,7 +128,11 @@ class FakeGoogle:
                 src = mc.group(1); meta = json.loads(body or b'{}')
                 if src not in self.files: return ok({'error': 'not found'}, 404)
                 nid = self.nid('c')
-                self.files[nid] = dict(self.files[src], name=meta.get('name', 'copy'), parents=meta.get('parents', []), appProperties={}, trashed=False)
+                props = dict(self.files[src].get('appProperties', {}))  # worst case: Drive keeps the source's tags
+                for k, v in (meta.get('appProperties') or {}).items():
+                    if v is None: props.pop(k, None)
+                    else: props[k] = v
+                self.files[nid] = dict(self.files[src], name=meta.get('name', 'copy'), parents=meta.get('parents', []), appProperties=props, trashed=False)
                 if src in self.sheets: self.sheets[nid] = {t: [list(r) for r in rows] for t, rows in self.sheets[src].items()}
                 return ok({'id': nid, 'name': self.files[nid]['name']})
             m = re.match(r'/drive/v3/files/([^/]+)$', path)
@@ -141,7 +145,9 @@ class FakeGoogle:
                     return ok({'id': fid, 'name': f['name'], 'trashed': f['trashed'], 'parents': f['parents'], 'md5Checksum': f.get('md5')})
                 if method == 'PATCH':
                     meta = json.loads(body or b'{}')
-                    if 'appProperties' in meta: f['appProperties'].update(meta['appProperties'])
+                    for k, v in (meta.get('appProperties') or {}).items():
+                        if v is None: f['appProperties'].pop(k, None)
+                        else: f['appProperties'][k] = v
                     if 'trashed' in meta: f['trashed'] = bool(meta['trashed'])
                     if 'addParents' in qs: f['parents'] = [qs['addParents'][0]]
                     return ok({'id': fid})

@@ -134,6 +134,11 @@ def main():
         lap.goto(base + '#/'); lap.wait_for_selector('.tile'); lap.wait_for_timeout(800)
         imgs = lap.locator('.tile .ph img').count()
         check(imgs == 2, f'laptop: both tiles show real photos ({imgs} of 2)')
+        main = [k for k in fake.sheets if not fake.files[k]['appProperties'].get('smgBackup')]
+        lap_wb = lap.evaluate("(async () => (await (await import('./js/idb.js')).meta.get('config')).workbookId)()")
+        backups = [k for k in fake.sheets if fake.files[k]['appProperties'].get('smgBackup')]
+        check(len(main) == 1 and lap_wb == main[0], f'laptop uses the main sheet, never a backup ({len(backups)} backups exist)')
+        check(all(not fake.files[k]['appProperties'].get('smgRole') for k in backups), 'backup copies carry no main-sheet tag')
         lap.screenshot(path=f'{SHOTS}/04-laptop.png')
 
         check(not [e for e in errors if 'ERR_CONNECTION' not in e], f'no page errors ({errors[:3]})')
