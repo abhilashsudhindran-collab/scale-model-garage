@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.13.0
+## Status: Stage 1 (quick-capture slice), version s1-0.14.0
+
+**s1-0.14.0 (24 Nov 2026): restore from a backup (D25).** Settings → Backups → Restore from a backup… lists the copies (Back up now, daily, monthly), newest first. Restoring refuses while anything on the phone is unsynced; otherwise it makes a fresh backup, copies the chosen backup into 00_DATABASE as the main sheet, keeps the old sheet renamed "(replaced <date time>)" (nothing deleted), rebuilds the phone's data from the restored sheet and records the restore in CHANGE_LOG. Photos are not touched. A second device opens the restored sheet.
 
 **s1-0.13.0 (24 Nov 2026): car page as a product page; line icons.** The car page opens with brand · scale, the name and product code, one large photo and thumbnails (tap for photo options), then facts (copies, sealed/opened, storage box as a link, barcode, quick/complete). Details show name, brand, scale and code; variant, series, notes and barcode fold under "More details" while empty. Each copy and the record info fold into a summary line. Camera and box emoji replaced by line icons. Photo run: "Saving…" while a car is being saved, so it can't be saved twice.
 
@@ -55,6 +57,7 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - `python3 tests/e2e_p2.py` — headless checks for s1-0.4.0 (storage boxes, backups, second device).
 - `python3 tests/e2e_p3.py` — headless checks for s1-0.5.0 (Photo run, Name them).
 - `node tests/release_check.mjs` — offline file complete and in step with the app version (run before every release).
+- `python3 tests/e2e_restore.py` — restore from a backup, end to end (refusal, safety backup, old sheet kept, second device).
 - `python3 tests/e2e_offline.py` — the app opens with the network cut.
 - `node tests/ai.test.mjs` — AI answer parser (copy-paste names).
 - `python3 tests/e2e_p5.py` — headless checks for s1-0.7.0 (Dashboard, Name tab).

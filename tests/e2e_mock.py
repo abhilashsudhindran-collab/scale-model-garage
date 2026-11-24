@@ -149,6 +149,7 @@ class FakeGoogle:
                         if v is None: f['appProperties'].pop(k, None)
                         else: f['appProperties'][k] = v
                     if 'trashed' in meta: f['trashed'] = bool(meta['trashed'])
+                    if 'name' in meta: f['name'] = meta['name']
                     if 'addParents' in qs: f['parents'] = [qs['addParents'][0]]
                     return ok({'id': fid})
             return ok({'error': 'unhandled drive ' + path}, 500)
