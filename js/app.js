@@ -1132,6 +1132,31 @@ const nameSkipped = new Set();
 // Only display copies (no location data) are shared; originals never leave Drive. The pasted answer is
 // untrusted text: parsed and validated in ai.js, used only to pre-fill fields; B saves each one himself.
 let aiPrep = null; // { batchId, ids, files, prompt } prepared in memory for the share tap
+// Suggestions read by an older version of the reader are read again from the raw answer kept in AI_LOG
+// (B, 24 Nov: wrong suggestions from out-of-order Gemini replies would otherwise stay on those cars).
+const READER_VERSION = 2;
+async function rereadSuggestions(ref) {
+  const sugg = await meta.get('aiSuggest', {});
+  const old = Object.entries(sugg).filter(([, sg]) => (sg.pv || 1) < READER_VERSION && sg.logId);
+  if (!old.length) return 0;
+  const photos = await store.list('photos');
+  const modelOfPhoto = new Map(photos.map(p => [p.photo_id, p.model_id]));
+  const names = [...ref.brands.map(x => x.name), ...ref.lines.map(x => x.name), ...KNOWN_BRANDS];
+  let n = 0;
+  for (const logId of new Set(old.map(([, sg]) => sg.logId))) {
+    const log = await store.get('ai_log', logId);
+    const order = String(log?.input_photo_ids || '').split(',').filter((_, i) => i % 2 === 0).map(id => modelOfPhoto.get(id)); // box k = its front photo
+    if (!log?.ai_response_raw || !order.length) continue;
+    const r = parseAnswer(log.ai_response_raw, order.length, names);
+    for (const it of r.items) {
+      const mid = order[it.n - 1];
+      if (mid && sugg[mid] && (sugg[mid].pv || 1) < READER_VERSION) { sugg[mid] = { name: it.name, code: it.code, brand: it.brand, notes: it.notes, logId, pv: READER_VERSION }; n++; }
+    }
+  }
+  for (const [mid, sg] of Object.entries(sugg)) if ((sg.pv || 1) < READER_VERSION) sugg[mid] = { ...sg, pv: READER_VERSION }; // could not re-read: leave as is, once
+  await meta.set('aiSuggest', sugg);
+  return n;
+}
 const aiState = async () => ({ batch: await meta.get('aiBatch', null), sugg: await meta.get('aiSuggest', {}) });
 async function photoFileFor(p, name) {
   let b = await blobs.get(`${p.photo_id}:display`);
@@ -1160,6 +1185,7 @@ async function copyText(t) { try { await navigator.clipboard.writeText(t); retur
 
 async function renderName(v) {
   const ref = await refData();
+  try { const n = await rereadSuggestions(ref); if (n) toast(`${plural(n, 'AI suggestion', 'AI suggestions')} read again with the improved reader`, 3500); } catch (e) { console.warn('re-read', e); }
   const [models, inv, ids] = await Promise.all([store.list('models'), store.list('inventory'), store.list('product_identifiers')]);
   const todo = models.filter(m => !String(m.display_name || '').trim()).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   v.append(h('div', { class: 'row' }, h('h2', {}, 'Name them'), h('div', { class: 'muted', style: 'text-align:right' }, todo.length ? `${plural(todo.length, 'box needs', 'boxes need')} a name` : '')));
@@ -1178,7 +1204,7 @@ async function renderName(v) {
           const r = parseAnswer(ta.value, batch.ids.length, [...ref.brands.map(x => x.name), ...ref.lines.map(x => x.name), ...KNOWN_BRANDS]);
           if (!r.items.length) { toast('No answer lines found. It should look like: Box 1 | name | code | brand', 4500, 'warn'); return; }
           const next = { ...(await meta.get('aiSuggest', {})) };
-          for (const it of r.items) next[batch.ids[it.n - 1]] = { name: it.name, code: it.code, brand: it.brand, notes: it.notes, logId: batch.logId };
+          for (const it of r.items) next[batch.ids[it.n - 1]] = { name: it.name, code: it.code, brand: it.brand, notes: it.notes, logId: batch.logId, pv: READER_VERSION };
           await meta.set('aiSuggest', next);
           await store.update('ai_log', batch.logId, { ai_response_raw: ta.value.slice(0, 5000), suggested_values: JSON.stringify(r.items.map(it => ({ model_id: batch.ids[it.n - 1], name: it.name, code: it.code, brand: it.brand }))), processed_at: store.nowIso() });
           await meta.set('aiBatch', null);
@@ -1240,7 +1266,11 @@ async function renderName(v) {
     // A code already saved is never replaced by an AI reading; a different reading is a note only.
     const codeNote = m.product_code && sg.code && sg.code !== m.product_code ? `AI read the code as "${sg.code}". Keeping the code already saved.` : null;
     v.append(h('div', { class: 'banner info' }, h('div', { class: 'hd' }, '✨ Suggested by AI: check it against the box before saving'),
-      ...[...(sg.notes || []), note, codeNote].filter(Boolean).map(t => h('div', { class: 'muted' }, t))));
+      ...[...(sg.notes || []), note, codeNote].filter(Boolean).map(t => h('div', { class: 'muted' }, t)),
+      h('button', { type: 'button', class: 'ghost small', style: 'margin-top:8px', onclick: async () => {
+        const rest = { ...(await meta.get('aiSuggest', {})) }; delete rest[m.model_id]; await meta.set('aiSuggest', rest);
+        toast('Suggestion discarded. This car can go in the next Gemini batch.', 3000); route();
+      } }, 'Discard suggestion')));
   }
   const nameIn = h('input', { placeholder: 'e.g. Nissan Skyline GT-R R34', 'aria-label': 'Name', autocapitalize: 'words', value: sg?.name || '' });
   const codeIn = h('input', { placeholder: brand?.code_example ? `e.g. ${brand.code_example}` : 'Exactly as printed', autocapitalize: 'characters', 'aria-label': 'Product code', value: m.product_code || sg?.code || '' });
