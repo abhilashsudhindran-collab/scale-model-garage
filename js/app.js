@@ -195,7 +195,7 @@ const BOX_SVG = '<svg viewBox="0 0 100 66" aria-hidden="true">'
 function boxShape(count) {
   const el = h('span', { class: 'boxshape' });
   el.innerHTML = BOX_SVG; // fixed markup, no user data
-  el.append(h('b', {}, count.toLocaleString('en-IN')));
+  el.append(h('b', {}, typeof count === 'number' ? count.toLocaleString('en-IN') : count));
   return el;
 }
 
@@ -206,7 +206,26 @@ async function boxesInUse() {
   const live = new Set(models.filter(r => !r.data.deleted_at).map(r => r.id));
   const counts = new Map();
   for (const i of inventory) if (i.ownership_status === 'Owned' && live.has(i.model_id) && i.storage_location) counts.set(i.storage_location, (counts.get(i.storage_location) || 0) + 1);
+  for (const r of await store.list('storage_boxes')) if (!r.deleted_at && r.box_label && !counts.has(r.box_label)) counts.set(r.box_label, 0); // new, still empty
   return [...counts.entries()].sort((a, b) => boxNum(a[0]) - boxNum(b[0]) || a[0].localeCompare(b[0]));
+}
+// "＋ New box": the next number after the highest box in use, created empty, then opened.
+async function newBox() {
+  const used = await boxesInUse();
+  const next = Math.max(0, ...used.map(([k]) => boxNum(k)).filter(Number.isFinite)) + 1;
+  const label = `Box ${next}`;
+  await store.create('storage_boxes', { box_label: label, box_name: '', box_size: '' });
+  autoSyncSoon();
+  return label;
+}
+// Start (or continue) a photo run straight into this box.
+async function fillBox(label) {
+  const id = label.replace(/^Box\s*/i, '');
+  localStorage.setItem('smg.lastBox', id);
+  if (!cap) cap = await loadDraft();
+  if (cap) { cap.box = id; saveDraftSoon(); }
+  runSetOpen = !(cap && cap.brandId && cap.scaleId);
+  location.hash = '#/run';
 }
 // One tap to put the next car in any box already in use (B: moving on shouldn't need "box full").
 function boxPicker(current, used, names, pick) {
@@ -218,15 +237,15 @@ function boxPicker(current, used, names, pick) {
   }));
 }
 // The shelf: each storage box as a SAMLA side view, count inside; size, number, name below.
-function shelfEl(boxes, names, onTap, { selected = '', scroll = false } = {}) {
-  return h('div', { class: `shelf${scroll ? ' scrollrow' : ''}` }, boxes.map(([k, n]) => {
+function shelfEl(boxes, names, onTap, { selected = '', scroll = false, onNew = null } = {}) {
+  return h('div', { class: `shelf${scroll ? ' scrollrow' : ''}` }, ...boxes.map(([k, n]) => {
     const r = names.get(k.toLowerCase()) || {};
     const sel = selected && selected.toLowerCase() === k.toLowerCase();
     return h('button', { type: 'button', class: `boxtile${sel ? ' sel' : ''}`, 'aria-pressed': sel ? 'true' : 'false', onclick: () => onTap(k, sel), 'aria-label': `${k}${r.box_name ? ', ' + r.box_name : ''}${r.box_size ? ', size ' + r.box_size : ''}: ${plural(n, 'car', 'cars')}` },
       boxShape(n),
       h('span', { class: 'bxl' }, r.box_size ? h('em', {}, r.box_size) : null, k),
       r.box_name ? h('i', {}, r.box_name) : null);
-  }));
+  }), onNew ? h('button', { type: 'button', class: 'boxtile newbox', onclick: onNew, 'aria-label': 'Add a new storage box' }, boxShape('＋'), h('span', { class: 'bxl' }, 'New box')) : null);
 }
 
 // Dashboard (B, 24 Nov: "get this dashboard up"). Counts are physical boxes (owned copies of
@@ -285,11 +304,13 @@ async function renderDash(v) {
     barList(tally(copies, i => scaleLabel[byId.get(i.model_id).scale_id] || 'Scale not set'), { onTap: (k) => goGarage('all', k) })));
 
   // Storage boxes: one tile per numbered box, in number order
-  const boxes = tally(copies, i => i.storage_location || '').filter(([k]) => k).sort((a, b) => (parseInt(a[0].replace(/\D/g, ''), 10) || 0) - (parseInt(b[0].replace(/\D/g, ''), 10) || 0));
+  const boxes0 = tally(copies, i => i.storage_location || '').filter(([k]) => k);
+  for (const r of await store.list('storage_boxes')) if (!r.deleted_at && r.box_label && !boxes0.some(([k]) => k === r.box_label)) boxes0.push([r.box_label, 0]);
+  const boxes = boxes0.sort((a, b) => (parseInt(a[0].replace(/\D/g, ''), 10) || 0) - (parseInt(b[0].replace(/\D/g, ''), 10) || 0));
   const names = await boxNames();
   const noBox = copies.filter(i => !i.storage_location).length;
   v.append(h('div', { class: 'card' }, h('h3', {}, 'Storage boxes · tap to open'),
-    boxes.length ? shelfEl(boxes, names, (k) => goGarage('all', k)) : h('p', { class: 'muted' }, 'No storage boxes recorded yet.'),
+    shelfEl(boxes, names, (k) => goGarage('all', k), { onNew: async () => goGarage('all', await newBox()) }) ,
     noBox ? h('p', { class: 'muted' }, `${plural(noBox, 'box has', 'boxes have')} no storage box yet.`) : null));
 
   // Box state (sealed / opened / loose), when recorded
@@ -323,11 +344,11 @@ async function renderGarage(v) {
   // The shelf on the home screen (B, 24 Nov): tap a box to see what's inside; tap it again for everything.
   {
     const used = await boxesInUse();
-    if (used.length) {
-      const sel = (garageSearch.trim().match(/^box\s*[a-z0-9-]+$/i) || [''])[0];
-      v.append(h('div', { class: 'shelfhome' }, h('div', { class: 'row' }, h('h3', {}, 'Storage boxes'), sel ? h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; route(); } }, 'Show all') : null),
-        shelfEl(used, names, (k, isSel) => { garageFilter = 'all'; garageSearch = isSel ? '' : k; route(); }, { selected: sel, scroll: true })));
-    }
+    const sel = (garageSearch.trim().match(/^box\s*[a-z0-9-]+$/i) || [''])[0];
+    v.append(h('div', { class: 'shelfhome' }, h('div', { class: 'row' }, h('h3', {}, used.length ? 'Storage boxes · tap to open' : 'Storage boxes'), sel ? h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; route(); } }, 'Show all') : null),
+      shelfEl(used, names, (k, isSel) => { garageFilter = 'all'; garageSearch = isSel ? '' : k; route(); },
+        { selected: sel, scroll: true, onNew: async () => { const label = await newBox(); garageFilter = 'all'; garageSearch = label; toast(`${label} added`); route(); } })));
+    if (sel) setTimeout(() => document.querySelector('.shelfhome .boxtile.sel')?.scrollIntoView({ inline: 'center', block: 'nearest' }), 0);
   }
   const search = h('input', { type: 'search', placeholder: 'Search name, code, barcode, brand, scale…', value: garageSearch, oninput: (e) => { garageSearch = e.target.value; draw(); } });
   v.append(search);
@@ -375,17 +396,18 @@ async function renderGarage(v) {
       const rec = names.get(label.toLowerCase());
       const inBox = inventory.filter(i => i.ownership_status === 'Owned' && activeIds.has(i.model_id) && String(i.storage_location || '').toLowerCase() === label.toLowerCase());
       const byBrand = tally(inBox, i => brandName[active.find(r => r.id === i.model_id)?.data.brand_id] || 'Brand not set').map(([k, c]) => `${k} ${c}`).join(' · ');
-      const nameIn = h('input', { value: rec?.box_name || '', placeholder: 'Name this box, e.g. Le Mans racers', 'aria-label': 'Box name', maxlength: '60' });
+      const nameIn = h('input', { value: rec?.box_name || '', placeholder: 'e.g. Mixed, HW Box, Le Mans racers', 'aria-label': 'Box name', maxlength: '60' });
       const save = async () => { await saveBox(label, { box_name: nameIn.value }); toast('Box name saved ✓'); autoSyncSoon(); route(); };
       nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
       boxHead.append(h('div', { class: 'card boxcard' },
         h('div', { class: 'row' }, h('h2', {}, `📦 ${label}${rec?.box_size ? ' · ' + rec.box_size : ''}`), h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; route(); } }, 'Close')),
-        h('div', { class: 'muted' }, `${plural(inBox.length, 'car', 'cars')} inside${byBrand ? ' · ' + byBrand : ''}`),
+        h('div', { class: 'muted' }, inBox.length ? `${plural(inBox.length, 'car', 'cars')} inside${byBrand ? ' · ' + byBrand : ''}` : 'Empty so far.'),
+        h('button', { type: 'button', class: 'wide', style: 'margin-top:10px', onclick: () => fillBox(label) }, `📷 Fill ${label}`),
         h('label', { class: 'f' }, 'Box size'),
         h('div', { class: 'chips' }, BOX_SIZES.map(sz => h('button', { type: 'button', class: `chip ${rec?.box_size === sz ? 'on' : ''}`, 'aria-pressed': rec?.box_size === sz ? 'true' : 'false', onclick: async () => { await saveBox(label, { box_size: rec?.box_size === sz ? '' : sz }); autoSyncSoon(); route(); } }, sz))),
-        h('label', { class: 'f' }, 'Box name (optional)'), nameIn, h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: save }, 'Save name')));
+        h('label', { class: 'f' }, rec?.box_name ? 'Box name' : 'Name this box? (optional)'), nameIn, h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: save }, 'Save name')));
     }
-    if (!list.length) { grid.append(h('p', { class: 'muted' }, active.length || archived.length ? 'Nothing matches.' : 'No models yet. Tap ＋ Add to catalogue your first box.')); return; }
+    if (!list.length) { grid.append(h('p', { class: 'muted' }, oneBox ? 'No cars in this box yet.' : active.length || archived.length ? 'Nothing matches.' : 'No models yet. Tap ＋ Add to catalogue your first box.')); return; }
     // Grouped views: by storage box (number order, no box last), by brand (A–Z), by scale (smallest scale number first).
     const boxesOf = (mid) => [...new Set(inventory.filter(i => i.model_id === mid && i.ownership_status === 'Owned').map(i => i.storage_location).filter(Boolean))];
     const scaleOrder = Object.fromEntries(ref.scales.map(sc => [sc.scale_id, Number(sc.sort_order) || 0]));
@@ -434,6 +456,7 @@ async function renderGarage(v) {
 // Quick capture (D17.1, D19, D20)
 // =====================================================================
 let cap = null;
+let runWork = Promise.resolve(); // the photo run's save in progress, so "Done with Box N" waits for it
 function freshCapture(keep = {}) {
   // "Sealed" is remembered like brand and scale (audit C1): most of the collection is sealed boxes.
   return { modelId: newId('models'), inventoryId: newId('inventory'), photos: {}, sealed: localStorage.getItem('smg.lastSealed') === 'yes', brandId: keep.brandId || '', scaleId: keep.scaleId || '', box: localStorage.getItem('smg.lastBox') || '', barcode: null, name: '', code: '', count: keep.count || 0, timer: newTimer() };
@@ -702,7 +725,18 @@ async function renderRun(v) {
   const brand = ref.brands.find(b => b.brand_id === cap.brandId);
   const scale = ref.scales.find(x => x.scale_id === cap.scaleId);
   v.append(h('div', { class: 'row' }, h('h2', {}, 'Photo run'), h('a', { href: '#/add', class: 'btn ghost small', style: 'flex:0 0 auto' }, 'One box at a time')));
-  v.append(h('p', { class: 'muted' }, 'Photos now, names later. Set these once; each box saves itself after its photos.'));
+  if (cap.box) {
+    const bn = (await boxNames()).get(`box ${cap.box}`.toLowerCase())?.box_name;
+    v.append(h('div', { class: 'banner fill' }, h('div', {}, h('b', {}, `📦 Filling Box ${cap.box}`), bn ? ` · ${bn}` : ''),
+      h('div', { class: 'row', style: 'gap:8px;margin-top:8px' },
+        h('button', { type: 'button', class: 'small quiet', onclick: () => { runSetOpen = true; route(); setTimeout(() => document.querySelector('input.boxin')?.scrollIntoView({ block: 'center' }), 50); } }, 'Switch box'),
+        h('button', { type: 'button', class: 'small', onclick: async () => {
+          await runWork.catch(() => {});
+          const half = Object.keys(cap.photos || {}).length;
+          if (half && !confirm(`A car for Box ${cap.box} is half done (${plural(half, 'photo', 'photos')}). Leave it for now? It stays here and you can finish it later.`)) return;
+          garageFilter = 'all'; garageSearch = `Box ${cap.box}`; location.hash = '#/';
+        } }, `Done with Box ${cap.box}`))));
+  } else v.append(h('p', { class: 'muted' }, 'Photos now, names later. Set these once; each car saves itself after its photos.'));
 
   // --- run settings ---
   const set = h('div', { class: 'card runset' });
@@ -727,7 +761,7 @@ async function renderRun(v) {
   if (brand && scale && !runSetOpen) {
     v.append(h('div', { class: 'runsum' },
       h('div', {}, h('b', {}, `${brand.name} · ${scale.label}`), ` · ${cap.box ? `Box ${cap.box}` : 'no storage box'} · ${cap.sealed ? 'Sealed' : 'Car visible'}`),
-      ...(/^\d+$/.test(cap.box) ? [h('button', { type: 'button', class: 'small quiet', onclick: () => { setBox(Number(cap.box) + 1); toast(`Now filling Box ${cap.box}`); route(); } }, `Next box → ${Number(cap.box) + 1}`)] : []),
+      recent.length > 1 ? h('div', { class: 'chips scroll', style: 'margin:6px 0' }, recent.map(b => h('button', { type: 'button', class: `chip ${cap.brandId === b.brand_id ? 'on' : ''}`, 'aria-pressed': cap.brandId === b.brand_id ? 'true' : 'false', onclick: () => { cap.brandId = b.brand_id; pushRecentBrand(b.brand_id); saveDraftSoon(); route(); } }, b.name))) : null,
       h('button', { type: 'button', class: 'small ghost', onclick: () => { runSetOpen = true; route(); } }, 'Change')));
   } else {
     v.append(set);
@@ -778,7 +812,8 @@ async function renderRun(v) {
   } }, `Undo last box (${runLast.label})`));
   v.append(h('p', { class: 'muted', style: 'margin-top:14px' }, h('a', { href: '#/name' }, 'Name the boxes from this run →')));
 
-  async function afterRunPhoto() {
+  async function afterRunPhoto() { runWork = afterRunPhotoInner(); await runWork; }
+  async function afterRunPhotoInner() {
     const need = ['box_front', 'box_rear', ...(cap.sealed && !cap.artSkipped ? ['box_art'] : [])];
     if (need.some(r => !cap.photos[r])) { route(); return; }
     const [models, ids] = await Promise.all([store.list('models'), store.list('product_identifiers')]);
