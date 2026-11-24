@@ -86,13 +86,13 @@ def main():
         check('📦 Box 12' in card and '2 cars inside · Bburago 2' in card, f'box card: label, count, brands ({card[:60]!r})')
         page.fill('input[aria-label="Box name"]', 'Le Mans racers'); page.get_by_role('button', name='Save name').click(); page.wait_for_timeout(600)
         check('Le Mans racers' in page.input_value('input[aria-label="Box name"]'), 'box name saved and shown')
-        page.locator('.boxcard .chip', has_text='L').first.click(); page.wait_for_timeout(500)
-        check('📦 Box 12 · L' in txt('.boxcard') and page.locator('.boxcard .chip.on').inner_text() == 'L', 'box size L set')
-        page.locator('.boxcard .chip', has_text='XL').click(); page.wait_for_timeout(500)
-        check(page.locator('.boxcard .chip.on').inner_text() == 'XL', 'box size changed to XL')
-        page.locator('.boxcard .chip', has_text='XL').click(); page.wait_for_timeout(500)
-        check(page.query_selector('.boxcard .chip.on') is None, 'tapping the chosen size again clears it')
-        page.locator('.boxcard .chip', has_text='L').first.click(); page.wait_for_timeout(500)
+        page.locator('.boxcard').get_by_role('button', name='L', exact=True).click(); page.wait_for_timeout(500)
+        check('📦 Box 12 · L' in txt('.boxcard') and page.locator('.boxcard').get_by_role('button', name='L', exact=True).get_attribute('aria-pressed') == 'true', 'box size L set')
+        page.locator('.boxcard').get_by_role('button', name='XL', exact=True).click(); page.wait_for_timeout(500)
+        check(page.locator('.boxcard').get_by_role('button', name='XL', exact=True).get_attribute('aria-pressed') == 'true', 'box size changed to XL')
+        page.locator('.boxcard').get_by_role('button', name='XL', exact=True).click(); page.wait_for_timeout(500)
+        check(all(page.locator('.boxcard').get_by_role('button', name=z, exact=True).get_attribute('aria-pressed') == 'false' for z in ['S', 'M', 'L', 'XL']), 'tapping the chosen size again clears it')
+        page.locator('.boxcard').get_by_role('button', name='L', exact=True).click(); page.wait_for_timeout(500)
         page.screenshot(path=f'{SHOTS}/03-box12.png')
         page.goto(base + '#/dash'); page.wait_for_selector('.boxtile')
         t12 = page.locator('.boxtile', has_text='Box 12').inner_text().replace('\n', ' ')
@@ -198,11 +198,48 @@ def main():
         page.goto(base + '#/'); page.wait_for_selector('.shelfhome .boxtile')
         check('Mixed' in page.locator('.shelfhome .boxtile', has_text='Box 32').inner_text(), 'unnamed mixed box tile says "Mixed"')
 
+        # Brand and scale per box: "Mixed brands, only 1:43" and "only Bburago, mixed scales"
+        def shoot_car():
+            for label, f in [('Box front', 'f'), ('Box rear', 'r')]:
+                with page.expect_file_chooser() as fc: page.get_by_role('button', name=f'📷 {label}').click()
+                fc.value.set_files(f'{tmp}/{f}.jpg'); page.wait_for_timeout(700)
+        def after_save():
+            if page.is_visible('text=Different model: save new'): page.get_by_role('button', name='Different model: save new').click(); page.wait_for_timeout(700)
+        def new_box(n):
+            page.goto(base + '#/'); page.wait_for_selector('.shelfhome'); page.fill('input[type=search]', ''); page.wait_for_timeout(200)
+            page.locator('.shelfhome .boxtile.newbox').click(); page.wait_for_selector('.boxcard')
+            check(f'📦 Box {n}' in txt('.boxcard'), f'new Box {n}')
+        new_box(33)
+        page.locator('.boxcard .chip', has_text='Mixed brands').click(); page.wait_for_timeout(400)
+        page.locator('.boxcard .chip', has_text='Only 1:43').click(); page.wait_for_timeout(400)
+        page.get_by_role('button', name='📷 Fill Box 33').click(); page.wait_for_selector('text=📦 Filling Box 33')
+        check('Mixed brands · 1:43' in txt('.runsum'), f"run: Mixed brands · 1:43 ({txt('.runsum')[:40]!r})")
+        shoot_car(); page.wait_for_selector('text=Which brand is this car?', timeout=8000)
+        check(not page.is_visible('text=Which scale?'), 'only the brand is asked (scale fixed by the box)')
+        page.screenshot(path=f'{SHOTS}/11-mixed-143.png')
+        page.select_option('select[aria-label="Brand for this car"]', label='Mini GT'); page.wait_for_timeout(900); after_save()
+        page.get_by_role('button', name='Done with Box 33').click(); page.wait_for_selector('.boxcard')
+        new_box(34)
+        page.select_option('select[aria-label="Brand for this box"]', label='Bburago'); page.wait_for_timeout(400)
+        page.locator('.boxcard .chip', has_text='Mixed scales').click(); page.wait_for_timeout(400)
+        page.get_by_role('button', name='📷 Fill Box 34').click(); page.wait_for_selector('text=📦 Filling Box 34')
+        shoot_car(); page.wait_for_selector('text=Which scale?', timeout=8000)
+        check(not page.is_visible('text=Which brand is this car?'), 'only the scale is asked (brand fixed by the box)')
+        page.locator('.brandpick .chip', has_text='1:18').click(); page.wait_for_timeout(900); after_save()
+        page.get_by_role('button', name='Done with Box 34').click(); page.wait_for_selector('.boxcard')
+        got = page.evaluate("""(async () => { const st = await import('./js/store.js'); const inv = await st.list('inventory'); const ms = await st.list('models'); const sc = await st.list('scales'); const br = await st.list('brands');
+          const one = (b) => { const i = inv.find(x => x.storage_location === b); const m = ms.find(x => x.model_id === i.model_id); return br.find(x => x.brand_id === m.brand_id).name + ' ' + sc.find(x => x.scale_id === m.scale_id).label; };
+          return [one('Box 33'), one('Box 34')]; })()""")
+        check(got == ['Mini GT 1:43', 'Bburago 1:18'], f'cars saved with box scale/brand + the one picked ({got})')
+        page.goto(base + '#/'); page.wait_for_selector('.shelfhome .boxtile')
+        t33 = page.locator('.shelfhome .boxtile', has_text='Box 33').inner_text(); t34 = page.locator('.shelfhome .boxtile', has_text='Box 34').inner_text()
+        check('Mixed · 1:43' in t33 and 'Bburago' in t34, f'tiles describe the box ({t33!r}, {t34!r})')
+
         # Grouped views in the Garage
         page.goto(base + '#/'); page.wait_for_selector('.tile'); page.fill('input[type=search]', ''); page.wait_for_timeout(200)
         page.get_by_role('button', name='By brand', exact=True).click(); page.wait_for_timeout(300)
         groups = [g.inner_text() for g in page.query_selector_all('h3.group')]
-        check(groups == ['BBURAGO · 4 MODELS', 'HOT WHEELS · 3 MODELS', 'MINI GT · 4 MODELS'], f'By brand groups A–Z ({groups})')
+        check(groups == ['BBURAGO · 5 MODELS', 'HOT WHEELS · 3 MODELS', 'MINI GT · 5 MODELS'], f'By brand groups A–Z ({groups})')
         page.get_by_role('button', name='By scale', exact=True).click(); page.wait_for_timeout(300)
         groups = [g.inner_text() for g in page.query_selector_all('h3.group')]
         check([g.split(' ·')[0] for g in groups] == ['1:64', '1:43', '1:18'], f'By scale groups in scale order ({groups})')
@@ -227,6 +264,10 @@ def main():
         sb = book.get('STORAGE_BOXES', [])
         lm = [r for r in sb[1:] if 'Le Mans racers' in r]
         check(len(lm) == 1 and lm[0][sb[0].index('box_size')] == 'L' and any('Box 31' in r for r in sb[1:]), f'box names, sizes and new boxes synced to STORAGE_BOXES ({len(sb) - 1} rows)')
+        for _ in range(100):  # let any sync/backup still running finish, so it can't write the old setup back
+            if not page.evaluate("(async () => (await import('./js/sync.js')).isSyncing())()"): break
+            page.wait_for_timeout(200)
+        page.wait_for_timeout(1500)
         del book['STORAGE_BOXES']
         page.evaluate("(async () => { const i = await import('./js/idb.js'); const c = await i.meta.get('config'); c.tabsVersion = 1; await i.meta.set('config', c); })()")
         page.goto(base + '#/'); page.wait_for_selector('.tile')
