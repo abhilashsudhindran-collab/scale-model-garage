@@ -120,7 +120,7 @@ export const drive = {
     });
   },
   update: (id, metadata) => api(`${DRIVE}/files/${id}?fields=id`, { method: 'PATCH', ...json(metadata) }),
-  copy: (id, name, parentId) => api(`${DRIVE}/files/${id}/copy?fields=id,name`, { method: 'POST', ...json({ name, parents: [parentId] }) }),
+  copy: (id, name, parentId, appProperties) => api(`${DRIVE}/files/${id}/copy?fields=id,name`, { method: 'POST', ...json({ name, parents: [parentId], ...(appProperties ? { appProperties } : {}) }) }),
   about: () => api(`${DRIVE}/about?fields=storageQuota`),
   download: async (id) => (await api(`${DRIVE}/files/${id}?alt=media`, { raw: true, timeoutMs: 90_000 })).blob(),
 };

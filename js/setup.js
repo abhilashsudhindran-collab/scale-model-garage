@@ -12,7 +12,8 @@ export const colLetter = (n) => { let s = ''; while (n > 0) { const m = (n - 1) 
 
 async function findTagged(role) {
   const r = await drive.list(`appProperties has { key='${TAG}' and value='${role}' } and trashed=false`);
-  return r.files?.[0]?.id || null;
+  // Never accept a backup copy as the main sheet or a folder (backups carry smgBackup).
+  return (r.files || []).find(f => !f.appProperties?.smgBackup)?.id || null;
 }
 
 async function ensureFolder(role, name, parent) {
