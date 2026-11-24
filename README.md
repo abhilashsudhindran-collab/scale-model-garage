@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.9.0
+## Status: Stage 1 (quick-capture slice), version s1-0.9.1
+
+**s1-0.9.1 (24 Nov 2026): offline fix.** s1-0.9.0 shipped an empty `sw.js` (a build-script mistake), so the app could not open without a network. Restored. New guards: `node tests/release_check.mjs` and `python3 tests/e2e_offline.py` (both fail on the broken file).
 
 **s1-0.9.0 (24 Nov 2026): storage boxes as a shelf.** Following B's sketch, the Dashboard draws each storage box as a SAMLA-style side view with the number of cars big inside, and the size (S, M, L, XL), number and name underneath. Box size is set on the box card (new `box_size` column in STORAGE_BOXES; sync adds the column to an existing sheet). Every box keeps its number; the name is optional. Safety fix: backup copies are tagged as backups in the copy request and lose the main-sheet tag, and a new device never accepts a backup as the main sheet.
 
@@ -44,6 +46,8 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - `python3 tests/e2e_p1.py` — headless checks for the s1-0.3.0 fixes (fake Google; needs `pip install python-barcode`).
 - `python3 tests/e2e_p2.py` — headless checks for s1-0.4.0 (storage boxes, backups, second device).
 - `python3 tests/e2e_p3.py` — headless checks for s1-0.5.0 (Photo run, Name them).
+- `node tests/release_check.mjs` — offline file complete and in step with the app version (run before every release).
+- `python3 tests/e2e_offline.py` — the app opens with the network cut.
 - `node tests/ai.test.mjs` — AI answer parser (copy-paste names).
 - `python3 tests/e2e_p5.py` — headless checks for s1-0.7.0 (Dashboard, Name tab).
 - `python3 tests/e2e_p4.py` — headless checks for s1-0.6.0 (share sheet and clipboard simulated).

@@ -13,7 +13,7 @@ import { newTimer, touch, seconds } from './timing.js';
 import { backupIfDue, backupNow, lastBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.9.0';
+export const APP_VERSION = 's1-0.9.1';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 
