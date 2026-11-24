@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.9.1
+## Status: Stage 1 (quick-capture slice), version s1-0.10.0
+
+**s1-0.10.0 (24 Nov 2026): box-first flow.** The home screen shows the shelf of storage boxes with a "＋ New box" tile (next number, created empty). Tap a box to see what's inside, set its size and name, and "📷 Fill Box N" to start a photo run straight into it. The run shows "Filling Box N" with Switch box and Done (Done waits for a car still saving, and warns about a half-done car). Chips jump to any box in use; "Box full" is now "Next box". Each storage box says what's in it: "Only <brand>" (the run presets that brand) or "Mixed brands" (take the photos, then tap the brand for each car). Runs count cars ("Car 3 of this run") so "box" always means a storage box. Boxes may hold anything in any order; the number is what matters.
 
 **s1-0.9.1 (24 Nov 2026): offline fix.** s1-0.9.0 shipped an empty `sw.js` (a build-script mistake), so the app could not open without a network. Restored. New guards: `node tests/release_check.mjs` and `python3 tests/e2e_offline.py` (both fail on the broken file).
 

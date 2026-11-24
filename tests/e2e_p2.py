@@ -62,15 +62,15 @@ def main():
                 pg.wait_for_timeout(200)
             return False
 
-        # Storage box: typed once, remembered, "Box full" moves on
+        # Storage box: typed once, remembered, "Next box" moves on
         box('Mini GT Skyline', 'Mini GT')
         page.fill('input.boxin', '1'); page.wait_for_timeout(300)
         page.get_by_role('button', name='Save & next box').click(); page.wait_for_selector('.toast')
         check('Box 1' in page.inner_text('.toast'), f'saved toast names the box ("{page.inner_text(".toast")}")')
         page.wait_for_timeout(400)
         check(page.input_value('input.boxin') == '1', 'storage box remembered for the next box')
-        page.get_by_role('button', name='Box full → 2').click(); page.wait_for_timeout(300)
-        check(page.input_value('input.boxin') == '2', '"Box full → 2" moves to Box 2')
+        page.get_by_role('button', name='Next box → 2').click(); page.wait_for_timeout(300)
+        check(page.input_value('input.boxin') == '2', '"Next box → 2" moves to Box 2')
         page.screenshot(path=f'{SHOTS}/01-storage-box.png')
         box('Tarmac Porsche', 'Tarmac Works', front='c')
         page.get_by_role('button', name='Save & next box').click(); page.wait_for_selector('.toast'); page.wait_for_timeout(400)
