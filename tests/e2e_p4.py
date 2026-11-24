@@ -108,7 +108,7 @@ def main():
         check(ms['Nissan Skyline GT-R R34']['product_code'] == 'MGT00341-L' and ms['Nissan Skyline GT-R R34']['identification_status'] == 'confirmed', 'confirmed AI name and code saved, marked confirmed')
         check(ms['Honda Civic EF']['product_code'] == 'TEST-003', 'box 3: earlier code kept after saving')
         log = ev("(async () => (await (await import('./js/store.js')).list('ai_log')))()")
-        check(len(log) == 1 and log[0]['prompt_version'] == 'names-v2' and 'Skyline' in log[0]['ai_response_raw'], 'AI_LOG records the prompt version and raw answer')
+        check(len(log) == 1 and log[0]['prompt_version'] == 'names-v3' and 'Skyline' in log[0]['ai_response_raw'], 'AI_LOG records the prompt version and raw answer')
         conf = json.loads(log[0]['confirmed_values'] or '{}')
         edited = sorted(v['edited'] for v in conf.values())
         check(len(conf) == 3 and edited == [False, True, True], f'AI_LOG records what B confirmed vs edited ({edited})')
@@ -120,7 +120,7 @@ def main():
             if page.inner_text('#status') == 'All synced': break
             page.wait_for_timeout(200)
         sid = next(iter(fake.sheets)); rows = fake.sheets[sid]['AI_LOG']
-        check(len(rows) == 2 and 'names-v2' in rows[1], f'AI_LOG row synced to the sheet ({len(rows) - 1} row)')
+        check(len(rows) == 2 and 'names-v3' in rows[1], f'AI_LOG row synced to the sheet ({len(rows) - 1} row)')
 
         check(not [e for e in errors if 'ERR_CONNECTION' not in e], f'no page errors ({errors[:3]})')
         browser.close()

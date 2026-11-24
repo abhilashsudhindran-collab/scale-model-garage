@@ -9,14 +9,14 @@ import { syncNow, isSyncing } from './sync.js';
 import { getClientId, setClientId, hasToken, signIn, tokenMinutesLeft, drive } from './google.js';
 import { getConfig, seedLocal } from './setup.js';
 import { newId } from './ids.js';
-import { resolveName, moreBrands } from './brands.js';
+import { resolveName, moreBrands, KNOWN_BRANDS } from './brands.js';
 import { newTimer, touch, seconds } from './timing.js';
 import { straighten, validQuad } from './crop.js';
 import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.17.0';
+export const APP_VERSION = 's1-0.17.1';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -1175,7 +1175,7 @@ async function renderName(v) {
       h('div', { class: 'row', style: 'margin-top:8px' },
         h('button', { type: 'button', class: 'quiet', onclick: async () => { try { ta.value = await navigator.clipboard.readText(); } catch { toast('Long-press the box above and choose Paste', 3500, 'warn'); } } }, 'Paste from clipboard'),
         h('button', { type: 'button', onclick: async () => {
-          const r = parseAnswer(ta.value, batch.ids.length);
+          const r = parseAnswer(ta.value, batch.ids.length, [...ref.brands.map(x => x.name), ...ref.lines.map(x => x.name), ...KNOWN_BRANDS]);
           if (!r.items.length) { toast('No answer lines found. It should look like: Box 1 | name | code | brand', 4500, 'warn'); return; }
           const next = { ...(await meta.get('aiSuggest', {})) };
           for (const it of r.items) next[batch.ids[it.n - 1]] = { name: it.name, code: it.code, brand: it.brand, notes: it.notes, logId: batch.logId };

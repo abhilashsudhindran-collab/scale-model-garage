@@ -71,5 +71,24 @@ eq(r.items[0].n, 2, 'photo tag assigns the box when there are no headings');
 eq(parseAnswer('Car Name: Civic', 3).items.length, 0, 'several boxes and no box marker: not guessed');
 eq(parseAnswer('Box 1 | Supra | 64-1 | Mini GT\nCar Name: Other', 1).items[0].name, 'Supra', 'requested lines win over a labelled list');
 
+// B's phone, 24 Nov 22:19: Gemini put the brand first, the car name in the code slot, the livery as brand
+{
+  const B = ['Hot Wheels', 'Mini GT', 'Tarmac Works', 'Pop Race', 'Bburago', 'Kaido House', 'Inno64', 'Majorette'];
+  let x = parseAnswer('Box 1 | Kaido House × Mini GT | Nissan Skyline GT-R | Kaido Star Racing V1', 5, B).items[0];
+  eq(x.name, 'Nissan Skyline GT-R Kaido Star Racing V1', 'brand in the name slot: car name + livery become the name');
+  eq(x.brand, 'Kaido House × Mini GT', 'brand in the name slot: recognised as the brand');
+  eq(x.code, '', 'no code given: none invented');
+  x = parseAnswer('Box 1 | Kaido House × Mini GT | Nissan Skyline GT-R [R34] Kaido Star Racing V1 | KHMG197', 5, B).items[0];
+  eq(x.code, 'KHMG197', 'code found in the last slot');
+  eq(x.name, 'Nissan Skyline GT-R [R34] Kaido Star Racing V1', 'name found in the middle slot');
+  x = parseAnswer('Box 1 | Mini GT | MGT00123-L | Toyota Supra (A80) 1997', 5, B).items[0];
+  eq([x.name, x.code, x.brand].join(' / '), 'Toyota Supra (A80) 1997 / MGT00123-L / Mini GT', 'brand first, name last: sorted');
+  x = parseAnswer('Box 1 | Hot Wheels | - | -', 5, B).items[0];
+  eq(x.name, '', 'only a brand: no name');
+  eq(x.notes.some(n => n.includes('no car name')), true, 'only a brand: noted for the user');
+  x = parseAnswer('Box 1 | Toyota GR010 Hybrid 2024 (#7) | 18-38322 | Bburago', 5, B).items[0];
+  eq([x.name, x.code, x.brand].join(' / '), 'Toyota GR010 Hybrid 2024 (#7) / 18-38322 / Bburago', 'correct order left as it is');
+}
+
 console.log(fails ? `${fails} of ${n} AI parser tests FAILED` : `All ${n} AI parser tests passed`);
 process.exit(fails ? 1 : 0);
