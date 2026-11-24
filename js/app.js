@@ -266,6 +266,58 @@ function shelfEl(boxes, names, onTap, { selected = '', scroll = false, onNew = n
   }), onNew ? h('button', { type: 'button', class: 'boxtile newbox', onclick: onNew, 'aria-label': 'Add a new storage box' }, boxShape('＋'), h('span', { class: 'bxl' }, 'New box')) : null);
 }
 
+// Removing a box never deletes cars: they move to "No box yet". The box is soft-deleted and every car it held is
+// logged in CHANGE_LOG with a tag, so "Restore" can put the box and its cars back (B, 24 Nov).
+async function carsInBox(label) {
+  const [models, inventory] = await Promise.all([store.listRecords('models'), store.list('inventory')]);
+  const live = new Set(models.filter(r => !r.data.deleted_at).map(r => r.id));
+  return inventory.filter(i => i.ownership_status === 'Owned' && live.has(i.model_id) && String(i.storage_location || '').toLowerCase() === label.toLowerCase());
+}
+async function removeBox(label) {
+  const cars = await carsInBox(label);
+  if (cars.length && !confirm(`${label} has ${plural(cars.length, 'car', 'cars')}. Remove the box?\n\nThe cars stay in your collection and move to "No box yet". You can restore the box later from Dashboard → Removed boxes.`)) return false;
+  let rec = (await boxNames()).get(label.toLowerCase());
+  if (!rec) rec = await store.create('storage_boxes', { box_label: label, box_name: '', box_size: '' });
+  const stamp = store.nowIso();
+  const tag = `box removed ${rec.storage_box_id} ${stamp}`;
+  for (const i of cars) {
+    await store.update('inventory', i.inventory_id, { storage_location: '' });
+    await store.logChange('inventory', i.inventory_id, 'storage_location', label, '', tag);
+  }
+  await store.update('storage_boxes', rec.storage_box_id, { deleted_at: stamp });
+  await store.logChange('storage_boxes', rec.storage_box_id, 'deleted_at', '', stamp, `removed in app (${plural(cars.length, 'car', 'cars')} moved to No box yet)`);
+  autoSyncSoon();
+  return true;
+}
+async function removedBoxes() {
+  const [boxRecs, log] = await Promise.all([store.listRecords('storage_boxes'), store.list('change_log')]);
+  const boxes = boxRecs.map(r => r.data); // includes removed boxes (store.list leaves them out)
+  return boxes.filter(b => b.deleted_at && b.notes !== 'restored into an active box').map(b => {
+    const tag = `box removed ${b.storage_box_id} ${b.deleted_at}`;
+    return { box: b, cars: log.filter(c => c.reason === tag).map(c => c.record_id) };
+  }).sort((a, b) => String(b.box.deleted_at).localeCompare(String(a.box.deleted_at)));
+}
+async function restoreBox(entry) {
+  const { box, cars } = entry;
+  const label = box.box_label;
+  const active = (await boxNames()).get(label.toLowerCase());
+  if (active && !confirm(`${label} is in use again. Put the restored cars into it as well?`)) return false;
+  const inv = await store.list('inventory');
+  let back = 0;
+  for (const id of cars) {
+    const i = inv.find(x => x.inventory_id === id);
+    if (!i || i.storage_location) continue; // moved somewhere else since: leave it there
+    await store.update('inventory', id, { storage_location: label });
+    await store.logChange('inventory', id, 'storage_location', '', label, `box restored ${box.storage_box_id}`);
+    back++;
+  }
+  if (active) await store.update('storage_boxes', box.storage_box_id, { notes: 'restored into an active box' });
+  else await store.update('storage_boxes', box.storage_box_id, { deleted_at: '' });
+  await store.logChange('storage_boxes', box.storage_box_id, 'deleted_at', box.deleted_at, '', `restored in app (${plural(back, 'car', 'cars')} back in the box)`);
+  autoSyncSoon();
+  return back;
+}
+
 // Dashboard (B, 24 Nov: "get this dashboard up"). Counts are physical boxes (owned copies of
 // models that aren't archived). Single-series bars: one hue, numbers in text colour, no legend.
 function barList(rows, { onTap } = {}) {
@@ -332,8 +384,15 @@ async function renderDash(v) {
     shelfEl(boxes, names, (k) => goGarage('all', k), { onNew: async () => goGarage('all', await newBox()) }) ,
     noBox ? h('p', { class: 'muted' }, `${plural(noBox, 'box has', 'boxes have')} no storage box yet.`) : null));
 
+  // Removed boxes: history with Restore
+  const gone = await removedBoxes();
+  if (gone.length) v.append(h('div', { class: 'card' }, h('h3', {}, 'Removed boxes'),
+    gone.slice(0, 20).map(e => h('div', { class: 'row removed' },
+      h('div', {}, h('b', {}, e.box.box_label), e.box.box_name ? ` · ${e.box.box_name}` : '', h('div', { class: 'muted small' }, `removed ${new Date(e.box.deleted_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} · ${plural(e.cars.length, 'car was', 'cars were')} inside`)),
+      h('button', { type: 'button', class: 'small quiet', onclick: async () => { const n = await restoreBox(e); if (n !== false) { toast(`${e.box.box_label} restored · ${plural(n, 'car', 'cars')} back inside`); route(); } } }, 'Restore')))));
+
   // Box state (sealed / opened / loose), when recorded
-  const states = tally(copies.filter(i => i.packaging_state), i => ({ sealed: 'Sealed', opened: 'Opened', loose: 'Loose' }[i.packaging_state] || i.packaging_state));
+  const states = tally(copies.filter(i => i.packaging_state && i.packaging_state !== 'unknown'), i => ({ sealed: 'Sealed', opened: 'Opened', loose: 'Loose' }[i.packaging_state] || i.packaging_state));
   if (states.length) v.append(h('div', { class: 'card' }, h('h3', {}, 'Box state'), barList(states)));
 }
 
@@ -445,7 +504,8 @@ async function renderGarage(v) {
         })(),
         h('label', { class: 'f' }, 'Box size'),
         h('div', { class: 'chips' }, BOX_SIZES.map(sz => h('button', { type: 'button', class: `chip ${rec?.box_size === sz ? 'on' : ''}`, 'aria-pressed': rec?.box_size === sz ? 'true' : 'false', onclick: async () => { await saveBox(label, { box_size: rec?.box_size === sz ? '' : sz }); autoSyncSoon(); route(); } }, sz))),
-        h('label', { class: 'f' }, rec?.box_name ? 'Box name' : 'Name this box? (optional)'), nameIn, h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: save }, 'Save name')));
+        h('label', { class: 'f' }, rec?.box_name ? 'Box name' : 'Name this box? (optional)'), nameIn, h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: save }, 'Save name'),
+        h('button', { type: 'button', class: 'ghost small removebox', onclick: async () => { if (await removeBox(label)) { toast(`${label} removed. Restore it from Dashboard → Removed boxes.`, 4000); garageSearch = ''; route(); } } }, `Remove ${label}`)));
     }
     if (!list.length) { grid.append(h('p', { class: 'muted' }, oneBox ? 'No cars in this box yet.' : active.length || archived.length ? 'Nothing matches.' : 'No models yet. Tap ＋ Add to catalogue your first box.')); return; }
     // Grouped views: by storage box (number order, no box last), by brand (A–Z), by scale (smallest scale number first).

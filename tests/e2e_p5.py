@@ -235,6 +235,34 @@ def main():
         t33 = page.locator('.shelfhome .boxtile', has_text='Box 33').inner_text(); t34 = page.locator('.shelfhome .boxtile', has_text='Box 34').inner_text()
         check('Mixed · 1:43' in t33 and 'Bburago' in t34, f'tiles describe the box ({t33!r}, {t34!r})')
 
+        # Removing boxes: empty = straight away; with cars = asks, cars move to "No box yet"; Restore puts them back
+        dialogs = []
+        def on_dialog(d): dialogs.append(d.message); d.accept()
+        page.on('dialog', on_dialog)
+        new_box(35)
+        page.get_by_role('button', name='Remove Box 35').click(); page.wait_for_timeout(600)
+        check(not dialogs and page.locator('.shelfhome .boxtile', has_text='Box 35').count() == 0, 'empty box removed without a question')
+        page.locator('.shelfhome .boxtile', has_text='Box 31').click(); page.wait_for_selector('.boxcard')
+        page.get_by_role('button', name='Remove Box 31').click(); page.wait_for_timeout(800)
+        check(len(dialogs) == 1 and '1 car' in dialogs[0] and 'stay in your collection' in dialogs[0], f'box with a car: asks first ({dialogs[-1][:50] if dialogs else None!r})')
+        check(page.locator('.shelfhome .boxtile', has_text='Box 31').count() == 0, 'Box 31 gone from the shelf')
+        page.get_by_role('button', name='By box', exact=True).click(); page.wait_for_timeout(300)
+        nobox = [g.inner_text() for g in page.query_selector_all('h3.group') if g.inner_text().startswith('NO BOX YET')]
+        check(nobox and '2 MODELS' in nobox[0], f'its car is kept, now under "No box yet" ({nobox})')
+        page.get_by_role('button', name='All', exact=True).click()
+        page.goto(base + '#/dash'); page.wait_for_selector('text=Removed boxes')
+        page.wait_for_selector('.card h3:text("Removed boxes")')
+        rem = txt('.card:has(h3:text("Removed boxes"))')
+        check('Box 31' in rem and '1 car was inside' in rem and 'Box 35' in rem, f'Dashboard lists removed boxes ({rem[:80]!r})')
+        page.screenshot(path=f'{SHOTS}/12-removed.png', full_page=True)
+        page.locator('.row.removed', has_text='Box 31').get_by_role('button', name='Restore').click(); page.wait_for_timeout(800)
+        page.goto(base + '#/'); page.wait_for_selector('.shelfhome .boxtile:has-text("Box 31")')
+        page.locator('.shelfhome .boxtile', has_text='Box 31').click(); page.wait_for_selector('.boxcard')
+        check('1 car inside · Hot Wheels 1' in txt('.boxcard'), 'Restore: Box 31 is back with its car')
+        log = page.evaluate("(async () => (await (await import('./js/store.js')).list('change_log')).filter(c => /box (removed|restored)|removed in app|restored in app/.test(c.reason)).length)()")
+        check(log >= 4, f'every step is in the change log ({log} entries)')
+        page.remove_listener('dialog', on_dialog)
+
         # Grouped views in the Garage
         page.goto(base + '#/'); page.wait_for_selector('.tile'); page.fill('input[type=search]', ''); page.wait_for_timeout(200)
         page.get_by_role('button', name='By brand', exact=True).click(); page.wait_for_timeout(300)
