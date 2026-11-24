@@ -361,3 +361,5 @@ details.card.more > summary { min-height: 52px; gap: 10px; }
 details.card.more > summary .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 details.more.inner { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 4px; }
 .restore { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 6px; }
+header.top h1 { display: flex; align-items: center; gap: 0; white-space: pre; }
+header.top h1 img.logo { width: 26px; height: 26px; border-radius: 7px; flex: 0 0 auto; margin-right: 8px; }

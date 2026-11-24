@@ -7,12 +7,14 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://accounts.google.com; style-src 'self' 'unsafe-inline' https://accounts.google.com; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' https://www.googleapis.com https://sheets.googleapis.com https://accounts.google.com; frame-src https://accounts.google.com; worker-src 'self'; object-src 'none'; base-uri 'self'">
 <title>Scale Model Garage</title>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icons/icon-192.png">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
 <header class="top">
-  <h1><b class="sm">Scale Model </b><span>Garage</span></h1>
+  <h1><img class="logo" src="icons/icon.svg" alt="" width="26" height="26"><b class="sm">Scale Model </b><span>Garage</span></h1>
   <button id="status" class="pill" type="button" aria-label="Sync status. Tap to sync.">…</button>
   <button id="syncBtn" class="small quiet iconbtn" aria-label="Sync now"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></svg></button>
 </header>
