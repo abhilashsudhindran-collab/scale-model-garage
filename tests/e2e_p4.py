@@ -20,7 +20,7 @@ Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (t) =>
 ANSWER = """Sure, here are the boxes:
 Box 1 | Nissan Skyline GT-R R34 | MGT00341-L | MINI GT
 Box 2 | Toyota Supra A80 | =HYPERLINK("x") | Kaido House
-Box 3 | - | - | -
+Box 3 | - | XYZ-1 | -
 Let me know if you need more."""
 
 
@@ -67,6 +67,9 @@ def main():
             shoot('Box rear', f'{tmp}/{r}.jpg'); page.wait_for_selector(f'text=Box {i + 2} of this run')
         check(len(listm()) == 3, 'three nameless boxes to start')
 
+        # Box 3 already has a code typed earlier (no name): it must survive naming
+        ev("(async () => { const s = await import('./js/store.js'); const ms = (await s.list('models')).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))); await s.update('models', ms[2].model_id, { product_code: 'TEST-003' }); })()")
+
         # Prepare and share
         page.goto(base + '#/name'); page.wait_for_selector('text=Names from Gemini or Claude')
         page.wait_for_timeout(300); page.screenshot(path=f'{SHOTS}/00-name.png')
@@ -96,13 +99,16 @@ def main():
 
         # Box 3: AI couldn't read it, B types the name
         check(page.input_value('input[aria-label=Name]') == '', 'box 3: unreadable stays empty')
+        check(page.input_value('input[aria-label="Product code"]') == 'TEST-003', 'box 3: code saved earlier is shown, not replaced by the AI reading')
+        check(page.is_visible('text=Keeping the code already saved'), 'box 3: different AI code shown as a note only')
         page.fill('input[aria-label=Name]', 'Honda Civic EF'); page.get_by_role('button', name='Save & next').click(); page.wait_for_timeout(600)
         check(page.is_visible('text=Every box has a name'), 'all three named')
 
         ms = {x['display_name']: x for x in listm()}
         check(ms['Nissan Skyline GT-R R34']['product_code'] == 'MGT00341-L' and ms['Nissan Skyline GT-R R34']['identification_status'] == 'confirmed', 'confirmed AI name and code saved, marked confirmed')
+        check(ms['Honda Civic EF']['product_code'] == 'TEST-003', 'box 3: earlier code kept after saving')
         log = ev("(async () => (await (await import('./js/store.js')).list('ai_log')))()")
-        check(len(log) == 1 and log[0]['prompt_version'] == 'names-v1' and 'Skyline' in log[0]['ai_response_raw'], 'AI_LOG records the prompt version and raw answer')
+        check(len(log) == 1 and log[0]['prompt_version'] == 'names-v2' and 'Skyline' in log[0]['ai_response_raw'], 'AI_LOG records the prompt version and raw answer')
         conf = json.loads(log[0]['confirmed_values'] or '{}')
         edited = sorted(v['edited'] for v in conf.values())
         check(len(conf) == 3 and edited == [False, True, True], f'AI_LOG records what B confirmed vs edited ({edited})')
@@ -114,7 +120,7 @@ def main():
             if page.inner_text('#status') == 'All synced': break
             page.wait_for_timeout(200)
         sid = next(iter(fake.sheets)); rows = fake.sheets[sid]['AI_LOG']
-        check(len(rows) == 2 and 'names-v1' in rows[1], f'AI_LOG row synced to the sheet ({len(rows) - 1} row)')
+        check(len(rows) == 2 and 'names-v2' in rows[1], f'AI_LOG row synced to the sheet ({len(rows) - 1} row)')
 
         check(not [e for e in errors if 'ERR_CONNECTION' not in e], f'no page errors ({errors[:3]})')
         browser.close()

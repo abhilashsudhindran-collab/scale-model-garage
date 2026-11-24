@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.6.0
+## Status: Stage 1 (quick-capture slice), version s1-0.6.1
+
+**s1-0.6.1 (24 Nov 2026): Gemini's own answer style accepted.** First real test on B's phone: sharing worked and Gemini read the box correctly, but replied as a labelled list ("Car Name: …", "Product / Item Code: …"), which the app rejected. The app now also reads labelled lists (grouped by "Box N" headings or the photo names Gemini cites; importer, price and dates ignored), and the instructions ask for the format first and last (prompt `names-v2`).
 
 **s1-0.6.0 (24 Nov 2026): names from Gemini or Claude (copy-paste, ₹0).** On "Name them", the app prepares up to 10 nameless boxes (front + rear display copies, no location data) with instructions, and shares them to the Gemini or Claude app on the phone. Paste the reply back; each box's name and code are shown as a suggestion to check, never saved until you tap Save. Codes with odd characters are ignored; a different brand reading is shown as a note only. Every batch is logged in AI_LOG (prompt version, raw answer, what you confirmed or edited). Backups: two syncs finishing together no longer make two copies.
 

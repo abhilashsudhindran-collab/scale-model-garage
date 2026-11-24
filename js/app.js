@@ -13,7 +13,7 @@ import { newTimer, touch, seconds } from './timing.js';
 import { backupIfDue, backupNow, lastBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.6.0';
+export const APP_VERSION = 's1-0.6.1';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 
@@ -727,11 +727,13 @@ async function renderName(v) {
   const sg = sugg[m.model_id];
   if (sg) {
     const note = brandNote(sg.brand, brand?.name);
+    // A code already saved is never replaced by an AI reading; a different reading is a note only.
+    const codeNote = m.product_code && sg.code && sg.code !== m.product_code ? `AI read the code as "${sg.code}". Keeping the code already saved.` : null;
     v.append(h('div', { class: 'banner info' }, h('div', { class: 'hd' }, '✨ Suggested by AI: check it against the box before saving'),
-      ...[...(sg.notes || []), note].filter(Boolean).map(t => h('div', { class: 'muted' }, t))));
+      ...[...(sg.notes || []), note, codeNote].filter(Boolean).map(t => h('div', { class: 'muted' }, t))));
   }
   const nameIn = h('input', { placeholder: 'e.g. Nissan Skyline GT-R R34', 'aria-label': 'Name', autocapitalize: 'words', value: sg?.name || '' });
-  const codeIn = h('input', { placeholder: brand?.code_example ? `e.g. ${brand.code_example}` : 'Exactly as printed', autocapitalize: 'characters', 'aria-label': 'Product code', value: sg?.code || '' });
+  const codeIn = h('input', { placeholder: brand?.code_example ? `e.g. ${brand.code_example}` : 'Exactly as printed', autocapitalize: 'characters', 'aria-label': 'Product code', value: m.product_code || sg?.code || '' });
   v.append(h('label', { class: 'f' }, 'Name'), nameIn, h('label', { class: 'f' }, 'Product code (optional)'), codeIn);
   const save = async () => {
     const name = nameIn.value.trim(), code = codeIn.value.trim();
@@ -739,8 +741,8 @@ async function renderName(v) {
     const ns = assignNamespace(brand, null);
     const patch = { display_name: name, product_code: code, product_code_cmp: codeCmp(code), code_namespace_type: ns.type, code_namespace_id: ns.id, namespace_status: ns.status };
     patch.duplicate_check_status = duplicateCheckStatus(patch);
+    if (code !== (m.product_code || '')) await store.logChange('models', m.model_id, 'product_code', m.product_code, code, 'named in app');
     if (code) {
-      await store.logChange('models', m.model_id, 'product_code', m.product_code, code, 'named in app');
       const r = checkDuplicate({ ...m, ...patch }, models, ids, []);
       if (r.status === 'duplicate') toast(`Same code as "${r.exact[0].display_name || r.exact[0].product_code}". Check both in the Garage.`, 5000, 'warn');
     }

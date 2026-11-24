@@ -42,5 +42,34 @@ eq(validCode('<script>'), false, 'markup is not a code');
 eq(brandNote('MINI GT', 'Mini GT'), '', 'same brand, different case: no note');
 eq(brandNote('Kaido House', 'Mini GT').startsWith('AI read the brand'), true, 'different brand: note only');
 
+// B's real Gemini reply (24 Nov, Toyota GR010): a labelled list, not the requested lines.
+const gem = `* Car Name: Toyota GR010 Hybrid (Car #7, Toyota Gazoo Racing)
+* Car Year: 2024
+* Brand: Bburago (Race series)
+* Scale: 1:43
+* Product / Item Code: 18-38322
+* Manufacture Date: 04/2026
+* MRP: ₹ 1,750.00
+* Importer: Creative Education (Bangalore)`;
+r = parseAnswer(gem, 1);
+eq(r.items.length, 1, 'Gemini labelled list: one box found');
+eq(r.items[0].name, 'Toyota GR010 Hybrid 2024 (Car #7, Toyota Gazoo Racing)', 'Gemini list: name with year');
+eq(r.items[0].code, '18-38322', 'Gemini list: product code');
+eq(r.items[0].brand, 'Bburago (Race series)', 'Gemini list: brand (importer ignored)');
+eq(brandNote(r.items[0].brand, 'Bburago'), '', 'Gemini list: same brand, no note');
+const gemTags = `○ Car Name: Toyota GR010 Hybrid (Car #7, Toyota Gazoo Racing) box1-front.jpg
+○ Brand: Bburago (Race series) box1-front.jpg +1
+○ Product / Item Code: 18-38322 box1-back.jpg`;
+r = parseAnswer(gemTags, 1);
+eq(r.items[0].code, '18-38322', 'photo-name tags removed from values');
+eq(r.items[0].brand, 'Bburago (Race series)', 'tag "+1" removed');
+// Several boxes, labelled, with headings or only photo tags
+r = parseAnswer(`**Box 1**\n- Car Name: Nissan Skyline\n- Product Code: MGT00341-L\n\n**Box 2:**\n- Model: Supra A80\n- Item No: KHMG001`, 2);
+eq(r.items.map(i => i.code).join(','), 'MGT00341-L,KHMG001', 'labelled list with Box headings');
+r = parseAnswer(`Car Name: Civic box2-front.jpg\nCode: 64-123 box2-back.jpg`, 3);
+eq(r.items[0].n, 2, 'photo tag assigns the box when there are no headings');
+eq(parseAnswer('Car Name: Civic', 3).items.length, 0, 'several boxes and no box marker: not guessed');
+eq(parseAnswer('Box 1 | Supra | 64-1 | Mini GT\nCar Name: Other', 1).items[0].name, 'Supra', 'requested lines win over a labelled list');
+
 console.log(fails ? `${fails} of ${n} AI parser tests FAILED` : `All ${n} AI parser tests passed`);
 process.exit(fails ? 1 : 0);
