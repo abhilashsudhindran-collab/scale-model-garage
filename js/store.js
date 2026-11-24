@@ -93,6 +93,21 @@ export async function counts() {
   };
 }
 
+// What is waiting to sync, in the user's terms (audit finding S1): boxes, not internal rows.
+// Seed reference rows (scales, brands, categories made at install) and the change log are never counted.
+export async function pendingSummary() {
+  const dirty = (await records.dirty()).filter(r => !r.seed && r.entity !== 'change_log');
+  const boxes = new Set();
+  let photos = 0, other = 0;
+  for (const r of dirty) {
+    if (r.entity === 'models') boxes.add(r.id);
+    else if (['inventory', 'photos', 'product_identifiers'].includes(r.entity) && r.data.model_id) boxes.add(r.data.model_id);
+    else other++;
+    if (r.entity === 'photos') photos++;
+  }
+  return { boxes: boxes.size, photos, other };
+}
+
 export async function logChange(entity, recordId, field, oldValue, newValue, reason = '') {
   return create('change_log', { entity, record_id: recordId, field, old_value: String(oldValue ?? ''), new_value: String(newValue ?? ''), reason, changed_at: nowIso() });
 }

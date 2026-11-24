@@ -9,8 +9,9 @@ import { syncNow, isSyncing } from './sync.js';
 import { getClientId, setClientId, hasToken, signIn, tokenMinutesLeft } from './google.js';
 import { getConfig, seedLocal } from './setup.js';
 import { newId } from './ids.js';
+import { newTimer, touch, seconds } from './timing.js';
 
-export const APP_VERSION = 's1-0.1.1';
+export const APP_VERSION = 's1-0.2.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 
@@ -28,7 +29,13 @@ function h(tag, attrs = {}, ...kids) {
   for (const c of kids.flat()) if (c !== null && c !== undefined && c !== false) n.append(c instanceof Node ? c : document.createTextNode(String(c)));
   return n;
 }
-function toast(msg, ms = 1800) { const t = h('div', { class: 'toast' }, msg); document.body.append(t); setTimeout(() => t.remove(), ms); }
+// kind: 'ok' (green, success) · 'warn' (amber, needs attention) · 'bad' (red, failed). Audit finding S3.
+function toast(msg, ms = 1800, kind = 'ok') {
+  document.querySelectorAll('.toast').forEach(x => x.remove());
+  const t = h('div', { class: `toast ${kind}`, role: 'status' }, msg);
+  document.body.append(t); setTimeout(() => t.remove(), kind === 'ok' ? ms : Math.max(ms, 3500));
+}
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 // ---------- thumbnails ----------
 const urlCache = new Map();
@@ -54,16 +61,21 @@ const recentBrands = () => JSON.parse(localStorage.getItem('smg.recentBrands') |
 const pushRecentBrand = (id) => localStorage.setItem('smg.recentBrands', JSON.stringify([id, ...recentBrands().filter(x => x !== id)].slice(0, 5)));
 
 // ---------- status bar ----------
+// Header pill (audit S1, S2): counts boxes, and says plainly when a sign-in is needed. Tap = sync.
 async function refreshStatus() {
-  const c = await store.counts();
+  const [c, p, config] = await Promise.all([store.counts(), store.pendingSummary(), getConfig()]);
   const pill = $('#status');
+  const what = p.boxes ? plural(p.boxes, 'box', 'boxes') : (p.other ? 'changes' : '');
   let txt, cls;
   if (isSyncing()) { txt = 'Syncing…'; cls = 'info'; }
-  else if (!navigator.onLine) { txt = c.pending ? `Offline · ${c.pending} waiting` : 'Offline'; cls = 'warn'; }
+  else if (!navigator.onLine) { txt = what ? `Offline · ${what} waiting` : 'Offline'; cls = 'warn'; }
   else if (c.conflicts) { txt = `${c.conflicts} to review`; cls = 'bad'; }
-  else if (c.pending) { txt = `${c.pending} to sync`; cls = 'warn'; }
-  else { txt = 'All synced'; cls = 'ok'; }
+  else if (what && !hasToken()) { txt = `Sign in to sync · ${what}`; cls = 'warn'; }
+  else if (what) { txt = `${what} waiting`; cls = 'warn'; }
+  else if (config) { txt = 'All synced'; cls = 'ok'; }
+  else { txt = 'Nothing to sync'; cls = 'muted'; }
   pill.textContent = txt; pill.style.color = `var(--${cls})`;
+  pill.setAttribute('aria-label', `${txt}. Tap to sync.`);
 }
 
 let lastSyncMsg = '';
@@ -73,20 +85,29 @@ async function runSync(interactive) {
   try {
     const s = await syncNow({ interactive, progress: setMsg });
     setMsg(`Synced: ${s.photosUploaded} photo(s), ${s.rowsAppended} new row(s), ${s.rowsUpdated} update(s), ${s.pulled} pulled${s.conflicts ? `, ${s.conflicts} clash(es) to review` : ''}${s.errors.length ? `, ${s.errors.length} error(s) — will retry` : ''} · ${(s.ms / 1000).toFixed(1)} s`);
-    if (interactive) toast(s.errors.length ? 'Synced with some errors' : 'Synced ✓');
+    if (interactive) toast(s.errors.length ? 'Synced with some errors — will retry' : 'Synced ✓', 1800, s.errors.length ? 'warn' : 'ok');
   } catch (e) {
     setMsg(e.message);
-    if (interactive) toast(e.message, 3500);
+    if (interactive) toast(e.message, 3500, (e.retryable || e.status === 401) ? 'warn' : 'bad');
   }
   refreshStatus();
-  if (location.hash.startsWith('#/item') || location.hash === '' || location.hash === '#/') route();
+  // Re-draw lists after a sync, but never redraw a page the user is in the middle of editing (I1).
+  if (location.hash.startsWith('#/item') ? !itemDirty() : (location.hash === '' || location.hash === '#/')) route();
 }
 let autoTimer = null;
 function autoSyncSoon() { clearTimeout(autoTimer); autoTimer = setTimeout(() => { if (navigator.onLine && hasToken()) runSync(false); }, 2500); }
 
 // ---------- router ----------
 let routeSeq = 0;
+// Pages with editable fields register a "save what's typed" hook; it runs before any navigation or
+// redraw, so typed edits are never thrown away (audit finding I1).
+let leaveHooks = [];
+let itemDirty = () => false;
 async function route() {
+  const hooks = leaveHooks; leaveHooks = []; itemDirty = () => false;
+  for (const fn of hooks) {
+    try { await fn(); } catch (e) { console.error(e); toast(`Could not save your changes: ${e.message}`, 4000, 'bad'); }
+  }
   const hash = location.hash || '#/';
   document.querySelectorAll('nav.bottom a').forEach(a => a.classList.toggle('on', hash.startsWith(a.getAttribute('href')) && (a.getAttribute('href') !== '#/' || hash === '#/')));
   // Render into a fresh container and swap it in only if no newer navigation started meanwhile
@@ -177,11 +198,52 @@ async function renderGarage(v) {
 // =====================================================================
 let cap = null;
 function freshCapture(keep = {}) {
-  return { modelId: newId('models'), inventoryId: newId('inventory'), photos: {}, sealed: false, brandId: keep.brandId || '', scaleId: keep.scaleId || '', barcode: null, name: '', code: '', count: keep.count || 0, startedAt: Date.now() };
+  return { modelId: newId('models'), inventoryId: newId('inventory'), photos: {}, sealed: false, brandId: keep.brandId || '', scaleId: keep.scaleId || '', barcode: null, name: '', code: '', count: keep.count || 0, timer: newTimer() };
 }
+const capTouch = () => { if (cap) touch(cap.timer); };
+
+// ---------- the box in progress survives a tab reload (audit finding C5) ----------
+// Fields go to the phone's meta store, photo files to the blob store under "draft:" keys.
+const DRAFT_KEY = 'captureDraft';
+const DRAFT_VARIANTS = ['original', 'display', 'thumb'];
+const PHOTO_INFO = ['md5', 'width', 'height', 'exif_orientation', 'original_has_location', 'original_bytes', 'original_filename'];
+async function saveDraft() {
+  if (!cap) return;
+  const photos = {};
+  for (const [role, p] of Object.entries(cap.photos)) {
+    if (!p.draftStored) { for (const v of DRAFT_VARIANTS) await blobs.put(`draft:${p.photoId}:${v}`, p.prep[v]); p.draftStored = true; }
+    photos[role] = { photoId: p.photoId, capturedAt: p.capturedAt, info: Object.fromEntries(PHOTO_INFO.map(k => [k, p.prep[k]])) };
+  }
+  const { modelId, inventoryId, sealed, brandId, scaleId, barcode, name, code, count, timer } = cap;
+  await meta.set(DRAFT_KEY, { modelId, inventoryId, sealed, brandId, scaleId, barcode, name, code, count, timer, photos });
+}
+let draftTimer = null;
+function saveDraftSoon() { clearTimeout(draftTimer); draftTimer = setTimeout(() => saveDraft().catch(console.error), 400); }
+async function dropDraftPhoto(photoId) { for (const v of DRAFT_VARIANTS) await blobs.remove(`draft:${photoId}:${v}`); }
+async function clearDraft() {
+  clearTimeout(draftTimer);
+  const d = await meta.get(DRAFT_KEY, null);
+  for (const p of Object.values(d?.photos || {})) await dropDraftPhoto(p.photoId);
+  await meta.set(DRAFT_KEY, null);
+}
+async function loadDraft() {
+  const d = await meta.get(DRAFT_KEY, null);
+  if (!d || !(Object.keys(d.photos || {}).length || d.name || d.code || d.barcode)) return null;
+  const c = { ...freshCapture(), ...d, timer: { ...newTimer(), ...(d.timer || {}), lastTouch: null }, photos: {}, restored: true };
+  for (const [role, p] of Object.entries(d.photos || {})) {
+    const [original, display, thumb] = await Promise.all(DRAFT_VARIANTS.map(v => blobs.get(`draft:${p.photoId}:${v}`)));
+    if (!original || !display || !thumb) continue;
+    c.photos[role] = { photoId: p.photoId, capturedAt: p.capturedAt, prep: { original, display, thumb, ...p.info }, url: URL.createObjectURL(thumb), draftStored: true };
+  }
+  return c;
+}
+// Photos actually saved for this box: a box-art photo only counts while "Sealed" is ticked (audit C6).
+const photosToSave = () => Object.fromEntries(Object.entries(cap.photos).filter(([role]) => role !== 'box_art' || cap.sealed));
 
 async function renderAdd(v) {
+  if (!cap) cap = await loadDraft();
   if (!cap) cap = freshCapture({ scaleId: localStorage.getItem('smg.lastScale') || '', brandId: recentBrands()[0] || '' });
+  if (cap.restored) { v.append(h('div', { class: 'banner info' }, 'Restored the box you were working on. Carry on, or tap Discard to start again.')); cap.restored = false; }
   const ref = await refData();
   const [models, ids] = await Promise.all([store.list('models'), store.list('product_identifiers')]);
   v.append(h('div', { class: 'row' }, h('h2', {}, 'Quick capture'), h('div', { class: 'muted', style: 'text-align:right' }, cap.count ? `${cap.count} saved this session` : 'Box by box')));
@@ -200,7 +262,7 @@ async function renderAdd(v) {
   if (roles.length < 3) shots.append(h('div', {}));
   v.append(shots);
   v.append(h('label', { class: 'row', style: 'margin-top:8px;font-weight:600' },
-    h('input', { type: 'checkbox', checked: cap.sealed, style: 'width:auto;min-height:auto;flex:0', onchange: (e) => { cap.sealed = e.target.checked; route(); } }),
+    h('input', { type: 'checkbox', checked: cap.sealed, style: 'width:auto;min-height:auto;flex:0', onchange: (e) => { cap.sealed = e.target.checked; capTouch(); saveDraftSoon(); route(); } }),
     h('span', {}, 'Sealed box — car can\'t be seen (adds a box-art photo)')));
   const busy = h('p', { class: 'muted', id: 'capBusy' });
   v.append(busy);
@@ -208,7 +270,7 @@ async function renderAdd(v) {
   // --- Brand ---
   v.append(h('label', { class: 'f' }, 'Brand'));
   const recent = recentBrands().map(id => ref.brands.find(b => b.brand_id === id)).filter(Boolean);
-  if (recent.length) v.append(h('div', { class: 'chips', style: 'margin-bottom:6px' }, recent.map(b => h('button', { type: 'button', class: `chip ${cap.brandId === b.brand_id ? 'on' : ''}`, onclick: () => { cap.brandId = b.brand_id; route(); } }, b.name))));
+  if (recent.length) v.append(h('div', { class: 'chips', style: 'margin-bottom:6px' }, recent.map(b => h('button', { type: 'button', class: `chip ${cap.brandId === b.brand_id ? 'on' : ''}`, onclick: () => { cap.brandId = b.brand_id; capTouch(); saveDraftSoon(); route(); } }, b.name))));
   const brandSel = h('select', { onchange: async (e) => {
     if (e.target.value === '__new') {
       const name = (prompt('New brand name (as printed on the box):') || '').trim();
@@ -217,6 +279,7 @@ async function renderAdd(v) {
         cap.brandId = existing ? existing.brand_id : (await store.create('brands', { name, brand_kind: 'miniature', is_code_namespace: 'yes', record_status: 'needs_review' })).brand_id;
       }
     } else cap.brandId = e.target.value;
+    capTouch(); saveDraftSoon();
     route();
   } }, h('option', { value: '' }, '— choose brand —'), ref.brands.map(b => h('option', { value: b.brand_id, selected: b.brand_id === cap.brandId ? true : undefined }, b.name + (b.record_status === 'needs_review' ? ' (needs review)' : ''))), h('option', { value: '__new' }, '＋ Add a new brand…'));
   v.append(brandSel);
@@ -224,8 +287,8 @@ async function renderAdd(v) {
   // --- Scale ---
   v.append(h('label', { class: 'f' }, 'Scale'));
   const main = ['1:64', '1:43', '1:18', '1:12'];
-  const scaleChips = h('div', { class: 'chips' }, ref.scales.filter(s => main.includes(s.label)).map(s => h('button', { type: 'button', class: `chip ${cap.scaleId === s.scale_id ? 'on' : ''}`, onclick: () => { cap.scaleId = s.scale_id; localStorage.setItem('smg.lastScale', s.scale_id); route(); } }, s.label)));
-  const more = h('select', { style: 'flex:1;min-width:140px', onchange: (e) => { if (e.target.value) { cap.scaleId = e.target.value; localStorage.setItem('smg.lastScale', e.target.value); route(); } } },
+  const scaleChips = h('div', { class: 'chips' }, ref.scales.filter(s => main.includes(s.label)).map(s => h('button', { type: 'button', class: `chip ${cap.scaleId === s.scale_id ? 'on' : ''}`, onclick: () => { cap.scaleId = s.scale_id; localStorage.setItem('smg.lastScale', s.scale_id); capTouch(); saveDraftSoon(); route(); } }, s.label)));
+  const more = h('select', { style: 'flex:1;min-width:140px', onchange: (e) => { if (e.target.value) { cap.scaleId = e.target.value; localStorage.setItem('smg.lastScale', e.target.value); capTouch(); saveDraftSoon(); route(); } } },
     h('option', { value: '' }, 'Other scale…'), ref.scales.filter(s => !main.includes(s.label)).map(s => h('option', { value: s.scale_id, selected: s.scale_id === cap.scaleId ? true : undefined }, s.label)));
   scaleChips.append(more);
   v.append(scaleChips);
@@ -235,12 +298,13 @@ async function renderAdd(v) {
   const bcInfo = h('div', { class: 'muted' });
   const bcInput = h('input', { inputmode: 'numeric', placeholder: 'Scan, or type the digits', value: cap.barcode?.raw || '', oninput: (e) => { setBarcode(e.target.value, 'typed', ''); updateBc(); updateDup(); } });
   const video = h('video', { class: 'scan hide', playsinline: true, muted: true });
-  const scanBtn = h('button', { type: 'button', class: 'quiet', onclick: () => doLiveScan() }, '▦ Scan barcode');
+  const scanBtn = h('button', { type: 'button', class: 'quiet', onclick: () => { capTouch(); doLiveScan(); } }, '▦ Scan barcode');
   const photoBtn = h('button', { type: 'button', class: 'quiet hide', onclick: () => doPhotoScan() }, '📷 Take photo instead');
   v.append(h('div', { class: 'row' }, scanBtn, photoBtn), video, bcInput, bcInfo);
   function setBarcode(raw, source, format) {
     raw = String(raw || '').trim();
     cap.barcode = raw ? { raw, cmp: barcodeCmp(raw), format, source, checkOk: gtinCheckOk(raw) } : null;
+    capTouch(); saveDraftSoon();
   }
   function updateBc() {
     const b = cap.barcode;
@@ -271,12 +335,12 @@ async function renderAdd(v) {
 
   // --- Name ---
   v.append(h('label', { class: 'f' }, 'Name'));
-  v.append(h('input', { placeholder: 'e.g. Range Rover 1981 Camel Trophy', value: cap.name, oninput: (e) => { cap.name = e.target.value; updateDup(); } }));
+  v.append(h('input', { placeholder: 'e.g. Range Rover 1981 Camel Trophy', value: cap.name, oninput: (e) => { cap.name = e.target.value; capTouch(); saveDraftSoon(); updateDup(); } }));
 
   // --- Product code (optional) ---
   const brand = ref.brands.find(b => b.brand_id === cap.brandId);
   v.append(h('label', { class: 'f' }, 'Product code (optional)'));
-  v.append(h('input', { placeholder: brand?.code_example ? `e.g. ${brand.code_example}` : 'Exactly as printed', value: cap.code, autocapitalize: 'characters', oninput: (e) => { cap.code = e.target.value; codeWarn(); updateDup(); } }));
+  v.append(h('input', { placeholder: brand?.code_example ? `e.g. ${brand.code_example}` : 'Exactly as printed', value: cap.code, autocapitalize: 'characters', oninput: (e) => { cap.code = e.target.value; capTouch(); saveDraftSoon(); codeWarn(); updateDup(); } }));
   const cw = h('div', { class: 'muted' });
   v.append(cw);
   function codeWarn() {
@@ -301,16 +365,33 @@ async function renderAdd(v) {
       const photos = (await store.list('photos')).filter(p => p.model_id === m.model_id);
       const img = h('img', { alt: '' });
       photoUrl(photos.find(p => p.photo_id === m.primary_photo_id) || photos[0]).then(u => { if (u) img.src = u; });
-      dupBox.append(h('div', { class: 'banner bad' }, `✅ You already own this (${n} cop${n === 1 ? 'y' : 'ies'}).`,
+      dupBox.append(h('div', { class: 'banner have' }, h('div', { class: 'hd' }, `✅ You already own this (${n} cop${n === 1 ? 'y' : 'ies'}).`),
         h('div', { class: 'dup' }, img, h('div', {}, h('div', {}, m.display_name || m.product_code), h('div', { class: 'muted' }, m.product_code))),
         h('div', { class: 'row', style: 'margin-top:8px' },
           h('button', { type: 'button', onclick: () => saveCopyOf(m) }, 'Add as another copy'),
-          h('a', { class: 'btn ghost', href: `#/item/${encodeURIComponent(m.model_id)}`, style: 'text-align:center;text-decoration:none' }, 'Open it'))));
+          h('a', { class: 'btn ghost', href: `#/item/${encodeURIComponent(m.model_id)}` }, 'Open it'))));
     } else if (r.possible.length) {
-      dupBox.append(h('div', { class: 'banner warn' }, `🟡 Possible match${r.possible.length > 1 ? 'es' : ''} (not confirmed):`,
-        r.possible.slice(0, 3).map(p => h('div', { class: 'muted' }, `• ${p.model.display_name || p.model.product_code || '(no name)'} — ${p.reason}`))));
+      // Possible match (audit D1): show it, let B open it or attach this box as a copy by his own tap.
+      // Never merged automatically (D10.1 rule 5).
+      const [inv, allPhotos] = await Promise.all([store.list('inventory'), store.list('photos')]);
+      const box = h('div', { class: 'banner warn' }, h('div', { class: 'hd' }, `🟡 Possible match${r.possible.length > 1 ? 'es' : ''} (not confirmed). Is it the same model?`));
+      for (const p of r.possible.slice(0, 3)) {
+        const m = p.model;
+        const label = m.display_name || m.product_code || '(no name yet)';
+        const n = inv.filter(i => i.model_id === m.model_id && i.ownership_status === 'Owned').length;
+        const ph = allPhotos.filter(x => x.model_id === m.model_id);
+        const img = h('img', { alt: '' });
+        photoUrl(ph.find(x => x.photo_id === m.primary_photo_id) || ph[0]).then(u => { if (u) img.src = u; });
+        box.append(h('div', { class: 'match' },
+          h('div', { class: 'dup' }, img, h('div', {}, h('div', { class: 'nm' }, label), h('div', { class: 'muted' }, `${p.reason} · ${n} cop${n === 1 ? 'y' : 'ies'} owned`))),
+          h('div', { class: 'row', style: 'margin-top:8px' },
+            h('button', { type: 'button', class: 'small', onclick: () => { if (confirm(`Add this box as another copy of "${label}"?`)) saveCopyOf(m); } }, 'Same model: add as copy'),
+            h('a', { class: 'btn ghost small', href: `#/item/${encodeURIComponent(m.model_id)}` }, 'Open'))));
+      }
+      box.append(h('div', { class: 'muted', style: 'margin-top:8px' }, `Different model? Just carry on and save.${cap.code.trim() ? '' : ' Adding the product code lets the app confirm it.'}`));
+      dupBox.append(box);
     } else if (r.status === 'no_match') {
-      dupBox.append(h('div', { class: 'banner ok' }, '❌ Not in your garage yet.'));
+      dupBox.append(h('div', { class: 'banner new' }, '❌ Not in your garage yet.'));
     } else if (cap.code.trim() || cap.barcode) {
       dupBox.append(h('div', { class: 'muted', style: 'margin-top:8px' }, r.status === 'needs_review' ? 'Brand needs review, so this can\'t be confirmed as a duplicate.' : 'Not checkable yet (needs a brand and product code).'));
     }
@@ -321,16 +402,21 @@ async function renderAdd(v) {
   const missing = [!cap.photos.box_front && 'box front photo', !cap.photos.box_rear && 'box rear photo', !cap.brandId && 'brand', !cap.scaleId && 'scale'].filter(Boolean);
   v.append(h('div', { class: 'muted', style: 'margin-top:14px' }, missing.length ? `Still needed: ${missing.join(', ')}.` : 'Ready to save.'));
   v.append(h('button', { class: 'wide', style: 'margin-top:8px', disabled: missing.length ? true : undefined, onclick: () => saveCapture() }, 'Save & next box'));
-  v.append(h('button', { class: 'wide ghost', style: 'margin-top:8px', onclick: () => { if (confirm('Discard this box?')) { cap = freshCapture({ brandId: cap.brandId, scaleId: cap.scaleId, count: cap.count }); route(); } } }, 'Discard'));
+  v.append(h('button', { class: 'wide ghost', style: 'margin-top:8px', onclick: async () => { if (confirm('Discard this box?')) { await clearDraft(); cap = freshCapture({ brandId: cap.brandId, scaleId: cap.scaleId, count: cap.count }); route(); } } }, 'Discard'));
 
   async function takePhoto(role) {
+    capTouch();
     const [f] = await pickPhoto({ camera: true });
     if (!f) return;
+    capTouch();
     busy.textContent = 'Preparing photo…';
     try {
       const prep = await preparePhoto(f);
-      const old = cap.photos[role]; if (old?.url) URL.revokeObjectURL(old.url);
+      const old = cap.photos[role];
+      if (old?.url) URL.revokeObjectURL(old.url);
+      if (old?.draftStored) await dropDraftPhoto(old.photoId);
       cap.photos[role] = { photoId: newId('photos'), prep, url: URL.createObjectURL(prep.thumb), capturedAt: new Date().toISOString() };
+      await saveDraft();
     } catch (e) { busy.textContent = `Could not read that photo: ${e.message}`; return; }
     route();
   }
@@ -361,12 +447,14 @@ async function saveCapture() {
   model.duplicate_check_status = duplicateCheckStatus(model);
   const items = [{ entity: 'models', fields: model },
     { entity: 'inventory', fields: { inventory_id: cap.inventoryId, model_id: cap.modelId, ownership_status: 'Owned', packaging_state: cap.sealed ? 'sealed' : 'unknown', acquisition_type: 'Unknown', purchase_date_precision: 'unknown', currency: 'INR' } },
-    ...(await savePhotoRecords(cap.modelId, cap.photos))];
+    ...(await savePhotoRecords(cap.modelId, photosToSave()))];
   if (cap.barcode) items.push({ entity: 'product_identifiers', fields: { model_id: cap.modelId, identifier_type: 'barcode', value_raw: cap.barcode.raw, value_cmp: cap.barcode.cmp, barcode_format: cap.barcode.format || '', check_digit_ok: cap.barcode.checkOk === null ? '' : (cap.barcode.checkOk ? 'yes' : 'no'), source: cap.barcode.source } });
-  await store.createMany(items);
+  try { await store.createMany(items); }
+  catch (e) { toast(`Not saved: ${e.message}. Your box is kept here; try again.`, 5000, 'bad'); return; }
   pushRecentBrand(cap.brandId);
-  const secs = Math.round((Date.now() - cap.startedAt) / 1000);
-  logTiming(secs);
+  const secs = seconds(touch(cap.timer));
+  await logTiming(secs);
+  await clearDraft();
   cap = freshCapture({ brandId: cap.brandId, scaleId: cap.scaleId, count: cap.count + 1 });
   toast(`Saved ✓ (${secs} s) — next box`);
   window.scrollTo(0, 0);
@@ -375,17 +463,25 @@ async function saveCapture() {
 }
 
 async function saveCopyOf(m) {
-  await store.createMany([{ entity: 'inventory', fields: { inventory_id: cap.inventoryId, model_id: m.model_id, ownership_status: 'Owned', packaging_state: cap.sealed ? 'sealed' : 'unknown', acquisition_type: 'Unknown', purchase_date_precision: 'unknown', currency: 'INR' } },
-    ...(await savePhotoRecords(m.model_id, Object.fromEntries(Object.entries(cap.photos).map(([r, p]) => [r === 'box_front' ? 'box_front' : r, p]))))
-      .map(it => ({ ...it, fields: { ...it.fields, inventory_id: cap.inventoryId, is_primary: 'no' } }))]);
+  // This box's photos are attached to the new physical copy (never made the product's main photo).
+  const items = [{ entity: 'inventory', fields: { inventory_id: cap.inventoryId, model_id: m.model_id, ownership_status: 'Owned', packaging_state: cap.sealed ? 'sealed' : 'unknown', acquisition_type: 'Unknown', purchase_date_precision: 'unknown', currency: 'INR' } },
+    ...(await savePhotoRecords(m.model_id, photosToSave())).map(it => ({ ...it, fields: { ...it.fields, inventory_id: cap.inventoryId, is_primary: 'no' } }))];
+  try { await store.createMany(items); }
+  catch (e) { toast(`Not saved: ${e.message}. Your box is kept here; try again.`, 5000, 'bad'); return; }
+  const secs = seconds(touch(cap.timer));
+  await logTiming(secs);
+  await clearDraft();
   cap = freshCapture({ brandId: cap.brandId, scaleId: cap.scaleId, count: cap.count + 1 });
-  toast('Added as another copy ✓');
+  toast(`Added as another copy ✓ (${secs} s)`);
+  window.scrollTo(0, 0);
   route(); autoSyncSoon();
 }
 
+// Capture times are kept under a new key: times recorded by s1-0.1.x counted idle time (audit C4).
+const TIMES_KEY = 'captureTimesV2';
 async function logTiming(secs) {
-  const t = await meta.get('captureTimes', []);
-  t.push(secs); await meta.set('captureTimes', t.slice(-500));
+  const t = await meta.get(TIMES_KEY, []);
+  t.push(secs); await meta.set(TIMES_KEY, t.slice(-500));
 }
 
 // =====================================================================
@@ -423,52 +519,81 @@ async function renderItem(v, modelId) {
   } }, '＋ Photo')));
 
   // Editable product fields
-  const f = { display_name: m.display_name, brand_id: m.brand_id, scale_id: m.scale_id, product_code: m.product_code, variant: m.variant, series: m.series, notes: m.notes };
+  // Typed edits are saved before any navigation or redraw (audit I1): see leaveHooks in route().
+  const f = { display_name: m.display_name || '', brand_id: m.brand_id || '', scale_id: m.scale_id || '', product_code: m.product_code || '', variant: m.variant || '', series: m.series || '', notes: m.notes || '' };
+  let productDirty = false;
+  const set = (k) => (e) => { f[k] = e.target.value; productDirty = true; };
   const form = h('div', { class: 'card' }, h('h3', {}, 'Product'));
   const field = (label, el) => form.append(h('label', { class: 'f' }, label), el);
-  field('Name', h('input', { value: f.display_name, oninput: e => f.display_name = e.target.value }));
-  field('Brand', h('select', { onchange: e => f.brand_id = e.target.value }, h('option', { value: '' }, '—'), ref.brands.map(b => h('option', { value: b.brand_id, selected: b.brand_id === f.brand_id ? true : undefined }, b.name + (b.record_status === 'needs_review' ? ' (needs review)' : '')))));
-  field('Scale', h('select', { onchange: e => f.scale_id = e.target.value }, h('option', { value: '' }, '—'), ref.scales.map(s => h('option', { value: s.scale_id, selected: s.scale_id === f.scale_id ? true : undefined }, s.label))));
-  field('Product code (exactly as printed)', h('input', { value: f.product_code, autocapitalize: 'characters', oninput: e => f.product_code = e.target.value }));
-  field('Variant / colour', h('input', { value: f.variant, oninput: e => f.variant = e.target.value }));
-  field('Series', h('input', { value: f.series, oninput: e => f.series = e.target.value }));
-  field('Notes', h('textarea', { oninput: e => f.notes = e.target.value }, f.notes || ''));
+  field('Name', h('input', { value: f.display_name, oninput: set('display_name') }));
+  field('Brand', h('select', { onchange: set('brand_id') }, h('option', { value: '' }, '—'), ref.brands.map(b => h('option', { value: b.brand_id, selected: b.brand_id === f.brand_id ? true : undefined }, b.name + (b.record_status === 'needs_review' ? ' (needs review)' : '')))));
+  field('Scale', h('select', { onchange: set('scale_id') }, h('option', { value: '' }, '—'), ref.scales.map(s => h('option', { value: s.scale_id, selected: s.scale_id === f.scale_id ? true : undefined }, s.label))));
+  field('Product code (exactly as printed)', h('input', { value: f.product_code, autocapitalize: 'characters', oninput: set('product_code') }));
+  field('Variant / colour', h('input', { value: f.variant, oninput: set('variant') }));
+  field('Series', h('input', { value: f.series, oninput: set('series') }));
+  field('Notes', h('textarea', { oninput: set('notes') }, f.notes));
   if (idfs.length) form.append(h('p', { class: 'muted' }, `Barcode: ${idfs.filter(i => i.identifier_type === 'barcode').map(i => i.value_raw).join(', ')}`));
+  async function saveProduct() {
+    const brand = ref.brands.find(b => b.brand_id === f.brand_id);
+    const ns = assignNamespace(brand, null);
+    const patch = { ...f, product_code: f.product_code.trim(), product_code_cmp: codeCmp(f.product_code), printed_brand_text: m.printed_brand_text || brand?.name || '',
+      code_namespace_type: ns.type, code_namespace_id: ns.id, namespace_status: ns.status };
+    patch.duplicate_check_status = duplicateCheckStatus(patch);
+    for (const k of ['brand_id', 'product_code']) if (String(m[k] || '') !== String(patch[k] || '')) await store.logChange('models', modelId, k, m[k], patch[k], 'edited in app');
+    await store.update('models', modelId, patch);
+    Object.assign(m, patch); productDirty = false;
+  }
   form.append(h('div', { class: 'row', style: 'margin-top:12px' },
-    h('button', { onclick: async () => {
-      const brand = ref.brands.find(b => b.brand_id === f.brand_id);
-      const ns = assignNamespace(brand, null);
-      const patch = { ...f, product_code: f.product_code.trim(), product_code_cmp: codeCmp(f.product_code), printed_brand_text: m.printed_brand_text || brand?.name || '',
-        code_namespace_type: ns.type, code_namespace_id: ns.id, namespace_status: ns.status };
-      patch.duplicate_check_status = duplicateCheckStatus(patch);
-      for (const k of ['brand_id', 'product_code']) if (String(m[k] || '') !== String(patch[k] || '')) await store.logChange('models', modelId, k, m[k], patch[k], 'edited in app');
-      await store.update('models', modelId, patch); toast('Saved'); route(); autoSyncSoon();
-    } }, 'Save'),
-    h('button', { class: m.completeness_status === 'complete' ? 'quiet' : 'ghost', onclick: async () => { await store.update('models', modelId, { completeness_status: m.completeness_status === 'complete' ? 'quick' : 'complete' }); route(); autoSyncSoon(); } }, m.completeness_status === 'complete' ? 'Mark as quick' : 'Mark complete')));
+    h('button', { onclick: async () => { await saveProduct(); toast('Saved ✓'); route(); autoSyncSoon(); } }, 'Save'),
+    h('button', { class: m.completeness_status === 'complete' ? 'quiet' : 'ghost', onclick: async () => {
+      if (productDirty) await saveProduct();
+      await store.update('models', modelId, { completeness_status: m.completeness_status === 'complete' ? 'quick' : 'complete' }); route(); autoSyncSoon();
+    } }, m.completeness_status === 'complete' ? 'Mark as quick' : 'Mark complete')));
   v.append(form);
+  const copies = [];
 
   // Copies (physical)
   for (const [idx, c] of inv.entries()) {
     const cf = { ownership_status: c.ownership_status, packaging_state: c.packaging_state, condition: c.condition, packaging_condition: c.packaging_condition, storage_location: c.storage_location, purchase_price: c.purchase_price, purchase_date: c.purchase_date, purchase_source: c.purchase_source };
+    const cc = { dirty: false };
     const card = h('div', { class: 'card' }, h('h3', {}, `Copy ${idx + 1}${inv.length > 1 ? ` of ${inv.length}` : ''}`));
     const add = (label, el) => card.append(h('label', { class: 'f' }, label), el);
-    const sel = (key, opts) => h('select', { onchange: e => cf[key] = e.target.value }, h('option', { value: '' }, '— unknown —'), opts.map(o => h('option', { value: o, selected: o === cf[key] ? true : undefined }, o)));
+    const sel = (key, opts) => h('select', { onchange: e => { cf[key] = e.target.value; cc.dirty = true; } }, h('option', { value: '' }, '— unknown —'), opts.map(o => h('option', { value: o, selected: o === cf[key] ? true : undefined }, o)));
     add('Status', sel('ownership_status', ['Owned', 'Sold', 'Gifted', 'Traded', 'Missing']));
     add('Box', sel('packaging_state', ['sealed', 'opened', 'loose']));
     add('Condition', sel('condition', CONDITIONS));
     add('Box condition', sel('packaging_condition', CONDITIONS));
-    add('Where it is stored', h('input', { value: cf.storage_location, placeholder: 'e.g. Cabinet 2, shelf 3', oninput: e => cf.storage_location = e.target.value }));
-    add('Price paid (₹) — leave empty if unknown', h('input', { inputmode: 'decimal', value: cf.purchase_price, placeholder: 'Unknown', oninput: e => cf.purchase_price = e.target.value }));
-    add('Date bought — leave empty if unknown', h('input', { type: 'date', value: cf.purchase_date, oninput: e => cf.purchase_date = e.target.value }));
-    add('Bought from', h('input', { value: cf.purchase_source, oninput: e => cf.purchase_source = e.target.value }));
-    card.append(h('button', { style: 'margin-top:12px', onclick: async () => {
-      const price = String(cf.purchase_price || '').replace(/[^\d.]/g, '');
-      if (cf.purchase_price && price === '') { toast('Price must be a number (or empty for unknown)'); return; }
+    add('Where it is stored', h('input', { value: cf.storage_location, placeholder: 'e.g. Cabinet 2, shelf 3', oninput: e => { cf.storage_location = e.target.value; cc.dirty = true; } }));
+    add('Price paid (₹) — leave empty if unknown', h('input', { inputmode: 'decimal', value: cf.purchase_price, placeholder: 'Unknown', oninput: e => { cf.purchase_price = e.target.value; cc.dirty = true; } }));
+    add('Date bought — leave empty if unknown', h('input', { type: 'date', value: cf.purchase_date, oninput: e => { cf.purchase_date = e.target.value; cc.dirty = true; } }));
+    add('Bought from', h('input', { value: cf.purchase_source, oninput: e => { cf.purchase_source = e.target.value; cc.dirty = true; } }));
+    // quiet = saving on the way out: an invalid price is left unchanged, everything else is kept.
+    cc.save = async (quiet) => {
+      let price = String(cf.purchase_price || '').replace(/[^\d.]/g, '');
+      if (cf.purchase_price && price === '') {
+        toast('Price must be a number (or empty for unknown) — price not saved', 3500, 'warn');
+        if (!quiet) return false;
+        price = c.purchase_price || '';
+      }
       await store.update('inventory', c.inventory_id, { ...cf, purchase_price: price, purchase_date_precision: cf.purchase_date ? 'day' : 'unknown', acquisition_type: price ? 'Purchase' : c.acquisition_type });
-      toast('Copy saved'); route(); autoSyncSoon();
+      cc.dirty = false;
+      return true;
+    };
+    copies.push(cc);
+    card.append(h('button', { style: 'margin-top:12px', onclick: async () => {
+      if (await cc.save(false)) { toast('Copy saved ✓'); route(); autoSyncSoon(); }
     } }, 'Save copy'));
     v.append(card);
   }
+  const dirtyHere = () => productDirty || copies.some(x => x.dirty);
+  itemDirty = dirtyHere;
+  leaveHooks.push(async () => {
+    if (!dirtyHere()) return; // checks this page's own state (route() resets itemDirty before hooks run)
+    if (productDirty) await saveProduct();
+    for (const x of copies) if (x.dirty) await x.save(true);
+    toast('Your changes were saved ✓');
+    autoSyncSoon();
+  });
   v.append(h('dl', { class: 'kv card' },
     h('dt', {}, 'Duplicate check'), h('dd', {}, { checkable: 'Checkable', not_checkable: 'Not checkable yet (no code)', needs_review: 'Brand needs review' }[m.duplicate_check_status] || m.duplicate_check_status),
     h('dt', {}, 'Added'), h('dd', {}, new Date(m.created_at).toLocaleString()),
@@ -505,19 +630,20 @@ async function renderSettings(v) {
   const config = await getConfig();
   const last = await meta.get('lastSync', null);
   const c = await store.counts();
+  const ps = await store.pendingSummary();
 
   const acct = h('div', { class: 'card' }, h('h3', {}, 'Google account'));
   const cid = h('input', { value: getClientId(), placeholder: 'OAuth Client ID (….apps.googleusercontent.com)' });
   acct.append(h('label', { class: 'f' }, 'Google Client ID (saved on this phone only)'), cid,
     h('p', { class: 'muted' }, getClientId() ? 'Found the Client ID saved by the test kit on this phone ✓' : 'Paste the Client ID from your Google Cloud project (same one the test kit used).'),
     h('div', { class: 'row' },
-      h('button', { onclick: async () => { if (cid.value.trim()) setClientId(cid.value); try { await signIn(); toast('Signed in'); await runSync(true); } catch (e) { toast(e.message, 4000); } route(); } }, hasToken() ? 'Sync now' : 'Sign in & set up'),
+      h('button', { onclick: async () => { if (cid.value.trim()) setClientId(cid.value); try { await signIn(); toast('Signed in'); await runSync(true); } catch (e) { toast(e.message, 4000, 'bad'); } route(); } }, hasToken() ? 'Sync now' : 'Sign in & set up'),
     ),
     h('p', { class: 'muted' }, hasToken() ? `Signed in (${tokenMinutesLeft()} min left; renews on sync).` : 'Not signed in. You can still capture offline.'));
   v.append(acct);
 
   const sync = h('div', { class: 'card' }, h('h3', {}, 'Sync'),
-    h('p', {}, `${c.pending} change(s) waiting · ${c.photosPending} photo(s) not uploaded yet${c.conflicts ? ` · ${c.conflicts} clash(es)` : ''}`),
+    h('p', {}, ps.boxes || ps.other ? `${ps.boxes ? plural(ps.boxes, 'box', 'boxes') : 'Some changes'} waiting · ${plural(ps.photos, 'photo', 'photos')} not uploaded yet${c.conflicts ? ` · ${plural(c.conflicts, 'clash', 'clashes')} to review` : ''}` : (c.conflicts ? `${plural(c.conflicts, 'clash', 'clashes')} to review` : 'Nothing waiting to sync.')),
     h('p', { class: 'muted', id: 'syncMsg' }, lastSyncMsg || (last ? `Last sync ${new Date(last.finishedAt).toLocaleString()} · ${last.errors.length ? last.errors.length + ' error(s)' : 'no errors'}` : 'Never synced.')),
     last?.errors?.length ? h('details', {}, h('summary', {}, 'Show errors'), h('pre', { style: 'white-space:pre-wrap;font-size:.8rem' }, last.errors.join('\n'))) : null,
     h('button', { onclick: () => runSync(true) }, 'Sync now'));
@@ -530,16 +656,16 @@ async function renderSettings(v) {
 
   const est = await storageEstimate();
   const persisted = await (navigator.storage?.persisted?.() ?? Promise.resolve(false));
-  const times = await meta.get('captureTimes', []);
+  const times = await meta.get(TIMES_KEY, []);
   const median = times.length ? times.slice().sort((a, b) => a - b)[Math.floor(times.length / 2)] : null;
   v.append(h('div', { class: 'card' }, h('h3', {}, 'This phone'),
     h('dl', { class: 'kv' },
       h('dt', {}, 'Storage used'), h('dd', {}, est ? `${(est.usage / 1048576).toFixed(1)} MB of ${(est.quota / 1073741824).toFixed(1)} GB` : '—'),
       h('dt', {}, 'Protected storage'), h('dd', {}, persisted ? 'Yes ✓' : 'No'),
-      h('dt', {}, 'Capture time'), h('dd', {}, median ? `median ${median} s per box (${times.length} boxes)` : '—'),
+      h('dt', {}, 'Capture time'), h('dd', {}, median ? `median ${median} s per box (${plural(times.length, 'box', 'boxes')}; time spent on each box only)` : 'Not measured yet (counts from this version on)'),
       h('dt', {}, 'App version'), h('dd', {}, APP_VERSION),
       h('dt', {}, 'Schema version'), h('dd', {}, String(SCHEMA_VERSION))),
-    persisted ? null : h('button', { class: 'quiet', style: 'margin-top:8px', onclick: async () => { const ok = await requestPersistentStorage(); toast(ok ? 'Storage protected ✓' : 'Chrome said no (try after installing the app)'); route(); } }, 'Protect storage on this phone')));
+    persisted ? null : h('button', { class: 'quiet', style: 'margin-top:8px', onclick: async () => { const ok = await requestPersistentStorage(); toast(ok ? 'Storage protected ✓' : 'Chrome said no (try after installing the app)', 3500, ok ? 'ok' : 'warn'); route(); } }, 'Protect storage on this phone')));
 }
 
 // ---------- start ----------
@@ -548,11 +674,14 @@ async function start() {
   requestPersistentStorage();
   await seedLocal();
   $('#syncBtn').addEventListener('click', () => runSync(true));
+  $('#status').addEventListener('click', () => runSync(true));
+  setInterval(refreshStatus, 30_000); // sign-in expiry has no event of its own
   window.addEventListener('hashchange', route);
   window.addEventListener('online', () => { refreshStatus(); autoSyncSoon(); });
   window.addEventListener('offline', refreshStatus);
   store.onChange(refreshStatus);
-  window.addEventListener('beforeunload', (e) => { if (cap && Object.keys(cap.photos).length) { e.preventDefault(); e.returnValue = ''; } });
+  // The box in progress is kept as a draft (C5); only unsaved item-page edits need a warning here.
+  window.addEventListener('beforeunload', (e) => { if (itemDirty()) { e.preventDefault(); e.returnValue = ''; } });
   await route();
 }
 start();
