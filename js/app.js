@@ -13,9 +13,16 @@ import { newTimer, touch, seconds } from './timing.js';
 import { backupIfDue, backupNow, lastBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.12.0';
+export const APP_VERSION = 's1-0.13.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
+// Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
+const ICON = {
+  camera: '<path d="M4 8.5h3.2l1.8-2.5h6l1.8 2.5H20V19H4z"/><circle cx="12" cy="13.2" r="3.4"/>',
+  box: '<path d="M3.5 7.5 12 3.5l8.5 4v9L12 20.5l-8.5-4z"/><path d="M3.5 7.5 12 11.5l8.5-4M12 11.5v9"/>',
+  car: '<path d="M3 15.5V12l2.2-4.5h13.6L21 12v3.5"/><path d="M3 15.5h18M6.5 18.5a1.5 1.5 0 1 0 0-.01M17.5 18.5a1.5 1.5 0 1 0 0-.01M5.5 11.5h13"/>',
+};
+function icon(name) { const sp = document.createElement('span'); sp.className = 'ico-in'; sp.innerHTML = `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`; return sp; }
 // Accent colour (DV-0.1): forest green, cobalt blue or burnt orange on a warm neutral base; B picks in Settings.
 const ACCENTS = [['forest', 'Forest green', '#2f6a4f'], ['cobalt', 'Cobalt blue', '#2b55c9'], ['burnt', 'Burnt orange', '#b4521f']];
 const applyAccent = () => { const a = localStorage.getItem('smg.accent') || 'forest'; document.documentElement.dataset.accent = ACCENTS.some(x => x[0] === a) ? a : 'forest'; };
@@ -350,7 +357,7 @@ async function renderDash(v) {
 
   v.append(h('div', { class: 'row' }, h('h2', {}, 'Dashboard'), h('div', { class: 'muted' }, 'on this phone')));
   if (!copies.length) {
-    v.append(h('div', { class: 'card' }, h('p', {}, 'Nothing catalogued yet.'), h('a', { href: '#/run', class: 'btn wide' }, '📷 Start a photo run')));
+    v.append(h('div', { class: 'card' }, h('p', {}, 'Nothing catalogued yet.'), h('a', { href: '#/run', class: 'btn wide' }, icon('camera'), 'Start a photo run')));
     return;
   }
   // Headline
@@ -485,9 +492,9 @@ async function renderGarage(v) {
       const save = async () => { await saveBox(label, { box_name: nameIn.value }); toast('Box name saved ✓'); autoSyncSoon(); route(); };
       nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
       boxHead.append(h('div', { class: 'card boxcard' },
-        h('div', { class: 'row' }, h('h2', {}, `📦 ${label}${rec?.box_size ? ' · ' + rec.box_size : ''}`), h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; route(); } }, 'Close')),
+        h('div', { class: 'row' }, h('h2', {}, icon('box'), `${label}${rec?.box_size ? ' · ' + rec.box_size : ''}`), h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; route(); } }, 'Close')),
         h('div', { class: 'muted' }, inBox.length ? `${plural(inBox.length, 'car', 'cars')} inside${byBrand ? ' · ' + byBrand : ''}` : 'Empty so far.'),
-        h('button', { type: 'button', class: 'wide', style: 'margin-top:10px', onclick: () => fillBox(label) }, `📷 Fill ${label}`),
+        h('button', { type: 'button', class: 'wide', style: 'margin-top:10px', onclick: () => fillBox(label) }, icon('camera'), `Fill ${label}`),
         // Progressive disclosure (DV-0.1): settings stay open until the box knows its brands and scale, then fold away.
         h('details', { class: 'more', open: (boxSettingsOpen.has(label) ? boxSettingsOpen.get(label) : !(rec?.box_brand && rec?.box_scale)) ? true : undefined, ontoggle: (e) => boxSettingsOpen.set(label, e.target.open) },
         h('summary', {}, 'Box settings', h('span', { class: 'muted', style: 'font-weight:400' }, [rec?.box_brand === 'mixed' ? 'Mixed brands' : brandName[rec?.box_brand], rec?.box_scale === 'mixed' ? 'Mixed scales' : ref.scales.find(x => x.scale_id === rec?.box_scale)?.label, rec?.box_size].filter(Boolean).join(' · '))),
@@ -538,7 +545,7 @@ async function renderGarage(v) {
         }
       }
       const ph = (photosByModel.get(m.model_id) || []).find(p => p.photo_id === m.primary_photo_id) || (photosByModel.get(m.model_id) || [])[0];
-      const img = h('div', { class: 'ph' }, '📦');
+      const img = h('div', { class: 'ph' }, icon('car'));
       photoUrl(ph).then(u => { if (u) img.replaceChildren(h('img', { src: u, alt: '' })); });
       const nCopies = inventory.filter(i => i.model_id === m.model_id && i.ownership_status === 'Owned').length;
       const pendingPhotos = (photosByModel.get(m.model_id) || []).some(p => !p.original_file_id);
@@ -629,7 +636,7 @@ async function renderAdd(v) {
   for (const role of roles) {
     const p = cap.photos[role];
     const tile = h('button', { class: `shot ${p ? 'done' : ''} ${role !== 'box_art' ? 'req' : ''}`, type: 'button', onclick: () => takePhoto(role) },
-      p?.url ? h('img', { src: p.url, alt: '' }) : h('span', {}, '📷', h('br'), SHOT_ROLES[role].label),
+      p?.url ? h('img', { src: p.url, alt: '' }) : h('span', {}, icon('camera'), SHOT_ROLES[role].label),
       p ? h('span', { class: 'tag' }, `${SHOT_ROLES[role].label} ✓`) : null);
     shots.append(tile);
   }
@@ -683,7 +690,7 @@ async function renderAdd(v) {
   const bcInput = h('input', { inputmode: 'numeric', placeholder: 'Scan, or type the digits', value: cap.barcode?.raw || '', oninput: (e) => { setBarcode(e.target.value, 'typed', ''); updateBc(); updateDup(); } });
   const video = h('video', { class: 'scan hide', playsinline: true, muted: true });
   const scanBtn = h('button', { type: 'button', class: 'quiet', onclick: () => { capTouch(); doLiveScan(); } }, '▦ Scan barcode');
-  const photoBtn = h('button', { type: 'button', class: 'quiet hide', onclick: () => doPhotoScan() }, '📷 Take photo instead');
+  const photoBtn = h('button', { type: 'button', class: 'quiet hide', onclick: () => doPhotoScan() }, icon('camera'), 'Take photo instead');
   v.append(h('div', { class: 'row' }, scanBtn, photoBtn), video, bcInput, bcInfo);
   function setBarcode(raw, source, format) {
     raw = String(raw || '').trim();
@@ -846,7 +853,7 @@ async function renderRun(v) {
   v.append(h('div', { class: 'row' }, h('h2', {}, 'Photo run'), h('a', { href: '#/add', class: 'btn ghost small', style: 'flex:0 0 auto' }, 'One box at a time')));
   if (cap.box) {
     const bn = (await boxNames()).get(`box ${cap.box}`.toLowerCase())?.box_name;
-    v.append(h('div', { class: 'banner fill' }, h('div', {}, h('b', {}, `📦 Filling Box ${cap.box}`), bn ? ` · ${bn}` : ''),
+    v.append(h('div', { class: 'banner fill' }, h('div', {}, h('b', {}, icon('box'), `Filling Box ${cap.box}`), bn ? ` · ${bn}` : ''),
       h('div', { class: 'row', style: 'gap:8px;margin-top:8px' },
         h('button', { type: 'button', class: 'small quiet', onclick: () => { runSetOpen = true; route(); setTimeout(() => document.querySelector('input.boxin')?.scrollIntoView({ block: 'center' }), 50); } }, 'Switch box'),
         h('button', { type: 'button', class: 'small', onclick: async () => {
@@ -947,10 +954,10 @@ async function renderRun(v) {
     }
     v.append(card);
   } else if (next) {
-    v.append(h('button', { class: 'wide runshot', onclick: async () => { runSetOpen = false; if (await takeCapPhoto(next, (t) => { say.textContent = t; })) await afterRunPhoto(); } }, `📷 ${SHOT_ROLES[next].label}`));
+    v.append(h('button', { class: 'wide runshot', onclick: async () => { runSetOpen = false; if (await takeCapPhoto(next, (t) => { say.textContent = t; })) await afterRunPhoto(); } }, icon('camera'), SHOT_ROLES[next].label));
     if (next === 'box_art') v.append(h('button', { class: 'wide ghost', style: 'margin-top:8px', onclick: async () => { cap.artSkipped = true; await afterRunPhoto(); } }, 'Skip box art'));
   } else {
-    v.append(h('button', { class: 'wide', onclick: () => afterRunPhoto() }, 'Save this car'));
+    v.append(runSaving ? h('button', { class: 'wide', disabled: true, 'aria-busy': 'true' }, 'Saving…') : h('button', { class: 'wide', onclick: () => afterRunPhoto() }, 'Save this car'));
   }
   if (runLast) v.append(h('button', { class: 'wide ghost', style: 'margin-top:10px', onclick: async () => {
     if (!confirm(`Undo the last box (${runLast.label})? It is archived, not deleted, and can be restored from Garage → Archived.`)) return;
@@ -970,11 +977,14 @@ async function renderRun(v) {
     await saveRunBox();
   }
 }
+let runSaving = false; // a car is being saved: no second "Save" tap can start another save of the same car
 async function saveRunBox() {
+  if (runSaving) return;
+  runSaving = true;
   const label = `car ${cap.count + 1}`;
   const id = cap.modelId;
-  await saveCapture();
-  if (await store.get('models', id)) runLast = { id, label };
+  try { await saveCapture(); if (await store.get('models', id)) runLast = { id, label }; }
+  finally { runSaving = false; }
   route();
 }
 
@@ -1203,7 +1213,13 @@ async function renderItem(v, modelId) {
   const photos = (await store.list('photos')).filter(p => p.model_id === modelId);
   const idfs = (await store.list('product_identifiers')).filter(i => i.model_id === modelId);
   v.append(h('a', { href: '#/', class: 'back' }, '← Garage'));
-  v.append(h('h2', {}, m.display_name || '(no name yet)'));
+  // Product page (DV-0.1, Apple Store / Discogs): name and identity first, one big photo, facts, details on demand.
+  const brandN = ref.brands.find(b => b.brand_id === m.brand_id)?.name || m.printed_brand_text || '';
+  const scaleN = ref.scales.find(x => x.scale_id === m.scale_id)?.label || '';
+  v.append(h('div', { class: 'pdp-head' },
+    h('div', { class: 'pdp-kicker' }, [brandN, scaleN].filter(Boolean).join(' · ') || 'Brand and scale not set'),
+    h('h2', {}, m.display_name || '(no name yet)'),
+    m.product_code ? h('div', { class: 'pdp-code' }, m.product_code) : null));
   if (m.deleted_at) v.append(h('div', { class: 'banner warn' }, h('div', { class: 'hd' }, 'Archived: hidden from your garage.'),
     h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: restore }, 'Restore to garage')));
   async function restore() { await store.update('models', modelId, { deleted_at: '' }); await store.logChange('models', modelId, 'deleted_at', m.deleted_at, '', 'restored in app'); toast('Restored ✓'); route(); autoSyncSoon(); }
@@ -1212,7 +1228,10 @@ async function renderItem(v, modelId) {
 
   // Photos (audit I2): tap a photo to change its label, make it the main photo, or remove it.
   if (selectedPhoto.model !== modelId) selectedPhoto = { model: modelId, id: null };
-  const gal = h('div', { class: 'gallery' });
+  const heroP = photos.find(p => p.photo_id === (selectedPhoto.id || m.primary_photo_id)) || photos.find(p => p.shot_role === 'box_front') || photos[0];
+  if (heroP) { const himg = h('img', { alt: SHOT_ROLES[heroP.shot_role]?.label || 'Photo' }); photoUrl(heroP, 'display').then(u => { if (u) himg.src = u; }); v.append(h('div', { class: 'pdp-hero' }, himg)); }
+  else v.append(h('div', { class: 'pdp-hero empty' }, icon('car'), h('span', { class: 'muted' }, 'No photo yet')));
+  const gal = h('div', { class: 'gallery thumbs' });
   for (const p of photos.sort((a, b) => Object.keys(SHOT_ROLES).indexOf(a.shot_role) - Object.keys(SHOT_ROLES).indexOf(b.shot_role))) {
     const img = h('img', { alt: SHOT_ROLES[p.shot_role]?.label || 'Photo' });
     photoUrl(p, 'display').then(u => { if (u) img.src = u; });
@@ -1250,6 +1269,11 @@ async function renderItem(v, modelId) {
     await store.createMany(items);
     toast('Photo added'); route(); autoSyncSoon();
   } }, '＋ Photo')));
+  const owned = inv.filter(i => i.ownership_status === 'Owned');
+  const facts = [plural(owned.length, 'copy', 'copies'), ...new Set(owned.map(i => ({ sealed: 'Sealed', opened: 'Opened', loose: 'Loose' }[i.packaging_state])).filter(Boolean)),
+    ...new Set(owned.map(i => i.storage_location).filter(Boolean)), idfs.find(i => i.identifier_type === 'barcode')?.value_raw ? `Barcode ${idfs.find(i => i.identifier_type === 'barcode').value_raw}` : null,
+    m.completeness_status === 'complete' ? 'Complete' : 'Quick entry'].filter(Boolean);
+  v.append(h('div', { class: 'facts' }, facts.map(t => /^Box /.test(t) ? h('a', { class: 'fact', href: '#/', onclick: (e) => { e.preventDefault(); garageFilter = 'all'; garageSearch = t; location.hash = '#/'; } }, icon('box'), t) : h('span', { class: 'fact' }, t))));
 
   // Editable product fields
   // Typed edits are saved before any navigation or redraw (audit I1): see leaveHooks in route().
@@ -1258,21 +1282,25 @@ async function renderItem(v, modelId) {
   const f = { display_name: m.display_name || '', brand_id: m.brand_id || '', scale_id: m.scale_id || '', product_code: m.product_code || '', variant: m.variant || '', series: m.series || '', notes: m.notes || '', barcode: bc0?.value_raw || '' };
   let productDirty = false;
   const set = (k) => (e) => { f[k] = e.target.value; productDirty = true; };
-  const form = h('div', { class: 'card' }, h('h3', {}, 'Product'));
+  const form = h('div', { class: 'card' }, h('h3', {}, 'Details'));
   const field = (label, el) => form.append(h('label', { class: 'f' }, label), el);
   field('Name', h('input', { value: f.display_name, oninput: set('display_name') }));
   field('Brand', h('select', { onchange: set('brand_id') }, h('option', { value: '' }, '—'), ref.brands.map(b => h('option', { value: b.brand_id, selected: b.brand_id === f.brand_id ? true : undefined }, b.name + (b.record_status === 'needs_review' ? ' (needs review)' : '')))));
   field('Scale', h('select', { onchange: set('scale_id') }, h('option', { value: '' }, '—'), ref.scales.map(s => h('option', { value: s.scale_id, selected: s.scale_id === f.scale_id ? true : undefined }, s.label))));
   field('Product code (exactly as printed)', h('input', { value: f.product_code, autocapitalize: 'characters', oninput: set('product_code') }));
-  field('Variant / colour', h('input', { value: f.variant, oninput: set('variant') }));
-  field('Series', h('input', { value: f.series, oninput: set('series') }));
-  field('Notes', h('textarea', { oninput: set('notes') }, f.notes));
+  // Progressive disclosure: the less-used fields fold away while empty; anything already filled stays visible.
+  const moreBox = h('details', { class: 'more inner', open: (f.variant || f.series || f.notes || f.barcode) ? true : undefined }, h('summary', {}, 'More details', h('span', { class: 'muted', style: 'font-weight:400' }, 'variant, series, notes, barcode')));
+  form.append(moreBox);
+  const field2 = (label, el) => moreBox.append(h('label', { class: 'f' }, label), el);
+  field2('Variant / colour', h('input', { value: f.variant, oninput: set('variant') }));
+  field2('Series', h('input', { value: f.series, oninput: set('series') }));
+  field2('Notes', h('textarea', { oninput: set('notes') }, f.notes));
   // Barcode can be corrected (audit I2), with the same check-digit warning as quick capture.
   const bcWarn = h('div', { class: 'muted' });
   const bcCheck = () => { const ok = gtinCheckOk(f.barcode); bcWarn.textContent = f.barcode.trim() && ok === false ? '⚠ These digits don\'t add up (check digit). Please re-check.' : ''; bcWarn.style.color = 'var(--warn)'; };
-  field('Barcode', h('input', { inputmode: 'numeric', value: f.barcode, placeholder: 'None yet', oninput: (e) => { set('barcode')(e); bcCheck(); } }));
-  form.append(bcWarn); bcCheck();
-  if (barcodes.length > 1) form.append(h('p', { class: 'muted' }, `Other barcodes: ${barcodes.slice(1).map(i => i.value_raw).join(', ')}`));
+  field2('Barcode', h('input', { inputmode: 'numeric', value: f.barcode, placeholder: 'None yet', oninput: (e) => { set('barcode')(e); bcCheck(); } }));
+  moreBox.append(bcWarn); bcCheck();
+  if (barcodes.length > 1) moreBox.append(h('p', { class: 'muted' }, `Other barcodes: ${barcodes.slice(1).map(i => i.value_raw).join(', ')}`));
   async function saveBarcode() {
     const nb = f.barcode.trim(), ob = bc0?.value_raw || '';
     if (nb === ob) return;
@@ -1308,7 +1336,8 @@ async function renderItem(v, modelId) {
   for (const [idx, c] of inv.entries()) {
     const cf = { ownership_status: c.ownership_status, packaging_state: c.packaging_state, condition: c.condition, packaging_condition: c.packaging_condition, storage_location: c.storage_location, purchase_price: c.purchase_price, purchase_date: c.purchase_date, purchase_source: c.purchase_source };
     const cc = { dirty: false };
-    const card = h('div', { class: 'card' }, h('h3', {}, `Copy ${idx + 1}${inv.length > 1 ? ` of ${inv.length}` : ''}`));
+    const csum = [c.storage_location, { sealed: 'sealed', opened: 'opened', loose: 'loose' }[c.packaging_state], c.purchase_price ? `₹${c.purchase_price}` : 'price unknown', c.ownership_status !== 'Owned' ? c.ownership_status : ''].filter(Boolean).join(' · ');
+    const card = h('details', { class: 'card more copy' }, h('summary', {}, `${inv.length > 1 ? `Copy ${idx + 1} of ${inv.length}` : 'Your copy'}`, h('span', { class: 'muted', style: 'font-weight:400' }, csum)));
     const add = (label, el) => card.append(h('label', { class: 'f' }, label), el);
     const sel = (key, opts) => h('select', { onchange: e => { cf[key] = e.target.value; cc.dirty = true; } }, h('option', { value: '' }, '— unknown —'), opts.map(o => h('option', { value: o, selected: o === cf[key] ? true : undefined }, o)));
     add('Status', sel('ownership_status', ['Owned', 'Sold', 'Gifted', 'Traded', 'Missing']));
@@ -1346,11 +1375,11 @@ async function renderItem(v, modelId) {
     toast('Your changes were saved ✓');
     autoSyncSoon();
   });
-  v.append(h('dl', { class: 'kv card' },
+  v.append(h('details', { class: 'card more' }, h('summary', {}, 'Record info'), h('dl', { class: 'kv' },
     h('dt', {}, 'Duplicate check'), h('dd', {}, { checkable: 'Checkable', not_checkable: 'Not checkable yet (no code)', needs_review: 'Brand needs review' }[m.duplicate_check_status] || m.duplicate_check_status),
     h('dt', {}, 'Added'), h('dd', {}, new Date(m.created_at).toLocaleString()),
     h('dt', {}, 'Sync'), h('dd', {}, rec.dirty ? 'Waiting to sync' : 'Synced'),
-    h('dt', {}, 'ID'), h('dd', { class: 'muted' }, m.model_id)));
+    h('dt', {}, 'ID'), h('dd', { class: 'muted' }, m.model_id))));
   v.append(m.deleted_at ? h('button', { class: 'wide', onclick: restore }, 'Restore to garage')
     : h('button', { class: 'ghost wide', onclick: async () => { if (confirm('Archive this model? It is hidden from your garage, never deleted, and can be restored from Garage → Archived.')) { await store.archive('models', modelId); toast('Archived. Restore it from Garage → Archived.', 3500); location.hash = '#/'; autoSyncSoon(); } } }, 'Archive'));
 }
