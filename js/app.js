@@ -16,7 +16,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.17.4';
+export const APP_VERSION = 's1-0.17.5';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -145,10 +145,24 @@ async function refreshStatus() {
 let lastSyncMsg = '';
 let moveBoxFor = null; // car page: the model whose "Move box" panel is open
 // Sync button state (B, 24 Nov): greyed out with "Syncing…" while a sync runs.
-function syncButtons() {
-  const busy = isSyncing() || syncBusy;
-  document.querySelectorAll('.syncbtn').forEach(b => { b.disabled = busy; b.setAttribute('aria-busy', busy ? 'true' : 'false'); b.textContent = busy ? 'Syncing…' : 'Sync now'; });
+// Button look rule (B, 24 Nov 23:10): greyed = can't work now (syncing, offline); quiet = works but not needed
+// (all synced: still pulls changes made on another device); bold = something for you to do (items waiting).
+async function syncButtons() {
+  const btns = document.querySelectorAll('.syncbtn');
+  if (!btns.length) return;
+  const busy = isSyncing() || syncBusy, offline = !navigator.onLine;
+  let p = { boxes: 0, other: 0 };
+  if (!busy && !offline) { try { p = await store.pendingSummary(); } catch {} }
+  const waiting = p.boxes || p.other;
+  btns.forEach(b => {
+    b.disabled = busy || offline;
+    b.setAttribute('aria-busy', busy ? 'true' : 'false');
+    b.classList.toggle('quiet', !busy && !offline && !waiting);
+    b.textContent = busy ? 'Syncing…' : offline ? 'Offline: sync later' : waiting ? `Sync now · ${p.boxes ? plural(p.boxes, 'box', 'boxes') : 'changes'}` : 'Sync now';
+  });
 }
+window.addEventListener('online', () => syncButtons());
+window.addEventListener('offline', () => syncButtons());
 let syncBusy = false;
 async function runSync(interactive) {
   if (isSyncing() || syncBusy) return;
@@ -229,7 +243,7 @@ async function route() {
   }
   updateNameBadge();
   if (token === routeSeq) {
-    view().replaceChildren(v);
+    view().replaceChildren(v); syncButtons(); // style Sync buttons once the page is on screen
     if (prevHash !== hash) window.scrollTo(0, isGarage(hash) && prevHash?.startsWith('#/item/') ? garageScroll : 0);
   }
   refreshStatus();
@@ -1301,7 +1315,8 @@ async function renderName(v) {
   v.append(h('div', { class: 'savebar' },
     h('button', { type: 'button', class: 'ghost', onclick: () => { nameSkipped.add(m.model_id); route(); } }, 'Skip'),
     h('div', { class: 'need' }, h('a', { href: `#/item/${encodeURIComponent(m.model_id)}` }, 'Open full page')),
-    h('button', { class: 'save', onclick: save }, 'Save & next')));
+    h('button', { class: `save ${nameIn.value.trim() ? '' : 'quiet'}`, id: 'nameSave', onclick: save }, 'Save & next')));
+  nameIn.addEventListener('input', () => $('#nameSave')?.classList.toggle('quiet', !nameIn.value.trim()));
   setTimeout(() => nameIn.focus(), 50);
 }
 
@@ -1489,11 +1504,12 @@ async function renderItem(v, modelId) {
   const bc0 = barcodes[0];
   const f = { display_name: m.display_name || '', brand_id: m.brand_id || '', scale_id: m.scale_id || '', product_code: m.product_code || '', variant: m.variant || '', series: m.series || '', notes: m.notes || '', barcode: bc0?.value_raw || '' };
   let productDirty = false;
-  const set = (k) => (e) => { f[k] = e.target.value; productDirty = true; };
+  const set = (k) => (e) => { f[k] = e.target.value; productDirty = true; markDirty(); };
+  const markDirty = () => $('#pdpSave')?.classList.remove('quiet');
   const form = h('div', { class: 'card', id: 'pdpDetails' }, h('h3', {}, 'Details'));
   const field = (label, el) => form.append(h('label', { class: 'f' }, label), el);
   field('Name', h('input', { value: f.display_name, oninput: set('display_name') }));
-  field('Brand', h('select', { onchange: async (e) => { const v = e.target.value; const id = v.startsWith('known:') || v === '__new' ? await pickedBrandId(v, ref.brands, e.target) : v; if (v && !id) { e.target.value = f.brand_id; return; } f.brand_id = id; productDirty = true; } }, brandOptions(ref.brands, f.brand_id, '—')));
+  field('Brand', h('select', { onchange: async (e) => { const v = e.target.value; const id = v.startsWith('known:') || v === '__new' ? await pickedBrandId(v, ref.brands, e.target) : v; if (v && !id) { e.target.value = f.brand_id; return; } f.brand_id = id; productDirty = true; markDirty(); } }, brandOptions(ref.brands, f.brand_id, '—')));
   field('Scale', h('select', { onchange: set('scale_id') }, h('option', { value: '' }, '—'), ref.scales.map(s => h('option', { value: s.scale_id, selected: s.scale_id === f.scale_id ? true : undefined }, s.label))));
   field('Product code (exactly as printed)', h('input', { value: f.product_code, autocapitalize: 'characters', oninput: set('product_code') }));
   // Progressive disclosure: the less-used fields fold away while empty; anything already filled stays visible.
@@ -1532,7 +1548,7 @@ async function renderItem(v, modelId) {
     if (bc0) bc0.value_raw = f.barcode.trim();
   }
   form.append(h('div', { class: 'row', style: 'margin-top:12px' },
-    h('button', { onclick: async () => { await saveProduct(); toast('Saved ✓'); route(); autoSyncSoon(); } }, 'Save'),
+    h('button', { id: 'pdpSave', class: 'quiet', onclick: async () => { if (!productDirty) { toast('Nothing changed'); return; } await saveProduct(); toast('Saved ✓'); route(); autoSyncSoon(); } }, 'Save'),
     h('button', { class: m.completeness_status === 'complete' ? 'quiet' : 'ghost', onclick: async () => {
       if (productDirty) await saveProduct();
       await store.update('models', modelId, { completeness_status: m.completeness_status === 'complete' ? 'quick' : 'complete' }); route(); autoSyncSoon();
@@ -1737,21 +1753,24 @@ async function renderSettings(v) {
   const ps = await store.pendingSummary();
 
   const acct = h('div', { class: 'card' }, h('h3', {}, 'Google account'));
-  const cid = h('input', { value: getClientId(), placeholder: 'OAuth Client ID (….apps.googleusercontent.com)' });
-  acct.append(h('label', { class: 'f' }, 'Google Client ID (saved on this phone only)'), cid,
-    h('p', { class: 'muted' }, getClientId() ? 'Found the Client ID saved by the test kit on this phone ✓' : 'Paste the Client ID from your Google Cloud project (same one the test kit used).'),
-    h('div', { class: 'row' },
-      h('button', { onclick: async () => { if (cid.value.trim()) setClientId(cid.value); try { await signIn(); toast('Signed in'); await runSync(true); } catch (e) { toast(e.message, 4000, 'bad'); } route(); } }, hasToken() ? 'Sync now' : 'Sign in & set up'),
-    ),
-    h('p', { class: 'muted' }, hasToken() ? `Signed in (${tokenMinutesLeft()} min left; renews on sync).` : 'Not signed in. You can still capture offline.'));
+  const cid = h('input', { value: getClientId(), placeholder: 'OAuth Client ID (….apps.googleusercontent.com)', 'aria-label': 'Google Client ID' });
+  const cidBlock = [h('label', { class: 'f' }, 'Google Client ID (saved on this phone only)'), cid,
+    h('p', { class: 'muted' }, getClientId() ? 'Saved on this phone ✓' : 'Paste the Client ID from your Google Cloud project (same one the test kit used).')];
+  // Signed in: one status line, the Client ID folded away, and no second Sync button (the Sync card has it).
+  if (hasToken()) acct.append(h('p', {}, `Signed in ✓`), h('p', { class: 'muted' }, `${tokenMinutesLeft()} min left; renews by itself on sync.`),
+    h('details', { class: 'more' }, h('summary', {}, 'Change Client ID'), ...cidBlock,
+      h('button', { class: 'quiet small', onclick: () => { if (cid.value.trim()) { setClientId(cid.value); toast('Client ID saved'); } } }, 'Save Client ID')));
+  else acct.append(...cidBlock, h('p', { class: 'muted' }, 'Not signed in. You can still capture offline.'),
+    h('button', { class: 'wide', onclick: async () => { if (cid.value.trim()) setClientId(cid.value); try { await signIn(); toast('Signed in'); await runSync(true); } catch (e) { toast(e.message, 4000, 'bad'); } route(); } }, 'Sign in & set up'));
   v.append(acct);
 
   const sync = h('div', { class: 'card' }, h('h3', {}, 'Sync'),
-    h('p', {}, ps.boxes || ps.other ? `${ps.boxes ? plural(ps.boxes, 'box', 'boxes') : 'Some changes'} waiting · ${plural(ps.photos, 'photo', 'photos')} not uploaded yet${c.conflicts ? ` · ${plural(c.conflicts, 'clash', 'clashes')} to review` : ''}` : (c.conflicts ? `${plural(c.conflicts, 'clash', 'clashes')} to review` : 'Nothing waiting to sync.')),
+    h('p', {}, ps.boxes || ps.other ? `${ps.boxes ? plural(ps.boxes, 'box', 'boxes') : 'Some changes'} waiting${ps.photos ? ` · ${plural(ps.photos, 'photo', 'photos')} not uploaded yet` : ''}${c.conflicts ? ` · ${plural(c.conflicts, 'clash', 'clashes')} to review` : ''}` : (c.conflicts ? `${plural(c.conflicts, 'clash', 'clashes')} to review` : 'Nothing waiting to sync.')),
     h('p', { class: 'muted', id: 'syncMsg' }, lastSyncMsg || (last ? `Last sync ${new Date(last.finishedAt).toLocaleString()} · ${last.errors.length ? last.errors.length + ' error(s)' : 'no errors'}` : 'Never synced.')),
     last?.errors?.length ? h('details', {}, h('summary', {}, 'Show errors'), h('pre', { style: 'white-space:pre-wrap;font-size:.8rem' }, last.errors.join('\n'))) : null,
-    h('button', { class: 'syncbtn', onclick: () => runSync(true) }, 'Sync now'));
-  v.append(sync); syncButtons();
+    hasToken() ? h('button', { class: 'syncbtn', onclick: () => runSync(true) }, 'Sync now')
+      : h('p', { class: 'muted' }, 'Sign in above to sync.')); // signed out: one bold button on the page, not two
+  v.append(sync);
 
   const where = h('div', { class: 'card' }, h('h3', {}, 'Your data'),
     config?.workbookId ? h('p', {}, h('a', { href: `https://docs.google.com/spreadsheets/d/${config.workbookId}`, target: '_blank', rel: 'noopener' }, 'Open SCALE_GARAGE_MASTER sheet ↗')) : h('p', { class: 'muted' }, 'Not set up yet — sign in above.'),
