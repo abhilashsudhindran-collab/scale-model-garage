@@ -57,7 +57,7 @@ def main():
         page.goto(base + '#/dash'); page.wait_for_selector('.card.hero')
         check(txt('.card.hero .big') == '7', f"headline counts 7 boxes, archived one excluded ({txt('.card.hero .big')})")
         hero = txt('.card.hero')
-        check('of about 1,000 boxes catalogued (1%)' in hero and '7 different models' in hero and '3 storage boxes in use' in hero, 'headline: progress, models, storage boxes')
+        check('boxes catalogued' in hero and '1,000' not in hero and 'rough progress' in hero and '7 different models' in hero and '3 storage boxes in use' in hero, 'headline: progress, models, storage boxes')
         stats = [s.inner_text().replace('\n', ' ') for s in page.query_selector_all('.stat')]
         check(any(s.startswith('✓ 5 named') for s in stats) and any('2 need a name' in s for s in stats), f'status tiles ({stats})')
         check(any('7 waiting to sync' in s for s in stats), 'waiting-to-sync tile counts unsynced boxes')

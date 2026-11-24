@@ -197,8 +197,9 @@ async function renderDash(v) {
   const storage = copies.map(i => i.storage_location).filter(Boolean);
   v.append(h('div', { class: 'card hero' },
     h('div', { class: 'big' }, copies.length.toLocaleString('en-IN')),
-    h('div', {}, `of about ${est.toLocaleString('en-IN')} boxes catalogued (${pct}%)`),
-    h('div', { class: 'bar', role: 'progressbar', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': `${pct}% catalogued` }, h('span', { style: `width:${Math.max(pct, 1)}%` })),
+    h('div', {}, plural(copies.length, 'box', 'boxes').replace(/^[\d,]+ /, '') + ' catalogued'),
+    h('div', { class: 'bar', role: 'progressbar', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': 'rough progress' }, h('span', { style: `width:${Math.max(pct, 1)}%` })),
+    h('div', { class: 'muted small' }, 'Bar = rough progress, based on your guess in Settings'),
     h('div', { class: 'muted' }, `${plural(active.length, 'different model', 'different models')} · ${plural(new Set(storage).size, 'storage box', 'storage boxes')} in use`)));
 
   // Status tiles: icon + label + number, each opens the matching list
@@ -227,7 +228,7 @@ async function renderDash(v) {
     h('div', { class: 'cols', role: 'img', 'aria-label': perDay.map(([d, n]) => `${d}: ${n}`).join(', ') }, perDay.map(([d, n]) => h('div', { class: 'col', title: `${new Date(d).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}: ${n}` },
       h('span', { class: 'cn' }, n ? String(n) : ''), h('span', { class: 'cb' }, h('span', { style: `height:${n ? Math.max(4, Math.round((n / maxDay) * 100)) : 0}%` })),
       h('span', { class: 'cd' }, new Date(d).toLocaleDateString('en-IN', { weekday: 'narrow' }))))),
-    h('p', { class: 'muted' }, week ? `${plural(week, 'box', 'boxes')} this week${perActiveDay && left ? ` · at ${Math.round(perActiveDay)} a session, about ${Math.ceil(left / perActiveDay)} more sessions for the rest (rough estimate)` : ''}` : 'No boxes added this week.')));
+    h('p', { class: 'muted' }, week ? `${plural(week, 'box', 'boxes')} this week${perActiveDay && left ? ` · at ${Math.round(perActiveDay)} a session, roughly ${Math.ceil(left / perActiveDay)} sessions to go (based on your rough guess)` : ''}` : 'No boxes added this week.')));
 
   // By brand, by scale
   v.append(h('div', { class: 'card' }, h('h3', {}, 'By brand'),
@@ -265,8 +266,8 @@ async function renderGarage(v) {
   const boxesUsed = new Set(copies.map(i => i.storage_location).filter(Boolean)).size;
   const pct = Math.min(100, Math.round((copies.length / est) * 100));
   v.append(h('div', { class: 'overview' },
-    h('div', { class: 'ovtext' }, h('b', {}, `${copies.length} of about ${est.toLocaleString('en-IN')}`), ' boxes catalogued', boxesUsed ? ` · ${plural(boxesUsed, 'storage box', 'storage boxes')} in use` : ''),
-    h('div', { class: 'bar', role: 'progressbar', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': `${pct}% catalogued` }, h('span', { style: `width:${Math.max(pct, copies.length ? 1 : 0)}%` }))));
+    h('div', { class: 'ovtext' }, h('b', {}, plural(copies.length, 'box', 'boxes')), ' catalogued', boxesUsed ? ` · ${plural(boxesUsed, 'storage box', 'storage boxes')} in use` : ''),
+    h('div', { class: 'bar', role: 'progressbar', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': 'rough progress' }, h('span', { style: `width:${Math.max(pct, copies.length ? 1 : 0)}%` }))));
   const nameless = active.filter(r => !String(r.data.display_name || '').trim()).length;
   if (nameless) v.append(h('a', { href: '#/name', class: 'btn quiet wide', style: 'margin-bottom:10px' }, `✎ ${plural(nameless, 'box needs', 'boxes need')} a name: name them`));
   const search = h('input', { type: 'search', placeholder: 'Search name, code, barcode, brand, scale…', value: garageSearch, oninput: (e) => { garageSearch = e.target.value; draw(); } });
@@ -1158,8 +1159,8 @@ async function renderSettings(v) {
   // Collection size, for the Garage progress bar.
   const estIn = h('input', { inputmode: 'numeric', value: String(collectionEstimate()), 'aria-label': 'About how many boxes in your collection' });
   v.append(h('div', { class: 'card' }, h('h3', {}, 'Your collection'),
-    h('label', { class: 'f' }, 'About how many boxes in total?'), estIn,
-    h('p', { class: 'muted' }, 'Used only for the progress bar on the Garage screen. A rough number is fine.'),
+    h('label', { class: 'f' }, 'Rough guess: how many boxes in total?'), estIn,
+    h('p', { class: 'muted' }, 'Only sets how full the progress bars look. It is never shown as a target. Raise it any time as the collection grows.'),
     h('button', { class: 'quiet', onclick: () => { const n = Number(estIn.value.replace(/\D/g, '')); if (n > 0) { localStorage.setItem('smg.collectionEstimate', String(n)); toast('Saved ✓'); } else toast('Please enter a number', 3000, 'warn'); } }, 'Save')));
 
   const est = await storageEstimate();
