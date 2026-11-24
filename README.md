@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.6.1
+## Status: Stage 1 (quick-capture slice), version s1-0.7.0
+
+**s1-0.7.0 (24 Nov 2026): Dashboard.** New Dashboard tab: boxes catalogued with a rough progress bar (the collection-size guess is never shown as a target), status tiles (named, need a name, need review, waiting to sync), boxes added in the last 7 days with a rough sessions-to-go estimate, boxes by brand and by scale, numbered storage boxes with their counts, and sealed/opened/loose when recorded. Every tile and bar opens the matching list. New Name tab with a badge counting boxes that need a name. Searching "box 3" (or tapping Box 3) now shows exactly storage Box 3, not Box 30 or scale 1:43.
 
 **s1-0.6.1 (24 Nov 2026): Gemini's own answer style accepted.** First real test on B's phone: sharing worked and Gemini read the box correctly, but replied as a labelled list ("Car Name: …", "Product / Item Code: …"), which the app rejected. The app now also reads labelled lists (grouped by "Box N" headings or the photo names Gemini cites; importer, price and dates ignored), and the instructions ask for the format first and last (prompt `names-v2`).
 
@@ -39,6 +41,7 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - `python3 tests/e2e_p2.py` — headless checks for s1-0.4.0 (storage boxes, backups, second device).
 - `python3 tests/e2e_p3.py` — headless checks for s1-0.5.0 (Photo run, Name them).
 - `node tests/ai.test.mjs` — AI answer parser (copy-paste names).
+- `python3 tests/e2e_p5.py` — headless checks for s1-0.7.0 (Dashboard, Name tab).
 - `python3 tests/e2e_p4.py` — headless checks for s1-0.6.0 (share sheet and clipboard simulated).
 - `python3 tests/e2e_mock.py` — headless Chrome against a **fake** in-memory Google Drive/Sheets.
 

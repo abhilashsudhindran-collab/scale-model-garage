@@ -80,7 +80,7 @@ def main():
         # Garage: overview, box badges, group by box, search by box
         page.goto(base + '#/'); page.wait_for_selector('.tile'); page.wait_for_timeout(300)
         ov = page.inner_text('.overview')
-        check('2 of about 1,000' in ov and '2 storage boxes in use' in ov, f'overview shows progress and boxes ("{ov}")')
+        check('2 boxes catalogued' in ov and '1,000' not in ov and '2 storage boxes in use' in ov, f'overview shows progress and boxes ("{ov}")')
         check(page.locator('.tile .b.box', has_text='Box 1').count() == 1, 'tile shows its storage box')
         page.get_by_role('button', name='By box').click(); page.wait_for_timeout(300)
         heads = page.locator('h3.group').all_inner_texts()
@@ -96,7 +96,7 @@ def main():
         page.locator('.card', has_text='Your collection').locator('input').fill('500')
         page.locator('.card', has_text='Your collection').get_by_role('button', name='Save').click(); page.wait_for_timeout(200)
         page.goto(base + '#/'); page.wait_for_selector('.overview')
-        check('2 of about 500' in page.inner_text('.overview'), 'collection size setting feeds the progress bar')
+        check(page.get_attribute('.overview .bar', 'aria-valuenow') == '0', 'collection size setting feeds the progress bar (2 of 500 rounds to 0%)')
 
         # Backups after the first successful sync: one daily + one monthly copy, recorded in SETTINGS
         ev(f"localStorage.setItem('smg.clientId', '{CID}')")
