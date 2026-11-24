@@ -14,7 +14,7 @@ import { straighten, validQuad } from './crop.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.15.1';
+export const APP_VERSION = 's1-0.15.2';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -639,13 +639,14 @@ async function renderAdd(v) {
   const roles = ['box_front', 'box_rear', ...(cap.sealed ? ['box_art'] : [])];
   for (const role of roles) {
     const p = cap.photos[role];
-    const tile = h('button', { class: `shot ${p ? 'done' : ''} ${role !== 'box_art' ? 'req' : ''}`, type: 'button', onclick: () => takePhoto(role) },
+    const tile = h('button', { class: `shot ${p ? 'done' : ''} ${role !== 'box_art' ? 'req' : ''} ${shotSel === role ? 'sel' : ''}`, type: 'button', 'aria-label': p ? `${SHOT_ROLES[role].label}: options` : undefined, onclick: () => { if (p) { shotSel = shotSel === role ? null : role; route(); } else takePhoto(role); } },
       p?.url ? h('img', { src: p.url, alt: '' }) : h('span', {}, icon('camera'), SHOT_ROLES[role].label),
       p ? h('span', { class: 'tag' }, `${SHOT_ROLES[role].label} ✓`) : null);
     shots.append(tile);
   }
   if (roles.length < 3) shots.append(h('div', {}));
   v.append(shots);
+  { const row = shotActionsRow(null); if (row) v.append(row); }
   const setSealed = (yes) => { cap.sealed = yes; localStorage.setItem('smg.lastSealed', yes ? 'yes' : 'no'); capTouch(); saveDraftSoon(); route(); };
   v.append(h('div', { class: 'chips', style: 'margin-top:10px', role: 'group', 'aria-label': 'Box type' },
     h('button', { type: 'button', class: `chip ${cap.sealed ? 'on' : ''}`, 'aria-pressed': cap.sealed ? 'true' : 'false', onclick: () => setSealed(true) }, 'Sealed box'),
@@ -806,6 +807,33 @@ async function renderAdd(v) {
   }
 }
 
+// Tap a taken photo -> "Retake" (camera opens; the old photo stays until a new one is taken) or "Remove".
+// Same on Quick capture and Photo run (B, 24 Nov: retake or discard each photo individually).
+let shotSel = null;
+async function retakeShot(role, after) {
+  const old = cap.photos[role]?.photoId;
+  shotSel = null;
+  const ok = await takeCapPhoto(role, () => {});
+  if (ok && old && cap.photos[role]?.photoId !== old) await dropDraftPhoto(old);
+  if (ok && after) await after(); else route();
+}
+async function removeShot(role) {
+  const p = cap.photos[role]; shotSel = null;
+  if (!p) { route(); return; }
+  await dropDraftPhoto(p.photoId); delete cap.photos[role];
+  if (role === 'box_rear' && cap.barcode?.source === 'rear_photo') cap.barcode = null;
+  if (role === 'box_art') cap.artSkipped = false;
+  cap.runDecision = null; await saveDraft(); toast(`${SHOT_ROLES[role].label} photo removed`); route();
+}
+function shotActionsRow(after) {
+  if (!shotSel || !cap.photos[shotSel]) return null;
+  const role = shotSel;
+  return h('div', { class: 'shotsel' }, h('b', {}, `${SHOT_ROLES[role].label} photo`),
+    h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'small', onclick: () => retakeShot(role, after) }, icon('camera'), 'Retake'),
+      h('button', { type: 'button', class: 'small quiet', onclick: () => removeShot(role) }, 'Remove'),
+      h('button', { type: 'button', class: 'small ghost', onclick: () => { shotSel = null; route(); } }, 'Cancel')));
+}
 // One photo for the box in progress (shared by Quick capture and Photo run). Returns true when a photo was added.
 async function takeCapPhoto(role, say = () => {}) {
   capTouch();
@@ -918,18 +946,14 @@ async function renderRun(v) {
   const strip = h('div', { class: 'shots' });
   for (const role of ['box_front', 'box_rear', ...(cap.sealed ? ['box_art'] : [])]) {
     const p = cap.photos[role];
-    const retake = p && !runSaving ? async () => {
-      if (!confirm(`Retake the ${SHOT_ROLES[role].label.toLowerCase()} photo?`)) return;
-      await dropDraftPhoto(p.photoId); delete cap.photos[role];
-      if (role === 'box_rear' && cap.barcode?.source === 'rear_photo') cap.barcode = null;
-      cap.runDecision = null; await saveDraft(); route();
-    } : undefined;
-    strip.append(h(p ? 'button' : 'div', { type: p ? 'button' : undefined, class: `shot ${p ? 'done' : ''} ${role === next ? 'nextshot' : ''}`, onclick: retake, 'aria-label': p ? `${SHOT_ROLES[role].label}: tap to retake` : undefined }, p?.url ? h('img', { src: p.url, alt: '' }) : h('span', {}, SHOT_ROLES[role].label), p ? h('span', { class: 'tag' }, `${SHOT_ROLES[role].label} ✓`) : null));
+    const retake = p && !runSaving ? () => { shotSel = shotSel === role ? null : role; route(); } : undefined;
+    strip.append(h(p ? 'button' : 'div', { type: p ? 'button' : undefined, class: `shot ${p ? 'done' : ''} ${role === next ? 'nextshot' : ''} ${shotSel === role ? 'sel' : ''}`, onclick: retake, 'aria-label': p ? `${SHOT_ROLES[role].label}: options` : undefined }, p?.url ? h('img', { src: p.url, alt: '' }) : h('span', {}, SHOT_ROLES[role].label), p ? h('span', { class: 'tag' }, `${SHOT_ROLES[role].label} ✓`) : null));
   }
   v.append(strip);
+  { const row = shotActionsRow(afterRunPhoto); if (row) v.append(row); }
   const nPhotos = Object.keys(cap.photos).length;
   if (nPhotos && !runSaving) v.append(h('div', { class: 'row shotacts' },
-    h('span', { class: 'muted small' }, 'Tap a photo to retake it'),
+    h('span', { class: 'muted small' }, 'Tap a photo to retake or remove it'),
     h('button', { type: 'button', class: 'small ghost', onclick: async () => {
       if (!confirm(`Discard this car (${plural(nPhotos, 'photo', 'photos')})? Nothing has been saved for it yet.`)) return;
       for (const r of Object.keys(cap.photos)) await dropDraftPhoto(cap.photos[r].photoId);

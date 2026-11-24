@@ -44,11 +44,21 @@ def main():
         page.reload(); page.wait_for_selector('text=Photo run')
         check('Box front ✓' in page.inner_text('.shots') and 'Bburago' not in page.inner_text('.runhead'), 'half-done car survives a reload, still without a brand')
         shoot('Box rear', 'r')
-        check(page.is_visible('text=Which brand is this car?') and nmod() == 0, 'mixed box: asks the brand (nothing saved with an old brand)')
+        try: page.wait_for_selector('text=Which brand is this car?', timeout=8000); asked = True
+        except Exception: asked = False
+        check(asked and nmod() == 0, 'mixed box: asks the brand (nothing saved with an old brand)')
 
-        # Retake one photo by tapping it
-        page.get_by_role('button', name='Box front: tap to retake').click(); page.wait_for_timeout(500)
-        check('Box front ✓' not in page.inner_text('.shots') and 'Box rear ✓' in page.inner_text('.shots'), 'tap a photo: retake just that photo')
+        # Tap a photo: Retake (camera opens, photo replaced) or Remove (just that photo)
+        page.get_by_role('button', name='Box front: options').click(); page.wait_for_selector('.shotsel')
+        check(page.locator('.shotsel').get_by_role('button', name='Retake').count() == 1 and page.locator('.shotsel').get_by_role('button', name='Remove').count() == 1, 'tap a photo: Retake and Remove offered')
+        old = page.evaluate("(async () => JSON.stringify((await (await import('./js/idb.js')).meta.get('captureDraft')).photos.box_front.photoId))()")
+        with page.expect_file_chooser() as fc: page.locator('.shotsel').get_by_role('button', name='Retake').click()
+        fc.value.set_files('/tmp/smg-runfix/r.jpg'); page.wait_for_timeout(1000)
+        new = page.evaluate("(async () => JSON.stringify((await (await import('./js/idb.js')).meta.get('captureDraft')).photos.box_front.photoId))()")
+        check(old != new and 'Box front ✓' in page.inner_text('.shots') and page.is_visible('text=Which brand is this car?'), 'Retake: camera opens and the photo is replaced, flow continues')
+        page.get_by_role('button', name='Box front: options').click(); page.wait_for_selector('.shotsel')
+        page.locator('.shotsel').get_by_role('button', name='Remove').click(); page.wait_for_timeout(500)
+        check('Box front ✓' not in page.inner_text('.shots') and 'Box rear ✓' in page.inner_text('.shots'), 'Remove: just that photo goes')
         shoot('Box front', 'f'); page.wait_for_selector('text=Which brand is this car?')
         # Discard the whole car
         page.get_by_role('button', name='Discard this car').click(); page.wait_for_timeout(500)
@@ -60,6 +70,16 @@ def main():
         got = page.evaluate("(async () => { const st = await import('./js/store.js'); const m = (await st.list('models'))[0]; const br = await st.list('brands'); const sc = await st.list('scales'); return m ? br.find(b => b.brand_id === m.brand_id).name + ' ' + sc.find(s => s.scale_id === m.scale_id).label : null; })()")
         check(got == 'Mini GT 1:43', f'car saved with the picked brand and the box scale ({got})')
         page.screenshot(path='/tmp/smg-runfix/after.png')
+        # Quick capture: the same choice, and an optional photo can be removed
+        page.goto(base + '#/add'); page.wait_for_selector('text=Quick capture')
+        if not page.is_visible('text=Box art'): page.get_by_role('button', name='Sealed box', exact=True).click(); page.wait_for_timeout(300)
+        for role, f in [('Box front', 'f'), ('Box art', 'r')]:
+            with page.expect_file_chooser() as fc: page.locator('.shots .shot', has_text=role).first.click()
+            fc.value.set_files(f'/tmp/smg-runfix/{f}.jpg'); page.wait_for_timeout(1500)
+        page.get_by_role('button', name='Box art (sealed box): options').click(); page.wait_for_selector('.shotsel')
+        page.screenshot(path='/tmp/smg-runfix/quick-choice.png')
+        page.locator('.shotsel').get_by_role('button', name='Remove').click(); page.wait_for_timeout(500)
+        check('Box art (sealed box) ✓' not in page.inner_text('.shots') and 'Box front ✓' in page.inner_text('.shots'), 'Quick capture: an optional photo can be removed on its own')
         check(not [e for e in errors if 'ERR_CONNECTION' not in e], f'no page errors ({errors[:2]})')
         b.close()
     httpd.shutdown()
