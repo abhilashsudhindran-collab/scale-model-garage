@@ -3,27 +3,26 @@
 // then pastes the answer back. The answer is UNTRUSTED TEXT: parsed as data only, validated, and used
 // only to pre-fill fields as suggestions that B confirms or corrects. Nothing is saved automatically.
 
-export const PROMPT_VERSION = 'names-v3';
+export const PROMPT_VERSION = 'names-v4';
 // 5 boxes = 10 photos per share. B's phone (24 Nov 21:39) refused to share 20 photos at once (2 worked);
 // Chrome on Android appears to cap a share at about 10 files (not confirmed in its docs), so batches stay at 10 photos.
 export const MAX_BATCH = 5;
 
 // boxes: [{ brand, scale }] in the order their photos are shared (front, then rear, for each box).
 export function buildPrompt(boxes) {
+  // names-v4 (B's real replies, 24 Nov): Gemini answers with a table anyway, so ask for one with known headings.
   const lines = boxes.map((b, i) => `Box ${i + 1}: photo ${i * 2 + 1} = box front, photo ${i * 2 + 2} = box back${b.brand ? ` (brand: ${b.brand}${b.scale ? `, ${b.scale}` : ''})` : ''}`);
-  const fmt = 'Box 1 | car name and year as printed | product code as printed | brand as printed';
   return [
-    `Reply with one line per box in exactly this format, nothing else:`,
-    fmt,
-    'Example: Box 1 | Toyota Supra (A80) 1997 Castrol | MGT00123-L | Mini GT',
-    'The car name is the real car (make, model, version, livery), never the brand. Keep the 4 parts in this order.',
-    'The product code is the maker\'s catalogue number (letters + digits, e.g. MGT00123-L, KHMG197, HYW58), usually on the box back or side near the barcode. It is not the barcode digits.',
+    'Reply with ONE table only, with exactly these column headings:',
+    '| Box | Car name | Year | Product code | Brand | Colour |',
     '',
     `I'm cataloguing my die-cast model car boxes. There are ${boxes.length} box${boxes.length === 1 ? '' : 'es'}, ${boxes.length * 2} photos, in this order:`,
     ...lines,
     '',
-    'Rules: copy the product code exactly (keep dashes, letters O vs digit 0 as printed). Use - for anything you cannot read clearly. Do not guess. No bullet points, no headings, no other text.',
-    `Start your reply with "Box 1 |".`,
+    'Car name = the real car (make, model, version, livery), never the brand.',
+    'Product code = the maker\'s catalogue number exactly as printed (e.g. MGT00123-L, KHMG197, PR64-240, HYW58), usually on the box back or side. Not the barcode digits. If you cannot read it clearly, write -.',
+    'Colour = the main colour of the car itself (not the box).',
+    'Use - for anything you cannot read. Do not guess. No other text before or after the table.',
   ].join('\n');
 }
 
@@ -74,11 +73,64 @@ function sortFields(fields, brandNames) {
   return { name: name.join(' ').slice(0, 120), code, brand };
 }
 
+// Tables with their own headings (B's real Gemini reply, 24 Nov 22:47):
+// | Box | Brand | Scale | Car Name | Year | Product Code | Color / Livery | Barcode / UPC |
+// Each value is taken from the column its heading names; scale and barcode columns are ignored.
+function colKind(hd) {
+  const k = hd.toLowerCase();
+  if (/barcode|upc|ean|gtin|jan\b/.test(k)) return 'barcode';
+  if (/^\s*(box|#|no\.?|n)\s*$/.test(k)) return 'box';
+  if (/scale/.test(k)) return 'scale';
+  if (/colou?r|livery|paint/.test(k)) return 'colour';
+  if (/year/.test(k)) return 'year';
+  if (/code|item|sku|catalog|ref|part\s*n/.test(k)) return 'code';
+  if (/brand|maker|manufacturer|make\b/.test(k)) return 'brand';
+  if (/note|remark|comment/.test(k)) return 'notes';
+  if (/name|model|car|vehicle|title/.test(k)) return 'name';
+  return '';
+}
+const UNSURE = /\b(or similar|obscured|unclear|unreadable|partial|partially|blurred|not visible|maybe|possibly|likely|approx|guess)\b|\?/i;
+function parseTable(text, expected) {
+  const rows = String(text || '').split(/\r?\n/).map(l => l.trim()).filter(l => l.startsWith('|'));
+  let kinds = null;
+  const out = [];
+  let order = 0;
+  for (const row of rows) {
+    const cells = row.replace(/^\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.replace(/\*\*/g, '').trim());
+    if (cells.every(c => /^:?-{2,}:?$/.test(c) || c === '')) continue; // |---|---|
+    if (!kinds) { const k = cells.map(colKind); if (k.includes('name') && k.filter(Boolean).length >= 2) kinds = k; continue; }
+    order++;
+    const get = (kind) => { const i = kinds.indexOf(kind); return i >= 0 ? clean(cells[i], 160) : ''; };
+    const boxCell = get('box');
+    const n = Number((boxCell.match(/\d{1,2}/) || [])[0]) || order;
+    if (n < 1 || n > expected) continue;
+    const notes = [];
+    let name = get('name');
+    if (blank(name)) name = '';
+    const year = (get('year').match(/\b(19|20)\d{2}\b/) || [])[0];
+    if (name && year && !name.includes(year)) name = `${name} ${year}`;
+    // Code: the first code-like word; if the AI says it is unsure, it becomes a note, never a pre-filled code.
+    const codeCell = get('code');
+    let code = '';
+    const cand = (codeCell.split(/[\s(]+/).find(w => looksLikeCode(w)) || '').replace(/[),.;]+$/, '');
+    if (cand && UNSURE.test(codeCell)) notes.push(`AI wasn't sure of the code (it said: "${codeCell.slice(0, 60)}"). Read it from the box.`);
+    else code = cand;
+    const colour = get('colour');
+    if (colour && !blank(colour)) notes.push(`Colour: ${colour.slice(0, 60)}`);
+    if (!name) notes.push('no car name in the answer: type it from the box');
+    out.push({ n, name: name.slice(0, 120), code, brand: blank(get('brand')) ? '' : get('brand'), colour: blank(colour) ? '' : colour.slice(0, 60), notes });
+  }
+  return kinds ? out : [];
+}
+
 // Returns { items: [{ n, name, code, brand, notes: [] }], ignored: number }.
 // Accepts "Box 1 | name | code | brand", "1 | ...", "1. ... | ...", and markdown table rows "| 1 | ... |".
 export function parseAnswer(text, expected = MAX_BATCH, brandNames = []) {
   const items = new Map();
   let ignored = 0;
+  // A table with headings wins: its columns say what each value is.
+  for (const it of parseTable(text, expected)) if (!items.has(it.n)) items.set(it.n, it);
+  if (items.size) return { items: [...items.values()].sort((a, b) => a.n - b.n), ignored: String(text || '').split(/\r?\n/).filter(l => l.trim() && !l.trim().startsWith('|')).length + 2 };
   for (const raw of String(text || '').split(/\r?\n/).slice(0, 200)) {
     let line = raw.trim().replace(/^[*•>\s]+/, '').replace(/\*\*/g, '');
     if (!line) continue;

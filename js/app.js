@@ -16,7 +16,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.17.2';
+export const APP_VERSION = 's1-0.17.3';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -1134,7 +1134,7 @@ const nameSkipped = new Set();
 let aiPrep = null; // { batchId, ids, files, prompt } prepared in memory for the share tap
 // Suggestions read by an older version of the reader are read again from the raw answer kept in AI_LOG
 // (B, 24 Nov: wrong suggestions from out-of-order Gemini replies would otherwise stay on those cars).
-const READER_VERSION = 3; // 3: "1995 Presentation" is not a code; barcode digits dropped (B, 24 Nov 22:38)
+const READER_VERSION = 4; // 4: tables read by their headings (B's real Gemini reply, 24 Nov 22:47) // 3: "1995 Presentation" is not a code; barcode digits dropped (B, 24 Nov 22:38)
 async function rereadSuggestions(ref) {
   const sugg = await meta.get('aiSuggest', {});
   const old = Object.entries(sugg).filter(([, sg]) => (sg.pv || 1) < READER_VERSION && sg.logId);
@@ -1150,7 +1150,7 @@ async function rereadSuggestions(ref) {
     const r = parseAnswer(log.ai_response_raw, order.length, names);
     for (const it of r.items) {
       const mid = order[it.n - 1];
-      if (mid && sugg[mid] && (sugg[mid].pv || 1) < READER_VERSION) { sugg[mid] = { name: it.name, code: it.code, brand: it.brand, notes: it.notes, logId, pv: READER_VERSION }; n++; }
+      if (mid && sugg[mid] && (sugg[mid].pv || 1) < READER_VERSION) { sugg[mid] = { name: it.name, code: it.code, brand: it.brand, colour: it.colour || '', notes: it.notes, logId, pv: READER_VERSION }; n++; }
     }
   }
   for (const [mid, sg] of Object.entries(sugg)) if ((sg.pv || 1) < READER_VERSION) sugg[mid] = { ...sg, pv: READER_VERSION }; // could not re-read: leave as is, once
@@ -1204,7 +1204,7 @@ async function renderName(v) {
           const r = parseAnswer(ta.value, batch.ids.length, [...ref.brands.map(x => x.name), ...ref.lines.map(x => x.name), ...KNOWN_BRANDS]);
           if (!r.items.length) { toast('No answer lines found. It should look like: Box 1 | name | code | brand', 4500, 'warn'); return; }
           const next = { ...(await meta.get('aiSuggest', {})) };
-          for (const it of r.items) next[batch.ids[it.n - 1]] = { name: it.name, code: it.code, brand: it.brand, notes: it.notes, logId: batch.logId, pv: READER_VERSION };
+          for (const it of r.items) next[batch.ids[it.n - 1]] = { name: it.name, code: it.code, brand: it.brand, colour: it.colour || '', notes: it.notes, logId: batch.logId, pv: READER_VERSION };
           await meta.set('aiSuggest', next);
           await store.update('ai_log', batch.logId, { ai_response_raw: ta.value.slice(0, 5000), suggested_values: JSON.stringify(r.items.map(it => ({ model_id: batch.ids[it.n - 1], name: it.name, code: it.code, brand: it.brand }))), processed_at: store.nowIso() });
           await meta.set('aiBatch', null);
