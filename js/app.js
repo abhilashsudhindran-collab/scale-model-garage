@@ -4,17 +4,18 @@ import { blobs, meta, requestPersistentStorage, storageEstimate } from './idb.js
 import { preparePhoto, pickPhoto } from './images.js';
 import { liveScan, scanPhoto } from './barcode.js';
 import { codeCmp, barcodeCmp, gtinCheckOk, assignNamespace, duplicateCheckStatus, checkDuplicate, searchMatch } from './rules.js';
-import { SHOT_ROLES, CONDITIONS, SCHEMA_VERSION } from './schema.js';
+import { SHOT_ROLES, CONDITIONS, SCHEMA_VERSION, TABS, SYNCED_ENTITIES, headersFor } from './schema.js';
 import { syncNow, isSyncing } from './sync.js';
 import { getClientId, setClientId, hasToken, signIn, tokenMinutesLeft, drive } from './google.js';
 import { getConfig, seedLocal } from './setup.js';
 import { newId } from './ids.js';
 import { newTimer, touch, seconds } from './timing.js';
 import { straighten, validQuad } from './crop.js';
+import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.15.3';
+export const APP_VERSION = 's1-0.16.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -110,11 +111,14 @@ async function refreshStatus() {
 let lastSyncMsg = '';
 async function runSync(interactive) {
   if (isSyncing()) return;
-  const setMsg = (m) => { lastSyncMsg = m; const el = $('#syncMsg'); if (el) el.textContent = m; refreshStatus(); };
+  // The status pill re-reads what's waiting; at most once a second during a sync (perf: once per photo grew with the backlog).
+  let lastPill = 0;
+  const setMsg = (m) => { lastSyncMsg = m; const el = $('#syncMsg'); if (el) el.textContent = m; const t = Date.now(); if (t - lastPill > 1000) { lastPill = t; refreshStatus(); } };
   try {
     const s = await syncNow({ interactive, progress: setMsg });
     setMsg(`Synced: ${s.photosUploaded} photo(s), ${s.rowsAppended} new row(s), ${s.rowsUpdated} update(s), ${s.pulled} pulled${s.conflicts ? `, ${s.conflicts} clash(es) to review` : ''}${s.errors.length ? `, ${s.errors.length} error(s) — will retry` : ''} · ${(s.ms / 1000).toFixed(1)} s`);
     if (interactive) toast(s.errors.length ? 'Synced with some errors — will retry' : 'Synced ✓', 1800, s.errors.length ? 'warn' : 'ok');
+    refreshStatus();
     // Daily/monthly sheet backup (D25) once a sync has succeeded; a failure here never affects the sync.
     try { const cfg = await getConfig(); if (cfg && !s.errors.length) { const b = await backupIfDue(cfg); if (b.daily || b.monthly) setMsg(`${lastSyncMsg} · backup made`); } }
     catch (e) { console.warn('backup', e); setMsg(`${lastSyncMsg} · backup failed: ${e.message}`); }
@@ -473,10 +477,17 @@ async function renderGarage(v) {
   inventory.forEach(i => { if (i.storage_location) storageByModel.set(i.model_id, `${storageByModel.get(i.model_id) || ''} ${i.storage_location}`); });
   const barcodesByModel = new Map();
   ids.forEach(i => { if (i.identifier_type === 'barcode') (barcodesByModel.get(i.model_id) || barcodesByModel.set(i.model_id, []).get(i.model_id)).push(i.value_raw, i.value_cmp); });
+  // Owned copies per model, built once (perf: the list used to scan every copy for every car).
+  const ownedByModel = new Map();
+  inventory.forEach(i => { if (i.ownership_status === 'Owned') (ownedByModel.get(i.model_id) || ownedByModel.set(i.model_id, []).get(i.model_id)).push(i); });
+  const modelById = new Map(models.map(r => [r.id, r.data]));
+  const PAGE = 120;
+  let shown = PAGE, lastQuery = null;
 
   async function draw() {
     grid.replaceChildren();
     const q = garageSearch.trim().toLowerCase();
+    if (q !== lastQuery) { shown = PAGE; lastQuery = q; } // a new search starts at the top again
     let list = (garageFilter === 'archived' ? archived : active).slice().sort((a, b) => String(b.data.created_at).localeCompare(String(a.data.created_at)));
     list = list.filter(r => {
       const m = r.data;
@@ -499,7 +510,7 @@ async function renderGarage(v) {
       const label = `Box ${oneBox[1].toUpperCase()}`;
       const rec = names.get(label.toLowerCase());
       const inBox = inventory.filter(i => i.ownership_status === 'Owned' && activeIds.has(i.model_id) && String(i.storage_location || '').toLowerCase() === label.toLowerCase());
-      const byBrand = tally(inBox, i => brandName[active.find(r => r.id === i.model_id)?.data.brand_id] || 'Brand not set').map(([k, c]) => `${k} ${c}`).join(' · ');
+      const byBrand = tally(inBox, i => brandName[modelById.get(i.model_id)?.brand_id] || 'Brand not set').map(([k, c]) => `${k} ${c}`).join(' · ');
       const nameIn = h('input', { value: rec?.box_name || '', placeholder: 'e.g. Mixed, HW Box, Le Mans racers', 'aria-label': 'Box name', maxlength: '60' });
       const save = async () => { await saveBox(label, { box_name: nameIn.value }); toast('Box name saved ✓'); autoSyncSoon(); route(); };
       nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
@@ -537,19 +548,21 @@ async function renderGarage(v) {
     }
     if (!list.length) { grid.append(h('p', { class: 'muted' }, oneBox ? 'No cars in this box yet.' : active.length || archived.length ? 'Nothing matches.' : 'No models yet. Tap ＋ Add to catalogue your first box.')); return; }
     // Grouped views: by storage box (number order, no box last), by brand (A–Z), by scale (smallest scale number first).
-    const boxesOf = (mid) => [...new Set(inventory.filter(i => i.model_id === mid && i.ownership_status === 'Owned').map(i => i.storage_location).filter(Boolean))];
+    const boxesMemo = new Map();
+    const boxesOf = (mid) => { let b = boxesMemo.get(mid); if (!b) { b = [...new Set((ownedByModel.get(mid) || []).map(i => i.storage_location).filter(Boolean))]; boxesMemo.set(mid, b); } return b; };
     const scaleOrder = Object.fromEntries(ref.scales.map(sc => [sc.scale_id, Number(sc.sort_order) || 0]));
     const grouping = { box: true, brand: true, scale: true }[garageFilter] ? garageFilter : null;
     const gkey = (r) => grouping === 'box' ? (boxesOf(r.data.model_id)[0] || '') : grouping === 'brand' ? (brandName[r.data.brand_id] || '') : grouping === 'scale' ? (r.data.scale_id || '') : '';
     const gnum = (k) => grouping === 'box' ? ((k.match(/\d+/) || [])[0] ? Number(k.match(/\d+/)[0]) : Infinity) : grouping === 'scale' ? (scaleOrder[k] ?? Infinity) : 0;
     const glabel = (k) => grouping === 'box' ? (k ? [k, names.get(k.toLowerCase())?.box_size, names.get(k.toLowerCase())?.box_name].filter(Boolean).join(' · ') : 'No box yet') : grouping === 'brand' ? (k || 'Brand not set') : (scaleLabel[k] || 'Scale not set');
-    if (grouping) list.sort((a, b) => { const ka = gkey(a), kb = gkey(b); if (!ka !== !kb) return ka ? -1 : 1; return gnum(ka) - gnum(kb) || ka.localeCompare(kb) || String(b.data.created_at).localeCompare(String(a.data.created_at)); });
-    const gcount = new Map(); if (grouping) list.forEach(r => gcount.set(gkey(r), (gcount.get(gkey(r)) || 0) + 1));
+    const keyMemo = new Map(); const gk = (r) => { let k = keyMemo.get(r.id); if (k === undefined) { k = gkey(r); keyMemo.set(r.id, k); } return k; };
+    if (grouping) list.sort((a, b) => { const ka = gk(a), kb = gk(b); if (!ka !== !kb) return ka ? -1 : 1; return gnum(ka) - gnum(kb) || ka.localeCompare(kb) || String(b.data.created_at).localeCompare(String(a.data.created_at)); });
+    const gcount = new Map(); if (grouping) list.forEach(r => gcount.set(gk(r), (gcount.get(gk(r)) || 0) + 1));
     let lastGroup = null;
-    for (const r of list.slice(0, 300)) {
+    for (const r of list.slice(0, shown)) {
       const m = r.data;
       if (grouping) {
-        const g = gkey(r);
+        const g = gk(r);
         if (g !== lastGroup) {
           lastGroup = g;
           const text = `${glabel(g)} · ${plural(gcount.get(g), 'model', 'models')}`;
@@ -559,7 +572,7 @@ async function renderGarage(v) {
       const ph = (photosByModel.get(m.model_id) || []).find(p => p.photo_id === m.primary_photo_id) || (photosByModel.get(m.model_id) || [])[0];
       const img = h('div', { class: 'ph' }, icon('car'));
       photoUrl(ph).then(u => { if (u) img.replaceChildren(h('img', { src: u, alt: '' })); });
-      const nCopies = inventory.filter(i => i.model_id === m.model_id && i.ownership_status === 'Owned').length;
+      const nCopies = (ownedByModel.get(m.model_id) || []).length;
       const pendingPhotos = (photosByModel.get(m.model_id) || []).some(p => !p.original_file_id);
       grid.append(h('a', { class: 'tile', href: `#/item/${encodeURIComponent(m.model_id)}` }, img,
         h('div', { class: 'tx' },
@@ -575,7 +588,12 @@ async function renderGarage(v) {
             r.lastError ? h('span', { class: 'b bad' }, 'Error') : null,
             r.conflict ? h('span', { class: 'b bad' }, 'Clash') : null))));
     }
-    if (list.length > 300) grid.append(h('p', { class: 'muted' }, `Showing 300 of ${list.length}. Use search to narrow.`));
+    if (list.length > shown) {
+      const rest = list.length - shown;
+      grid.append(h('div', { class: 'more-row' },
+        h('p', { class: 'muted' }, `Showing ${shown} of ${list.length}`),
+        h('button', { type: 'button', class: 'ghost wide showmore', onclick: () => { const y = window.scrollY; shown += PAGE * 2; draw().then(() => window.scrollTo(0, y)); } }, `Show ${Math.min(rest, PAGE * 2)} more`)));
+    }
   }
   draw();
 }
@@ -1456,6 +1474,30 @@ async function renderItem(v, modelId) {
     : h('button', { class: 'ghost wide', onclick: async () => { if (confirm('Archive this model? It is hidden from your garage, never deleted, and can be restored from Garage → Archived.')) { await store.archive('models', modelId); toast('Archived. Restore it from Garage → Archived.', 3500); location.hash = '#/'; autoSyncSoon(); } } }, 'Archive'));
 }
 
+// ---------- Export downloads ----------
+function download(blob, name) {
+  const a = h('a', { href: URL.createObjectURL(blob), download: name }); document.body.append(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+}
+const stamp = () => { const d = new Date(), p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
+async function exportCollection() {
+  const [models, inventory, photos, identifiers, brands, scales, boxes] = await Promise.all(['models', 'inventory', 'photos', 'product_identifiers', 'brands', 'scales', 'storage_boxes'].map(e => store.list(e)));
+  const rows = collectionRows({ models, inventory, photos, identifiers, brands, scales, boxes });
+  download(new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8' }), `Scale Model Garage collection ${stamp()}.csv`);
+  toast(`Exported ${plural(rows.length - 1, 'row', 'rows')} ✓`);
+}
+async function exportEverything() {
+  const files = [];
+  for (const [tab, t] of Object.entries(TABS)) {
+    if (!SYNCED_ENTITIES.includes(t.entity)) continue;
+    const head = headersFor(tab), rows = await store.list(t.entity, { includeDeleted: true });
+    files.push({ name: `${tab}.csv`, text: toCsv([head, ...rows.map(r => head.map(k => r[k] ?? ''))]) });
+  }
+  files.push({ name: 'README.txt', text: `Scale Model Garage export, ${new Date().toString()}\r\nApp version ${APP_VERSION}. One CSV per tab, same columns as your Google Sheet (SCALE_GARAGE_MASTER). Archived and removed rows are included (deleted_at is filled in). Photos are not included: they stay in your Google Drive (SCALE GARAGE folders); the PHOTOS tab holds their Drive file IDs.\r\n` });
+  download(new Blob([zip(files)], { type: 'application/zip' }), `Scale Model Garage export ${stamp()}.zip`);
+  toast(`Exported ${plural(files.length - 1, 'tab', 'tabs')} ✓`);
+}
+
 // =====================================================================
 // Crop / straighten (D14, D19): drag four corners onto the box; the app makes a straight copy.
 // The original is never changed; the copy is stored as `cropped` (uploaded) + `cropthumb` (phone only).
@@ -1646,6 +1688,12 @@ async function renderSettings(v) {
       location.hash = '#/';
     } catch (err) { toast(`Restore failed: ${err.message}`, 5000, 'bad'); btn.disabled = false; btn.textContent = 'Restore'; }
   }
+
+  // Export (brief R6): never locked in. Both files are made on the phone from what is stored here.
+  v.append(h('div', { class: 'card' }, h('h3', {}, 'Export'),
+    h('p', { class: 'muted' }, 'Download your collection. Opens in Excel, Google Sheets or Numbers. Made on this phone from what is stored here; sync first for the latest.'),
+    h('button', { class: 'quiet wide', onclick: () => exportCollection() }, 'Collection list (CSV, one row per car)'),
+    h('button', { class: 'ghost wide', style: 'margin-top:8px', onclick: () => exportEverything() }, 'Everything (ZIP, every tab as CSV)')));
 
   // Collection size, for the Garage progress bar.
   const curAccent = document.documentElement.dataset.accent;

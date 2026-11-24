@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.15.3
+## Status: Stage 1 (quick-capture slice), version s1-0.16.0
+
+**s1-0.16.0 (24 Nov 2026): speed at a big collection + Export.** (1) Speed, measured with `tests/perf_1500.py` (1,500 cars, 3,000 photos, 15 boxes; fake Google, desktop CPU, so a phone is roughly 3-5x slower): Dashboard 1.98 → 0.45 s, By box 1.72 → 0.39 s, open a box 0.91 → 0.38 s, sync after one edit 3.25 → 0.85 s, rows part of a first sync 52 s → about 3 s (at 300 cars). Causes fixed: the status pill re-read every waiting row on each sync message (now at most once a second); the By box sort scanned every copy for every comparison (now a lookup map); screens re-read whole tables each time (now an in-memory copy, dropped on any write, in this tab and other open tabs). (2) The Garage list shows 120 cars, then "Show more", instead of stopping at 300 with "use search". (3) Settings → Export: "Collection list" (CSV, one row per car, opens in Excel/Sheets, non-English text kept, formula-looking text made safe) and "Everything" (ZIP with every tab as CSV). Both are made on the phone from what is stored there; nothing is uploaded.
 
 **s1-0.15.3 (24 Nov 2026): clearer brand question.** "Which brand is this car?" now says nothing is chosen until you tap, and offers up to 8 shortcuts (recent brands, the brands you own most, then common ones) instead of a single recent brand that looked pre-selected. Recent brands carry an × to forget them.
 

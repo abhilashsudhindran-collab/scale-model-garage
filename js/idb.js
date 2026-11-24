@@ -41,14 +41,42 @@ async function run(storeNames, mode, fn) {
 }
 
 // A stored record: { key: 'models:mdl_…', entity, id, data: {...columns}, dirty: 0|1, sync: {...} }
+//
+// Read cache (perf at 1,000+ boxes): every screen lists whole tables, so the last list of each
+// table is kept in memory and handed out as a fresh copy (callers may change what they get).
+// Any write drops that table's cached list - here and, via BroadcastChannel, in other open tabs.
+// A list read that overlaps a write is not cached (generation check), so the cache never holds stale rows.
+const cache = new Map();   // entity -> array of records
+const gen = new Map();     // entity -> write counter
+let allGen = 0;            // bumped by clearAll
+const chan = (() => { try { return new BroadcastChannel('smg-records'); } catch { return null; } })();
+function dropLocal(entities) {
+  if (entities === '*') { cache.clear(); allGen++; return; }
+  for (const e of entities) { cache.delete(e); gen.set(e, (gen.get(e) || 0) + 1); }
+}
+if (chan) chan.onmessage = (ev) => dropLocal(ev.data);
+function drop(entities) {
+  dropLocal(entities);
+  try { chan?.postMessage(entities === '*' ? '*' : [...entities]); } catch {}
+}
+const clone = (x) => (typeof structuredClone === 'function' ? structuredClone(x) : JSON.parse(JSON.stringify(x)));
+const entitiesOf = (recs) => new Set(recs.map(r => r.entity));
+
 export const records = {
   get: (entity, id) => run(['records'], 'readonly', t => reqP(t.objectStore('records').get(`${entity}:${id}`))),
-  put: (rec) => run(['records'], 'readwrite', t => reqP(t.objectStore('records').put(rec))),
-  putMany: (recs) => run(['records'], 'readwrite', t => { const s = t.objectStore('records'); recs.forEach(r => s.put(r)); }),
-  byEntity: (entity) => run(['records'], 'readonly', t => reqP(t.objectStore('records').index('entity').getAll(entity))),
+  put: async (rec) => { drop([rec.entity]); try { return await run(['records'], 'readwrite', t => reqP(t.objectStore('records').put(rec))); } finally { drop([rec.entity]); } },
+  putMany: async (recs) => { if (!recs.length) return; const es = entitiesOf(recs); drop(es); try { return await run(['records'], 'readwrite', t => { const s = t.objectStore('records'); recs.forEach(r => s.put(r)); }); } finally { drop(es); } },
+  byEntity: async (entity) => {
+    const hit = cache.get(entity);
+    if (hit) return clone(hit);
+    const g = gen.get(entity) || 0, ag = allGen;
+    const rows = await run(['records'], 'readonly', t => reqP(t.objectStore('records').index('entity').getAll(entity)));
+    if ((gen.get(entity) || 0) === g && allGen === ag) cache.set(entity, clone(rows));
+    return rows;
+  },
   dirty: () => run(['records'], 'readonly', t => reqP(t.objectStore('records').index('dirty').getAll(1))),
   count: () => run(['records'], 'readonly', t => reqP(t.objectStore('records').count())),
-  clearAll: () => run(['records', 'blobs', 'meta'], 'readwrite', t => { ['records', 'blobs', 'meta'].forEach(n => t.objectStore(n).clear()); }),
+  clearAll: async () => { drop('*'); try { return await run(['records', 'blobs', 'meta'], 'readwrite', t => { ['records', 'blobs', 'meta'].forEach(n => t.objectStore(n).clear()); }); } finally { drop('*'); } },
 };
 
 // Photo files: key 'pho_…:original' | ':display' | ':thumb'
