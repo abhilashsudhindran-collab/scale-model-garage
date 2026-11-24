@@ -14,7 +14,7 @@ import { straighten, validQuad } from './crop.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.15.2';
+export const APP_VERSION = 's1-0.15.3';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -78,6 +78,15 @@ async function refData() {
 }
 const recentBrands = () => JSON.parse(localStorage.getItem('smg.recentBrands') || '[]');
 const pushRecentBrand = (id) => localStorage.setItem('smg.recentBrands', JSON.stringify([id, ...recentBrands().filter(x => x !== id)].slice(0, 5)));
+const forgetRecentBrand = (id) => localStorage.setItem('smg.recentBrands', JSON.stringify(recentBrands().filter(x => x !== id)));
+// Quick-pick brands for a car: recent first, then the brands B owns most, then common ones. Up to 8.
+const COMMON_BRANDS = ['Hot Wheels', 'Mini GT', 'Tarmac Works', 'Bburago', 'Matchbox', 'Inno64', 'Pop Race', 'Kaido House'];
+async function quickBrands(all) {
+  const ms = await store.list('models');
+  const used = tally(ms.filter(m => m.brand_id), m => m.brand_id).map(([id]) => id);
+  const common = COMMON_BRANDS.map(n => all.find(b => b.name === n)?.brand_id).filter(Boolean);
+  return [...new Set([...recentBrands(), ...used, ...common])].map(id => all.find(b => b.brand_id === id)).filter(Boolean).slice(0, 8);
+}
 
 // ---------- status bar ----------
 // Header pill (audit S1, S2): counts boxes, and says plainly when a sign-in is needed. Tap = sync.
@@ -986,7 +995,7 @@ async function renderRun(v) {
   } else if (!next && ((perCar && !cap.brandId) || (scalePer && !cap.scaleId))) {
     // Photos done: ask only what this box doesn't already decide (brand and/or scale); saves when both are known.
     const all = ref.brands;
-    const quick = recentBrands().map(id => all.find(b => b.brand_id === id)).filter(Boolean).slice(0, 8);
+    const quick = await quickBrands(all), recent = new Set(recentBrands());
     const done = async () => { saveDraftSoon(); if (cap.brandId && cap.scaleId) await afterRunPhoto(); else route(); };
     const pickBrand = async (id) => { if (!id) return; cap.brandId = id; cap.brandPicked = true; pushRecentBrand(id); await done(); };
     const pickScale = async (id) => { if (!id) return; cap.scaleId = id; cap.scalePicked = true; localStorage.setItem('smg.lastScale', id); await done(); };
@@ -994,7 +1003,11 @@ async function renderRun(v) {
     if (perCar) {
       card.append(h('div', { class: 'hd' }, cap.brandId ? `Brand: ${all.find(b => b.brand_id === cap.brandId)?.name}` : 'Which brand is this car? (photos above)'));
       if (!cap.brandId) card.append(
-        quick.length ? h('div', { class: 'chips', style: 'margin:10px 0' }, quick.map(b => h('button', { type: 'button', class: 'chip big', onclick: () => pickBrand(b.brand_id) }, b.name))) : null,
+        h('p', { class: 'muted small', style: 'margin:6px 0 0' }, 'Tap the brand. Nothing is chosen until you tap.'),
+        quick.length ? h('div', { class: 'chips', style: 'margin:10px 0' }, quick.map(b => recent.has(b.brand_id)
+          ? h('span', { class: 'chipx' }, h('button', { type: 'button', class: 'chip big', onclick: () => pickBrand(b.brand_id) }, b.name),
+              h('button', { type: 'button', class: 'x', 'aria-label': `Remove ${b.name} from recent brands`, onclick: () => { forgetRecentBrand(b.brand_id); route(); } }, '×'))
+          : h('button', { type: 'button', class: 'chip big', onclick: () => pickBrand(b.brand_id) }, b.name))) : null,
         h('select', { 'aria-label': 'Brand for this car', onchange: (e) => pickBrand(e.target.value) }, h('option', { value: '' }, quick.length ? '— another brand —' : '— choose brand —'), all.map(b => h('option', { value: b.brand_id }, b.name))));
     }
     if (scalePer) {

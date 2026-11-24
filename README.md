@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.15.2
+## Status: Stage 1 (quick-capture slice), version s1-0.15.3
+
+**s1-0.15.3 (24 Nov 2026): clearer brand question.** "Which brand is this car?" now says nothing is chosen until you tap, and offers up to 8 shortcuts (recent brands, the brands you own most, then common ones) instead of a single recent brand that looked pre-selected. Recent brands carry an × to forget them.
 
 **s1-0.15.2 (24 Nov 2026): retake or remove each photo.** On Quick capture and Photo run, tapping a taken photo offers Retake (the camera opens; the old photo stays until a new one is taken) or Remove (just that photo, e.g. an optional box-art photo).
 

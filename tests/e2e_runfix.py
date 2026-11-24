@@ -47,6 +47,12 @@ def main():
         try: page.wait_for_selector('text=Which brand is this car?', timeout=8000); asked = True
         except Exception: asked = False
         check(asked and nmod() == 0, 'mixed box: asks the brand (nothing saved with an old brand)')
+        chips = [c.inner_text() for c in page.query_selector_all('.brandpick .chip')]
+        check(len(chips) >= 5 and 'Hot Wheels' in chips and page.is_visible('text=Nothing is chosen until you tap'), f'several brands offered, clearly not pre-chosen ({chips})')
+        page.get_by_role('button', name='Remove Bburago from recent brands').click(); page.wait_for_timeout(400)
+        rec = page.evaluate("localStorage.getItem('smg.recentBrands')")
+        check(rec == '[]' and page.locator('.brandpick .chipx').count() == 0, f'× removes a brand from the recent ones ({rec})')
+        page.screenshot(path='/tmp/smg-runfix/brandpick.png')
 
         # Tap a photo: Retake (camera opens, photo replaced) or Remove (just that photo)
         page.get_by_role('button', name='Box front: options').click(); page.wait_for_selector('.shotsel')
