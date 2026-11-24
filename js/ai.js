@@ -107,6 +107,10 @@ export function parseAnswer(text, expected = MAX_BATCH, brandNames = []) {
       || (fields.length > 3 && !looksLikeCode(code) && fields.slice(3).some(f => looksLikeCode(clean(f, 60))));
     if (shifted) ({ name, code, brand } = sortFields(fields, brandNames));
     if (code && !validCode(code)) { notes.push(`code "${code.slice(0, 20)}" ignored (unexpected characters)`); code = ''; }
+    // Barcode digits never belong in a name or code (the app reads the barcode itself): removed whatever the order.
+    const noBarcode = (t) => t.split(/\s+/).filter(w => !(isBarcode(w.replace(/[()\-]/g, '')) && /^\(?[\d-]+\)?$/.test(w))).join(' ').replace(/\s*[|·,;—-]\s*$/, '').trim();
+    name = noBarcode(name);
+    code = isBarcode(code.replace(/[\s-]/g, '')) ? '' : noBarcode(code);
     if (!name) notes.push('no car name in the answer: type it from the box');
     if (!items.has(n)) items.set(n, { n, name, code, brand, notes });
   }

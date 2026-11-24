@@ -115,5 +115,18 @@ eq(parseAnswer('Box 1 | Supra | 64-1 | Mini GT\nCar Name: Other', 1).items[0].na
   eq([z.name, z.code, z.brand].join(' / '), 'McLaren F1 GTR 1995 Presentation / MGT00988 / Mini GT', 'requested order still works');
 }
 
+// B's phone, 24 Nov 22:41: barcode digits ended up at the end of the name
+{
+  const B = ['Hot Wheels', 'Mini GT', 'Bburago', 'Kaido House'];
+  for (const line of ['Box 4 | Mini GT (TSM Model) | Toyota Supra VeilSide Combat V-II Red | MGT00999 | 840456311691',
+                      'Box 4 | Toyota Supra VeilSide Combat V-II Red 840456311691 | MGT00999 | Mini GT',
+                      'Box 4 | Toyota Supra VeilSide Combat V-II Red | MGT00999 840456311691 | Mini GT',
+                      'Box 4 | Toyota Supra VeilSide Combat V-II Red (840456311691) | MGT00999 | Mini GT']) {
+    const x = parseAnswer(line, 5, B).items[0];
+    eq([x.name, x.code].join(' / '), 'Toyota Supra VeilSide Combat V-II Red / MGT00999', 'no barcode in name or code: ' + line.slice(8, 60));
+  }
+  eq(parseAnswer('Box 1 | Ferrari 499P 2023 #51 | - | Bburago', 5, B).items[0].name, 'Ferrari 499P 2023 #51', 'years and race numbers kept');
+}
+
 console.log(fails ? `${fails} of ${n} AI parser tests FAILED` : `All ${n} AI parser tests passed`);
 process.exit(fails ? 1 : 0);
