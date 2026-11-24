@@ -5,7 +5,10 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.4.0
+## Status: Stage 1 (quick-capture slice), version s1-0.5.0
+
+**s1-0.5.0 (24 Nov 2026): Photo run + Name them.** Photo run: set brand, scale, storage box and sealed once; each box needs only its photos and saves itself (barcode read from the rear photo; a barcode match pauses the run to ask "same model or different"; "Undo last box" archives). Name them: nameless boxes one at a time, big photo first, name + optional code, Save & next. Garage shows "Needs a name (N)".
+
 
 **s1-0.4.0 (24 Nov 2026): storage boxes, overview, backups, photos on other devices.** Each capture can record a numbered storage box (remembered; "Box full → next"); tiles show the box; Garage can group "By box"; search finds "box 12". Garage overview shows how much of the collection is catalogued (collection size set in Settings). The sheet is backed up to `06_BACKUPS` after a sync: daily (7 kept), monthly (12 kept), plus "Back up now" (decision D25; photos not copied; restore is manual for now). Thumbnails are downloaded on sync, so the laptop shows real photos.
 
@@ -29,6 +32,7 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - `python3 tests/e2e_p0.py` — headless checks for the s1-0.2.0 fixes (fake Google).
 - `python3 tests/e2e_p1.py` — headless checks for the s1-0.3.0 fixes (fake Google; needs `pip install python-barcode`).
 - `python3 tests/e2e_p2.py` — headless checks for s1-0.4.0 (storage boxes, backups, second device).
+- `python3 tests/e2e_p3.py` — headless checks for s1-0.5.0 (Photo run, Name them).
 - `python3 tests/e2e_mock.py` — headless Chrome against a **fake** in-memory Google Drive/Sheets.
 
 **A feature counts as passed only after testing on the owner's phone with the real Google account.**
