@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.7.0
+## Status: Stage 1 (quick-capture slice), version s1-0.8.0
+
+**s1-0.8.0 (24 Nov 2026): storage boxes you can name and open.** Tap a storage box (Dashboard, or a "By box" header in the Garage) to see only the cars inside it, with a card to name the box (e.g. "Le Mans racers"). Box names are kept in a new STORAGE_BOXES tab; an existing sheet gets the tab added on the next sync (nothing deleted). Garage can also be grouped By brand and By scale. The "last 7 days" chart is removed (B: not useful).
 
 **s1-0.7.0 (24 Nov 2026): Dashboard.** New Dashboard tab: boxes catalogued with a rough progress bar (the collection-size guess is never shown as a target), status tiles (named, need a name, need review, waiting to sync), boxes added in the last 7 days with a rough sessions-to-go estimate, boxes by brand and by scale, numbered storage boxes with their counts, and sealed/opened/loose when recorded. Every tile and bar opens the matching list. New Name tab with a badge counting boxes that need a name. Searching "box 3" (or tapping Box 3) now shows exactly storage Box 3, not Box 30 or scale 1:43.
 

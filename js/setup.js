@@ -24,11 +24,39 @@ async function ensureFolder(role, name, parent) {
 export async function getConfig() { return meta.get('config', null); }
 
 // Returns config { rootId, folders:{name:id}, workbookId, created: bool }
+// Bump when TABS gains a tab, so existing workbooks get it on the next sync.
+const TABS_VERSION = 2;
+// Add any tabs missing from an older workbook, with their header row (never delete).
+async function addMissingTabs(workbookId) {
+  const tabNames = [...Object.keys(TABS), SETTINGS_TAB.name];
+  const m = await sheets.meta(workbookId);
+  const have = new Set(m.sheets.map(s => s.properties.title));
+  const missing = tabNames.filter(t => !have.has(t));
+  if (missing.length) {
+    await sheets.addTabs(workbookId, missing);
+    await sheets.batchUpdate(workbookId, missing.map(t => ({ range: `${t}!A1`, values: [t === SETTINGS_TAB.name ? SETTINGS_TAB.cols : headersFor(t)] })));
+  }
+  return missing;
+}
+
 export async function ensureSetup(progress = () => {}) {
   const cached = await getConfig();
   if (cached?.workbookId) {
     // Cheap check that the workbook still exists and isn't trashed.
-    try { const f = await drive.get(cached.workbookId, 'id,trashed'); if (!f.trashed) return cached; } catch (e) { if (e.status && e.status !== 404) throw e; }
+    try {
+      const f = await drive.get(cached.workbookId, 'id,trashed');
+      if (!f.trashed) {
+        // A newer app version may need tabs an older workbook lacks (e.g. STORAGE_BOXES): add them once.
+        if (cached.tabsVersion !== TABS_VERSION) {
+          progress('Adding new tabs to your sheet…');
+          await addMissingTabs(cached.workbookId);
+          const upd = { ...cached, tabsVersion: TABS_VERSION };
+          await meta.set('config', upd);
+          return upd;
+        }
+        return cached;
+      }
+    } catch (e) { if (e.status && e.status !== 404) throw e; }
   }
   progress('Finding or creating your SCALE GARAGE folder…');
   const rootId = await ensureFolder('root', ROOT_FOLDER);
@@ -56,17 +84,10 @@ export async function ensureSetup(progress = () => {}) {
     if (!(f.parents || []).includes(folders['00_DATABASE'])) await drive.move(workbookId, folders['00_DATABASE'], (f.parents || []).join(','));
     const probe = await sheets.batchGet(workbookId, [`${SETTINGS_TAB.name}!A1:A1`]);
     const settingsEmpty = !probe.valueRanges?.[0]?.values?.length;
-    // Add any tabs missing from an older workbook (never delete).
-    const m = await sheets.meta(workbookId);
-    const have = new Set(m.sheets.map(s => s.properties.title));
-    const missing = tabNames.filter(t => !have.has(t));
-    if (missing.length) {
-      await sheets.addTabs(workbookId, missing);
-      await sheets.batchUpdate(workbookId, missing.map(t => ({ range: `${t}!A1`, values: [t === SETTINGS_TAB.name ? SETTINGS_TAB.cols : headersFor(t)] })));
-    }
+    await addMissingTabs(workbookId);
     if (settingsEmpty) { progress('Finishing sheet setup…'); await writeHeadersAndSeeds(workbookId); }
   }
-  const config = { rootId, folders, workbookId, created, setupAt: nowIso() };
+  const config = { rootId, folders, workbookId, created, setupAt: nowIso(), tabsVersion: TABS_VERSION };
   await meta.set('config', config);
   return config;
 }

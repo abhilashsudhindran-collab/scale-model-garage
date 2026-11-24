@@ -8,7 +8,7 @@ export const PREFIX = {
   companies: 'cmp', brands: 'brd', product_lines: 'lin', aliases: 'als', scales: 'scl',
   categories: 'cat', objects: 'obj', models: 'mdl', product_identifiers: 'pid', inventory: 'inv',
   orders: 'ord', transactions: 'trx', photos: 'pho', wishlist: 'wsh', price_evidence: 'evd',
-  value_history: 'val', valuation_runs: 'run', ai_log: 'ail', change_log: 'chg',
+  value_history: 'val', valuation_runs: 'run', ai_log: 'ail', change_log: 'chg', storage_boxes: 'sbx',
 };
 
 export function timePart(ms = Date.now()) {
