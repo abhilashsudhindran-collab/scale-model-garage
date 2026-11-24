@@ -1,4 +1,4 @@
-"""Developer test for release s1-0.7.0 (Dashboard tab, Name tab with badge). NOT a phone test.
+"""Developer test for releases s1-0.7.0/0.8.0 (Dashboard, Name tab, box names, grouped views, tab migration). NOT a phone test.
 Seeds boxes straight into the phone database, then checks the dashboard's numbers and taps.
 
 Run:  python3 tests/e2e_p5.py
@@ -69,10 +69,9 @@ def main():
         sc = [r.inner_text().replace('\n', ' ') for r in page.query_selector_all('.card:has(h3:text("By scale")) .barrow')]
         check(sc[0] == '1:64 4' and len(sc) == 3, f'by scale ({sc})')
         tiles = [t.inner_text().replace('\n', ' ') for t in page.query_selector_all('.boxtile')]
-        check(tiles == ['3 3 models', '12 2 models', '30 1 model'], f'storage boxes in number order ({tiles})')
+        check(tiles == ['3 3 cars', '12 2 cars', '30 1 car'], f'storage boxes in number order ({tiles})')
         check(page.is_visible('text=1 box has no storage box yet'), 'boxes without a storage box are counted')
-        week = page.query_selector_all('.col .cn')
-        check(week[-1].inner_text() == '7' and 'boxes this week' in txt('.card:has(h3:text("Last 7 days"))'), 'last 7 days: today shows 7')
+        check(not page.is_visible('text=Last 7 days'), 'no "last 7 days" chart (B: not useful)')
         st = [r.inner_text().replace('\n', ' ') for r in page.query_selector_all('.card:has(h3:text("Box state")) .barrow')]
         check(st == ['Opened 3', 'Sealed 1'], f'box state ({st})')
         page.screenshot(path=f'{SHOTS}/01-dash-top.png')
@@ -83,6 +82,13 @@ def main():
         page.locator('.boxtile', has_text='12').click(); page.wait_for_selector('.tile')
         names = [t.inner_text() for t in page.query_selector_all('.tile')]
         check(len(names) == 2 and all('Box 12' in n for n in names), f'tapping Box 12 shows only what is in Box 12 ({len(names)} tiles)')
+        card = txt('.boxcard')
+        check('📦 Box 12' in card and '2 cars inside · Bburago 2' in card, f'box card: label, count, brands ({card[:60]!r})')
+        page.fill('input[aria-label="Box name"]', 'Le Mans racers'); page.get_by_role('button', name='Save name').click(); page.wait_for_timeout(600)
+        check('Le Mans racers' in page.input_value('input[aria-label="Box name"]'), 'box name saved and shown')
+        page.screenshot(path=f'{SHOTS}/03-box12.png')
+        page.goto(base + '#/dash'); page.wait_for_selector('.boxtile')
+        check('Le Mans racers' in page.locator('.boxtile', has_text='12').inner_text(), 'dashboard tile shows the box name')
         page.goto(base + '#/dash'); page.wait_for_selector('.boxtile')
         page.locator('.boxtile').first.click(); page.wait_for_selector('.tile')
         t3 = [t.inner_text() for t in page.query_selector_all('.tile')]
@@ -97,6 +103,43 @@ def main():
         # Badge updates after naming
         page.fill('input[aria-label=Name]', 'Mini GT sealed one'); page.get_by_role('button', name='Save & next').click(); page.wait_for_timeout(700)
         check(page.query_selector('#navname .badge').inner_text() == '1', 'badge drops to 1 after naming a box')
+
+        # Grouped views in the Garage
+        page.goto(base + '#/'); page.wait_for_selector('.tile'); page.fill('input[type=search]', ''); page.wait_for_timeout(200)
+        page.get_by_role('button', name='By brand', exact=True).click(); page.wait_for_timeout(300)
+        groups = [g.inner_text() for g in page.query_selector_all('h3.group')]
+        check(groups == ['BBURAGO · 3 MODELS', 'HOT WHEELS · 1 MODEL', 'MINI GT · 3 MODELS'], f'By brand groups A–Z ({groups})')
+        page.get_by_role('button', name='By scale', exact=True).click(); page.wait_for_timeout(300)
+        groups = [g.inner_text() for g in page.query_selector_all('h3.group')]
+        check([g.split(' ·')[0] for g in groups] == ['1:64', '1:43', '1:18'], f'By scale groups in scale order ({groups})')
+        page.get_by_role('button', name='By box', exact=True).click(); page.wait_for_timeout(300)
+        groups = [g.inner_text() for g in page.query_selector_all('h3.group')]
+        check(groups[1].startswith('BOX 12 · LE MANS RACERS · 2 MODELS') and groups[-1].startswith('NO BOX YET'), f'By box headers carry box names ({groups})')
+        page.screenshot(path=f'{SHOTS}/04-bybox.png')
+        page.locator('h3.group a', has_text='BOX 30').click(); page.wait_for_selector('.boxcard')
+        check('Box 30' in txt('.boxcard') and len(page.query_selector_all('.tile')) == 1, 'tapping a box header opens that box')
+
+        # Box names reach the sheet; an older sheet without STORAGE_BOXES gets the tab added (never deleted)
+        page.evaluate("localStorage.setItem('smg.clientId', 'test-client.apps.googleusercontent.com')")
+        page.goto(base + '#/'); page.wait_for_selector('.tile')
+        def sync_all():
+            page.click('#status')
+            for _ in range(150):
+                if page.inner_text('#status') == 'All synced': return True
+                page.wait_for_timeout(200)
+            return False
+        check(sync_all(), 'first sync completes')
+        sid = next(iter(fake.sheets)); book = fake.sheets[sid]
+        check(len(book.get('STORAGE_BOXES', [])) == 2 and 'Le Mans racers' in book['STORAGE_BOXES'][1], 'box name synced to STORAGE_BOXES')
+        del book['STORAGE_BOXES']
+        page.evaluate("(async () => { const i = await import('./js/idb.js'); const c = await i.meta.get('config'); c.tabsVersion = 1; await i.meta.set('config', c); })()")
+        page.goto(base + '#/'); page.wait_for_selector('.tile')
+        page.fill('input[type=search]', 'box 3'); page.wait_for_selector('.boxcard')
+        page.fill('input[aria-label="Box name"]', 'Mini GT JDM'); page.get_by_role('button', name='Save name').click(); page.wait_for_timeout(500)
+        check(sync_all(), 'sync after app update completes')
+        rows = book.get('STORAGE_BOXES', [])
+        check(len(rows) >= 2 and rows[0][:3] == ['storage_box_id', 'created_at', 'updated_at'] and any('Mini GT JDM' in r for r in rows), f'older sheet: STORAGE_BOXES tab added with headers, new name synced ({len(rows)} rows)')
+        check('MODELS' in book and len(book['MODELS']) > 1, 'existing tabs untouched')
 
         check(not [e for e in errors if 'ERR_CONNECTION' not in e], f'no page errors ({errors[:3]})')
         browser.close()
