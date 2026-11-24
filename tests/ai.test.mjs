@@ -90,5 +90,17 @@ eq(parseAnswer('Box 1 | Supra | 64-1 | Mini GT\nCar Name: Other', 1).items[0].na
   eq([x.name, x.code, x.brand].join(' / '), 'Toyota GR010 Hybrid 2024 (#7) / 18-38322 / Bburago', 'correct order left as it is');
 }
 
+// B's phone, 24 Nov 22:26: same pattern, brand with extras + a long car name in the code slot + event as brand
+{
+  const B = ['Hot Wheels', 'Mini GT', 'Tarmac Works', 'Pop Race', 'Bburago', 'Kaido House', 'Inno64'];
+  const x = parseAnswer('Box 1 | Mini GT (TSM Model) | Chevrolet Corvette Z06 GT3.R #4 | 2025 IMSA Daytona 24 Hrs — Corvette Racing by Pratt Miller Motorsports', 5, B).items[0];
+  eq(x.brand, 'Mini GT (TSM Model)', 'brand with "(TSM Model)" recognised as the brand');
+  eq(x.code, '', 'a car name is never taken as a code');
+  eq(x.name.startsWith('Chevrolet Corvette Z06 GT3.R #4'), true, 'car name starts with the car');
+  eq(x.name.includes('Daytona'), true, 'event/livery kept in the name');
+  const y = parseAnswer('Box 1 | Mini GT | Chevrolet Corvette Z06 GT3.R #4 | MGT00999-L', 5, B).items[0];
+  eq([y.name, y.code].join(' / '), 'Chevrolet Corvette Z06 GT3.R #4 / MGT00999-L', 'brand | car | code order sorted');
+}
+
 console.log(fails ? `${fails} of ${n} AI parser tests FAILED` : `All ${n} AI parser tests passed`);
 process.exit(fails ? 1 : 0);

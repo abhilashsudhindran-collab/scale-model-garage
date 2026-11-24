@@ -17,6 +17,7 @@ export function buildPrompt(boxes) {
     fmt,
     'Example: Box 1 | Toyota Supra (A80) 1997 Castrol | MGT00123-L | Mini GT',
     'The car name is the real car (make, model, version, livery), never the brand. Keep the 4 parts in this order.',
+    'The product code is the maker\'s catalogue number (letters + digits, e.g. MGT00123-L, KHMG197, HKT123), usually on the box back or side near the barcode. It is not the barcode digits.',
     '',
     `I'm cataloguing my die-cast model car boxes. There are ${boxes.length} box${boxes.length === 1 ? '' : 'es'}, ${boxes.length * 2} photos, in this order:`,
     ...lines,
@@ -46,9 +47,11 @@ export function looksLikeBrand(f, brandNames = []) {
   if (!t || t.split(/\s+/).length > 6) return false;
   const k = sqz(t);
   // the whole part is brand names (e.g. "Kaido House × Mini GT", "Hot Wheels"), nothing else
-  let rest = k;
+  // Extras that often ride along with a brand: "(TSM Model)", "by TSM", "Models", "×", "x".
+  const bare = sqz(t.replace(/\([^)]*\)/g, ' ').replace(/\b(by|tsm|true\s*scale(\s*miniatures)?|models?|diecast|die-cast|collection|limited|edition)\b/gi, ' '));
+  let rest = bare;
   for (const b of [...brandNames].sort((a, c) => sqz(c).length - sqz(a).length)) { const bb = sqz(b); if (bb.length >= 2 && rest.includes(bb)) rest = rest.split(bb).join(''); }
-  return rest !== k && rest.replace(/x/g, '').length <= 2;
+  return rest !== bare && rest.replace(/x/g, '').length <= 2;
 }
 function sortFields(fields, brandNames) {
   const parts = fields.map(f => clean(f, 120)).filter(f => !blank(f) && !/^[=+@]/.test(f)); // formula-like parts never become text
@@ -87,7 +90,9 @@ export function parseAnswer(text, expected = MAX_BATCH, brandNames = []) {
     if (blank(brand)) brand = '';
     // Parts out of order (brand where the name should be, a car name where the code should be, extra parts): sort by look.
     // Only on clear evidence: the brand sits in the name slot, or a code sits where the brand or an extra part is.
+    const wordy = (f) => f.split(/\s+/).length >= 3 && /[a-z]{3}/i.test(f); // a car name, not a code
     const shifted = (name && looksLikeBrand(name, brandNames))
+      || (code && wordy(code))
       || (brand && looksLikeCode(brand) && !looksLikeCode(code))
       || (fields.length > 3 && !looksLikeCode(code) && fields.slice(3).some(f => looksLikeCode(clean(f, 60))));
     if (shifted) ({ name, code, brand } = sortFields(fields, brandNames));
