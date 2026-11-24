@@ -10,8 +10,9 @@ import { getClientId, setClientId, hasToken, signIn, tokenMinutesLeft } from './
 import { getConfig, seedLocal } from './setup.js';
 import { newId } from './ids.js';
 import { newTimer, touch, seconds } from './timing.js';
+import { backupIfDue, backupNow, lastBackup } from './backup.js';
 
-export const APP_VERSION = 's1-0.3.0';
+export const APP_VERSION = 's1-0.4.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 
@@ -36,6 +37,10 @@ function toast(msg, ms = 1800, kind = 'ok') {
   document.body.append(t); setTimeout(() => t.remove(), kind === 'ok' ? ms : Math.max(ms, 3500));
 }
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+// Numbered storage boxes (B, 24 Nov: models go into numbered see-through boxes). Stored on the
+// physical copy as storage_location "Box 12"; B types only "12".
+const boxLoc = (b) => (String(b || '').trim() ? `Box ${String(b).trim()}` : '');
+const collectionEstimate = () => Number(localStorage.getItem('smg.collectionEstimate')) || 1000;
 
 // ---------- thumbnails ----------
 const urlCache = new Map();
@@ -87,6 +92,9 @@ async function runSync(interactive) {
     const s = await syncNow({ interactive, progress: setMsg });
     setMsg(`Synced: ${s.photosUploaded} photo(s), ${s.rowsAppended} new row(s), ${s.rowsUpdated} update(s), ${s.pulled} pulled${s.conflicts ? `, ${s.conflicts} clash(es) to review` : ''}${s.errors.length ? `, ${s.errors.length} error(s) — will retry` : ''} · ${(s.ms / 1000).toFixed(1)} s`);
     if (interactive) toast(s.errors.length ? 'Synced with some errors — will retry' : 'Synced ✓', 1800, s.errors.length ? 'warn' : 'ok');
+    // Daily/monthly sheet backup (D25) once a sync has succeeded; a failure here never affects the sync.
+    try { const cfg = await getConfig(); if (cfg && !s.errors.length) { const b = await backupIfDue(cfg); if (b.daily || b.monthly) setMsg(`${lastSyncMsg} · backup made`); } }
+    catch (e) { console.warn('backup', e); setMsg(`${lastSyncMsg} · backup failed: ${e.message}`); }
   } catch (e) {
     setMsg(e.message);
     if (interactive) toast(e.message, 3500, (e.retryable || e.status === 401) ? 'warn' : 'bad');
@@ -155,6 +163,13 @@ async function renderGarage(v) {
   const archived = models.filter(r => r.data.deleted_at);
   const copies = inventory.filter(i => i.ownership_status === 'Owned');
   v.append(h('div', { class: 'row' }, h('h2', {}, 'My Garage'), h('div', { class: 'muted', style: 'text-align:right' }, `${plural(active.length, 'model', 'models')} · ${plural(copies.length, 'copy', 'copies')}`)));
+  // Overview (B, 24 Nov): how far the backlog has got, and how many storage boxes are in use.
+  const est = collectionEstimate();
+  const boxesUsed = new Set(copies.map(i => i.storage_location).filter(Boolean)).size;
+  const pct = Math.min(100, Math.round((copies.length / est) * 100));
+  v.append(h('div', { class: 'overview' },
+    h('div', { class: 'ovtext' }, h('b', {}, `${copies.length} of about ${est.toLocaleString('en-IN')}`), ' boxes catalogued', boxesUsed ? ` · ${plural(boxesUsed, 'storage box', 'storage boxes')} in use` : ''),
+    h('div', { class: 'bar', role: 'progressbar', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': `${pct}% catalogued` }, h('span', { style: `width:${Math.max(pct, copies.length ? 1 : 0)}%` }))));
   const search = h('input', { type: 'search', placeholder: 'Search name, code, barcode, brand, scale…', value: garageSearch, oninput: (e) => { garageSearch = e.target.value; draw(); } });
   v.append(search);
   const photosByModel = new Map();
@@ -163,7 +178,7 @@ async function renderGarage(v) {
   // One scrolling row of filters (audit G5); a filter only appears when it has something in it.
   const n = { review: active.filter(r => r.data.namespace_status === 'needs_review').length, pending: active.filter(isPending).length, clash: active.filter(r => r.conflict).length, archived: archived.length };
   if (n[garageFilter] === 0) garageFilter = 'all'; // e.g. after restoring the last archived model, don't leave an empty list
-  const filters = [['all', 'All'], ['quick', 'Quick'], ['review', `Needs review (${n.review})`, n.review], ['pending', `Waiting to sync (${n.pending})`, n.pending], ['clash', `Clashes (${n.clash})`, n.clash], ['archived', `Archived (${n.archived})`, n.archived]]
+  const filters = [['all', 'All'], ['box', 'By box'], ['quick', 'Quick'], ['review', `Needs review (${n.review})`, n.review], ['pending', `Waiting to sync (${n.pending})`, n.pending], ['clash', `Clashes (${n.clash})`, n.clash], ['archived', `Archived (${n.archived})`, n.archived]]
     .filter(([k, , c]) => c === undefined || c > 0 || garageFilter === k);
   const chips = h('div', { class: 'chips scroll', style: 'margin:10px 0' }, filters.map(([k, label]) => h('button', { class: `chip ${garageFilter === k ? 'on' : ''}`, onclick: () => { garageFilter = k; route(); } }, label)));
   v.append(chips);
@@ -189,8 +204,21 @@ async function renderGarage(v) {
       return searchMatch(q, hay);
     });
     if (!list.length) { grid.append(h('p', { class: 'muted' }, active.length || archived.length ? 'Nothing matches.' : 'No models yet. Tap ＋ Add to catalogue your first box.')); return; }
+    // "By box": grouped under each storage box, in box-number order; models without a box last.
+    const boxesOf = (mid) => [...new Set(inventory.filter(i => i.model_id === mid && i.ownership_status === 'Owned').map(i => i.storage_location).filter(Boolean))];
+    let lastGroup = null;
+    if (garageFilter === 'box') {
+      const key = (r) => boxesOf(r.data.model_id)[0] || '';
+      const num = (k) => { const n = k.match(/\d+/); return n ? Number(n[0]) : Infinity; };
+      list.sort((a, b) => { const ka = key(a), kb = key(b); if (!ka !== !kb) return ka ? -1 : 1; return num(ka) - num(kb) || ka.localeCompare(kb) || String(b.data.created_at).localeCompare(String(a.data.created_at)); });
+    }
+    const groupCount = (k) => list.filter(r => (boxesOf(r.data.model_id)[0] || '') === k).length;
     for (const r of list.slice(0, 300)) {
       const m = r.data;
+      if (garageFilter === 'box') {
+        const g = boxesOf(m.model_id)[0] || '';
+        if (g !== lastGroup) { lastGroup = g; grid.append(h('h3', { class: 'group' }, `${g || 'No box yet'} · ${plural(groupCount(g), 'model', 'models')}`)); }
+      }
       const ph = (photosByModel.get(m.model_id) || []).find(p => p.photo_id === m.primary_photo_id) || (photosByModel.get(m.model_id) || [])[0];
       const img = h('div', { class: 'ph' }, '📦');
       photoUrl(ph).then(u => { if (u) img.replaceChildren(h('img', { src: u, alt: '' })); });
@@ -201,6 +229,7 @@ async function renderGarage(v) {
           h('div', { class: 'nm' }, m.display_name || '(no name yet)'),
           h('div', { class: 'sub' }, [brandName[m.brand_id] || m.printed_brand_text || 'Brand?', scaleLabel[m.scale_id], m.product_code].filter(Boolean).join(' · ')),
           h('div', { class: 'badges' },
+            ...boxesOf(m.model_id).slice(0, 2).map(bx => h('span', { class: 'b box' }, bx)),
             m.completeness_status === 'complete' ? h('span', { class: 'b ok' }, 'Complete') : null, // "Quick" is the normal case, so no badge (G6)
             m.deleted_at ? h('span', { class: 'b mute' }, 'Archived') : null,
             nCopies > 1 ? h('span', { class: 'b info' }, `${nCopies} copies`) : null,
@@ -220,7 +249,7 @@ async function renderGarage(v) {
 let cap = null;
 function freshCapture(keep = {}) {
   // "Sealed" is remembered like brand and scale (audit C1): most of the collection is sealed boxes.
-  return { modelId: newId('models'), inventoryId: newId('inventory'), photos: {}, sealed: localStorage.getItem('smg.lastSealed') === 'yes', brandId: keep.brandId || '', scaleId: keep.scaleId || '', barcode: null, name: '', code: '', count: keep.count || 0, timer: newTimer() };
+  return { modelId: newId('models'), inventoryId: newId('inventory'), photos: {}, sealed: localStorage.getItem('smg.lastSealed') === 'yes', brandId: keep.brandId || '', scaleId: keep.scaleId || '', box: localStorage.getItem('smg.lastBox') || '', barcode: null, name: '', code: '', count: keep.count || 0, timer: newTimer() };
 }
 const capTouch = () => { if (cap) touch(cap.timer); };
 
@@ -236,8 +265,8 @@ async function saveDraft() {
     if (!p.draftStored) { for (const v of DRAFT_VARIANTS) await blobs.put(`draft:${p.photoId}:${v}`, p.prep[v]); p.draftStored = true; }
     photos[role] = { photoId: p.photoId, capturedAt: p.capturedAt, info: Object.fromEntries(PHOTO_INFO.map(k => [k, p.prep[k]])) };
   }
-  const { modelId, inventoryId, sealed, brandId, scaleId, barcode, name, code, count, timer } = cap;
-  await meta.set(DRAFT_KEY, { modelId, inventoryId, sealed, brandId, scaleId, barcode, name, code, count, timer, photos });
+  const { modelId, inventoryId, sealed, brandId, scaleId, box, barcode, name, code, count, timer } = cap;
+  await meta.set(DRAFT_KEY, { modelId, inventoryId, sealed, brandId, scaleId, box, barcode, name, code, count, timer, photos });
 }
 let draftTimer = null;
 function saveDraftSoon() { clearTimeout(draftTimer); draftTimer = setTimeout(() => saveDraft().catch(console.error), 400); }
@@ -316,6 +345,13 @@ async function renderAdd(v) {
     h('option', { value: '' }, 'Other scale…'), ref.scales.filter(s => !main.includes(s.label)).map(s => h('option', { value: s.scale_id, selected: s.scale_id === cap.scaleId ? true : undefined }, s.label)));
   scaleChips.append(more);
   v.append(scaleChips);
+
+  // --- Storage box (optional, remembered; "Box full" moves to the next number) ---
+  v.append(h('label', { class: 'f' }, 'Storage box (optional)'));
+  const setBox = (b) => { cap.box = String(b).trim(); localStorage.setItem('smg.lastBox', cap.box); capTouch(); saveDraftSoon(); };
+  const boxRow = h('div', { class: 'row' }, h('input', { class: 'boxin', inputmode: 'text', placeholder: 'Box number, e.g. 12', value: cap.box, 'aria-label': 'Storage box number', oninput: (e) => setBox(e.target.value) }));
+  if (/^\d+$/.test(cap.box)) boxRow.append(h('button', { type: 'button', class: 'quiet', style: 'flex:0 0 auto', onclick: () => { setBox(Number(cap.box) + 1); toast(`Now filling Box ${cap.box}`); route(); } }, `Box full → ${Number(cap.box) + 1}`));
+  v.append(boxRow);
 
   // --- Barcode ---
   v.append(h('label', { class: 'f' }, 'Barcode (if the box has one)'));
@@ -481,7 +517,7 @@ async function saveCapture() {
     primary_photo_id: cap.photos.box_front?.photoId || '' };
   model.duplicate_check_status = duplicateCheckStatus(model);
   const items = [{ entity: 'models', fields: model },
-    { entity: 'inventory', fields: { inventory_id: cap.inventoryId, model_id: cap.modelId, ownership_status: 'Owned', packaging_state: cap.sealed ? 'sealed' : 'unknown', acquisition_type: 'Unknown', purchase_date_precision: 'unknown', currency: 'INR' } },
+    { entity: 'inventory', fields: { inventory_id: cap.inventoryId, model_id: cap.modelId, ownership_status: 'Owned', packaging_state: cap.sealed ? 'sealed' : 'unknown', storage_location: boxLoc(cap.box), acquisition_type: 'Unknown', purchase_date_precision: 'unknown', currency: 'INR' } },
     ...(await savePhotoRecords(cap.modelId, photosToSave()))];
   if (cap.barcode) items.push({ entity: 'product_identifiers', fields: { model_id: cap.modelId, identifier_type: 'barcode', value_raw: cap.barcode.raw, value_cmp: cap.barcode.cmp, barcode_format: cap.barcode.format || '', check_digit_ok: cap.barcode.checkOk === null ? '' : (cap.barcode.checkOk ? 'yes' : 'no'), source: cap.barcode.source } });
   try { await store.createMany(items); }
@@ -491,7 +527,7 @@ async function saveCapture() {
   await logTiming(secs);
   await clearDraft();
   cap = freshCapture({ brandId: cap.brandId, scaleId: cap.scaleId, count: cap.count + 1 });
-  toast(`Saved ✓ (${secs} s) — next box`);
+  toast(`Saved ✓ (${secs} s)${cap.box ? ` · Box ${cap.box}` : ''} — next box`);
   window.scrollTo(0, 0);
   route();
   autoSyncSoon();
@@ -499,7 +535,7 @@ async function saveCapture() {
 
 async function saveCopyOf(m) {
   // This box's photos are attached to the new physical copy (never made the product's main photo).
-  const items = [{ entity: 'inventory', fields: { inventory_id: cap.inventoryId, model_id: m.model_id, ownership_status: 'Owned', packaging_state: cap.sealed ? 'sealed' : 'unknown', acquisition_type: 'Unknown', purchase_date_precision: 'unknown', currency: 'INR' } },
+  const items = [{ entity: 'inventory', fields: { inventory_id: cap.inventoryId, model_id: m.model_id, ownership_status: 'Owned', packaging_state: cap.sealed ? 'sealed' : 'unknown', storage_location: boxLoc(cap.box), acquisition_type: 'Unknown', purchase_date_precision: 'unknown', currency: 'INR' } },
     ...(await savePhotoRecords(m.model_id, photosToSave())).map(it => ({ ...it, fields: { ...it.fields, inventory_id: cap.inventoryId, is_primary: 'no' } }))];
   try { await store.createMany(items); }
   catch (e) { toast(`Not saved: ${e.message}. Your box is kept here; try again.`, 5000, 'bad'); return; }
@@ -643,7 +679,7 @@ async function renderItem(v, modelId) {
     add('Box', sel('packaging_state', ['sealed', 'opened', 'loose']));
     add('Condition', sel('condition', CONDITIONS));
     add('Box condition', sel('packaging_condition', CONDITIONS));
-    add('Where it is stored', h('input', { value: cf.storage_location, placeholder: 'e.g. Cabinet 2, shelf 3', oninput: e => { cf.storage_location = e.target.value; cc.dirty = true; } }));
+    add('Storage box / place', h('input', { value: cf.storage_location, placeholder: 'e.g. Box 12', oninput: e => { cf.storage_location = e.target.value; cc.dirty = true; } }));
     add('Price paid (₹) — leave empty if unknown', h('input', { inputmode: 'decimal', value: cf.purchase_price, placeholder: 'Unknown', oninput: e => { cf.purchase_price = e.target.value; cc.dirty = true; } }));
     add('Date bought — leave empty if unknown', h('input', { type: 'date', value: cf.purchase_date, oninput: e => { cf.purchase_date = e.target.value; cc.dirty = true; } }));
     add('Bought from', h('input', { value: cf.purchase_source, oninput: e => { cf.purchase_source = e.target.value; cc.dirty = true; } }));
@@ -734,6 +770,29 @@ async function renderSettings(v) {
     config?.workbookId ? h('p', {}, h('a', { href: `https://docs.google.com/spreadsheets/d/${config.workbookId}`, target: '_blank', rel: 'noopener' }, 'Open SCALE_GARAGE_MASTER sheet ↗')) : h('p', { class: 'muted' }, 'Not set up yet — sign in above.'),
     config?.rootId ? h('p', {}, h('a', { href: `https://drive.google.com/drive/folders/${config.rootId}`, target: '_blank', rel: 'noopener' }, 'Open SCALE GARAGE folder ↗')) : null);
   v.append(where);
+
+  // Backups (D25): automatic after a successful sync (daily, monthly) + on demand.
+  const lb = await lastBackup();
+  const when = (iso) => (iso ? new Date(iso).toLocaleString() : 'not yet');
+  v.append(h('div', { class: 'card' }, h('h3', {}, 'Backups'),
+    h('dl', { class: 'kv' },
+      h('dt', {}, 'Daily copy'), h('dd', {}, when(lb.dailyAt)),
+      h('dt', {}, 'Monthly copy'), h('dd', {}, lb.monthlyMonth || 'not yet'),
+      h('dt', {}, 'Manual copy'), h('dd', {}, when(lb.manualAt))),
+    h('p', { class: 'muted' }, 'A copy of your sheet goes to SCALE GARAGE › 06_BACKUPS after a sync, once a day (7 kept) and once a month (12 kept). Photos stay in Drive and are not copied.'),
+    h('button', { class: 'quiet', disabled: config?.workbookId ? undefined : true, onclick: async (e) => {
+      e.target.disabled = true; e.target.textContent = 'Backing up…';
+      try { if (!hasToken()) await signIn(); await backupNow(await getConfig()); toast('Backup made ✓'); }
+      catch (err) { toast(`Backup failed: ${err.message}`, 4000, 'bad'); }
+      route();
+    } }, 'Back up now')));
+
+  // Collection size, for the Garage progress bar.
+  const estIn = h('input', { inputmode: 'numeric', value: String(collectionEstimate()), 'aria-label': 'About how many boxes in your collection' });
+  v.append(h('div', { class: 'card' }, h('h3', {}, 'Your collection'),
+    h('label', { class: 'f' }, 'About how many boxes in total?'), estIn,
+    h('p', { class: 'muted' }, 'Used only for the progress bar on the Garage screen. A rough number is fine.'),
+    h('button', { class: 'quiet', onclick: () => { const n = Number(estIn.value.replace(/\D/g, '')); if (n > 0) { localStorage.setItem('smg.collectionEstimate', String(n)); toast('Saved ✓'); } else toast('Please enter a number', 3000, 'warn'); } }, 'Save')));
 
   const est = await storageEstimate();
   const persisted = await (navigator.storage?.persisted?.() ?? Promise.resolve(false));

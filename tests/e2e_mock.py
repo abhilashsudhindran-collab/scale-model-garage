@@ -15,6 +15,7 @@ PORT = 8765
 class FakeGoogle:
     def __init__(self):
         self.files = {}      # id -> {name, mimeType, parents, appProperties, md5, size, trashed}
+        self.blobs = {}      # id -> bytes (uploaded photo files, for downloads)
         self.sheets = {}     # id -> {tab: [[...]]}
         self.n = 0
         self.calls = []
@@ -72,11 +73,17 @@ class FakeGoogle:
                     return route.abort('connectionreset')  # simulate setup cut off before headers were written
                 for d in json.loads(body)['data']:
                     tab, row = self.a1(d['range'])
+                    letters = re.match(r"[^!]*!([A-Z]+)", d['range'])
+                    col = 0
+                    for ch in (letters.group(1) if letters else 'A'): col = col * 26 + (ord(ch) - 64)
+                    col -= 1  # 0-based start column (writes to B5:C5 keep column A intact, like real Sheets)
                     rows = book.setdefault(tab, [])
                     for i, vals in enumerate(d['values']):
                         idx = row - 1 + i
                         while len(rows) <= idx: rows.append([])
-                        rows[idx] = list(vals)
+                        if col == 0: rows[idx] = list(vals)
+                        else:
+                            r = list(rows[idx]); r += [''] * max(0, col + len(vals) - len(r)); r[col:col + len(vals)] = list(vals); rows[idx] = r
                 return ok({})
             m2 = re.match(r'/values/(.+):append', rest)
             if method == 'POST' and m2:
@@ -96,6 +103,7 @@ class FakeGoogle:
                 data = data[:-2] if data.endswith(b'\r\n') else data
                 fid = self.nid('d')
                 md5 = hashlib.md5(data).hexdigest()
+                self.blobs[fid] = data
                 self.files[fid] = dict(name=meta['name'], mimeType='image/jpeg', parents=meta.get('parents', []), appProperties=meta.get('appProperties', {}), md5=md5, size=len(data), trashed=False)
                 if self.fail_next_upload_after_store:
                     self.fail_next_upload_after_store = False
@@ -115,15 +123,26 @@ class FakeGoogle:
                 fid = self.nid('F')
                 self.files[fid] = dict(name=meta['name'], mimeType=meta.get('mimeType'), parents=meta.get('parents', []), appProperties=meta.get('appProperties', {}), trashed=False)
                 return ok({'id': fid, 'name': meta['name']})
+            mc = re.match(r'/drive/v3/files/([^/]+)/copy$', path)
+            if mc and method == 'POST':
+                src = mc.group(1); meta = json.loads(body or b'{}')
+                if src not in self.files: return ok({'error': 'not found'}, 404)
+                nid = self.nid('c')
+                self.files[nid] = dict(self.files[src], name=meta.get('name', 'copy'), parents=meta.get('parents', []), appProperties={}, trashed=False)
+                if src in self.sheets: self.sheets[nid] = {t: [list(r) for r in rows] for t, rows in self.sheets[src].items()}
+                return ok({'id': nid, 'name': self.files[nid]['name']})
             m = re.match(r'/drive/v3/files/([^/]+)$', path)
             if m:
                 fid = m.group(1); f = self.files.get(fid)
                 if not f: return ok({'error': 'not found'}, 404)
+                if method == 'GET' and qs.get('alt', [''])[0] == 'media':
+                    return route.fulfill(status=200, content_type='image/jpeg', body=self.blobs.get(fid, b''))
                 if method == 'GET':
                     return ok({'id': fid, 'name': f['name'], 'trashed': f['trashed'], 'parents': f['parents'], 'md5Checksum': f.get('md5')})
                 if method == 'PATCH':
                     meta = json.loads(body or b'{}')
                     if 'appProperties' in meta: f['appProperties'].update(meta['appProperties'])
+                    if 'trashed' in meta: f['trashed'] = bool(meta['trashed'])
                     if 'addParents' in qs: f['parents'] = [qs['addParents'][0]]
                     return ok({'id': fid})
             return ok({'error': 'unhandled drive ' + path}, 500)
@@ -246,7 +265,7 @@ def main():
         page.reload(); page.wait_for_selector('text=Google account')  # like the phone reloading the tab
         page.get_by_role('button', name='Sign in & set up').click()
         page.wait_for_selector('text=Synced:', timeout=30000)
-        check(len(fake.sheets) == 1, 'retry reuses the same sheet (no second workbook)')
+        check(len([k for k in fake.sheets if not fake.files[k]['appProperties'].get('smgBackup')]) == 1, 'retry reuses the same sheet (no second workbook; backup copies not counted)')
         check(len(fake.sheets[sid0]['SETTINGS']) == 7, 'retry finishes SETTINGS rows')
         check(len([f for f in fake.files.values() if f.get('name') == 'SCALE GARAGE']) == 1, 'retry reuses the same SCALE GARAGE folder')
         msg = page.inner_text('#syncMsg')

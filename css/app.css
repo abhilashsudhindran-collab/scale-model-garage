@@ -108,3 +108,13 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; text
 
 /* With a long status in the pill, the wordmark shortens to "Garage" instead of being cut off */
 header.top.compact h1 .sm { display: none; }
+
+/* Garage overview: progress of the backlog (B, 24 Nov) */
+.overview { margin: 2px 0 12px; }
+.overview .ovtext { font-size: .85rem; color: var(--muted); }
+.overview .ovtext b { color: var(--text); }
+.overview .bar { height: 6px; border-radius: 999px; background: var(--surface2); margin-top: 6px; overflow: hidden; }
+.overview .bar span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+/* Storage boxes */
+.b.box { color: var(--accent); }
+.grid h3.group { grid-column: 1 / -1; margin: 14px 0 0; }

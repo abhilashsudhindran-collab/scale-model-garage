@@ -163,6 +163,20 @@ async function doSync({ interactive = false, progress = () => {} } = {}) {
   if (pulls.length) await records.putMany(pulls);
   summary.pulled = pulls.length;
 
+  // 5b. Photos on another device (audit G3): fetch missing thumbnails (~33 KB each) so tiles show real
+  //     photos on the laptop or after clearing Chrome. Capped per sync so a first sync stays quick.
+  summary.thumbsFetched = 0;
+  const haveBlobs = new Set(await blobs.keys());
+  for (const r of await records.byEntity('photos')) {
+    if (summary.thumbsFetched >= 60) break;
+    if (r.data.deleted_at || !r.data.thumb_file_id || haveBlobs.has(`${r.id}:thumb`)) continue;
+    try {
+      progress(`Fetching photo previews… ${summary.thumbsFetched + 1}`);
+      await blobs.put(`${r.id}:thumb`, await drive.download(r.data.thumb_file_id));
+      summary.thumbsFetched++;
+    } catch (e) { console.warn('thumbnail download', r.id, e.message); }
+  }
+
   // 6. Free phone storage: once a photo row is safely in the Sheet, drop the local original
   //    (and display copy, except box fronts kept for the offline shop check). Thumbnails stay.
   for (const r of await records.byEntity('photos')) {
