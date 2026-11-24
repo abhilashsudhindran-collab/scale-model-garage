@@ -376,3 +376,6 @@ header.top h1 img.logo { width: 26px; height: 26px; border-radius: 7px; flex: 0 
 .cropmag.on { opacity: 1; }
 .shotacts { margin: 8px 0 2px; align-items: center; } .shotacts > .muted { flex: 1 1 auto; } button.shot { font: inherit; padding: 0; cursor: pointer; }
 .cropmag { width: 132px; height: 132px; }
+.shotsel { background: var(--surface); border-radius: 16px; padding: 12px 14px; margin: 10px 0; }
+.shotsel .row { margin-top: 8px; }
+.shot.sel { box-shadow: 0 0 0 3px var(--accent); }
