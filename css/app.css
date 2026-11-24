@@ -118,3 +118,13 @@ header.top.compact h1 .sm { display: none; }
 /* Storage boxes */
 .b.box { color: var(--accent); }
 .grid h3.group { grid-column: 1 / -1; margin: 14px 0 0; }
+
+/* Photo run and Name them (s1-0.5.0) */
+.runhead { margin: 14px 0 8px; color: var(--muted); }
+.runhead b { color: var(--text); }
+.shot.nextshot { border-color: var(--accent); border-style: solid; color: var(--accent); }
+button.runshot { min-height: 64px; font-size: 1.15rem; margin-top: 10px; }
+img.namebig { display: block; width: 100%; max-height: 52vh; object-fit: contain; background: var(--surface2); border-radius: var(--radius); }
+.runsum { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--muted); font-size: .9rem; }
+.runsum > div { flex: 1 1 100%; }
+.runsum b { color: var(--text); }
