@@ -14,7 +14,7 @@ import { straighten, validQuad } from './crop.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.15.0';
+export const APP_VERSION = 's1-0.15.1';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -598,8 +598,8 @@ async function saveDraft() {
     if (!p.draftStored) { for (const v of DRAFT_VARIANTS) await blobs.put(`draft:${p.photoId}:${v}`, p.prep[v]); p.draftStored = true; }
     photos[role] = { photoId: p.photoId, capturedAt: p.capturedAt, info: Object.fromEntries(PHOTO_INFO.map(k => [k, p.prep[k]])) };
   }
-  const { modelId, inventoryId, sealed, brandId, scaleId, box, barcode, name, code, count, timer } = cap;
-  await meta.set(DRAFT_KEY, { modelId, inventoryId, sealed, brandId, scaleId, box, barcode, name, code, count, timer, photos });
+  const { modelId, inventoryId, sealed, brandId, scaleId, box, barcode, name, code, count, timer, brandPicked, scalePicked, artSkipped } = cap;
+  await meta.set(DRAFT_KEY, { modelId, inventoryId, sealed, brandId, scaleId, box, barcode, name, code, count, timer, brandPicked, scalePicked, artSkipped, photos });
 }
 let draftTimer = null;
 function saveDraftSoon() { clearTimeout(draftTimer); draftTimer = setTimeout(() => saveDraft().catch(console.error), 400); }
@@ -844,6 +844,10 @@ let runSetOpen = true; // run settings stay open until "Done: start shooting" or
 async function renderRun(v) {
   if (!cap) cap = await loadDraft();
   if (!cap) cap = freshCapture({ scaleId: localStorage.getItem('smg.lastScale') || '', brandId: recentBrands()[0] || '' });
+  // Mixed box: the brand (or scale) must be chosen for THIS car after its photos. A value carried over from an
+  // earlier setting or restored after Chrome reloaded the page (e.g. while the camera was open) doesn't count.
+  if (localStorage.getItem('smg.brandPerCar') === '1' && !cap.brandPicked) cap.brandId = '';
+  if (localStorage.getItem('smg.scalePerCar') === '1' && !cap.scalePicked) cap.scaleId = '';
   const ref = await refData();
   const brand = ref.brands.find(b => b.brand_id === cap.brandId);
   const scale = ref.scales.find(x => x.scale_id === cap.scaleId);
@@ -914,9 +918,27 @@ async function renderRun(v) {
   const strip = h('div', { class: 'shots' });
   for (const role of ['box_front', 'box_rear', ...(cap.sealed ? ['box_art'] : [])]) {
     const p = cap.photos[role];
-    strip.append(h('div', { class: `shot ${p ? 'done' : ''} ${role === next ? 'nextshot' : ''}` }, p?.url ? h('img', { src: p.url, alt: '' }) : h('span', {}, SHOT_ROLES[role].label), p ? h('span', { class: 'tag' }, `${SHOT_ROLES[role].label} ✓`) : null));
+    const retake = p && !runSaving ? async () => {
+      if (!confirm(`Retake the ${SHOT_ROLES[role].label.toLowerCase()} photo?`)) return;
+      await dropDraftPhoto(p.photoId); delete cap.photos[role];
+      if (role === 'box_rear' && cap.barcode?.source === 'rear_photo') cap.barcode = null;
+      cap.runDecision = null; await saveDraft(); route();
+    } : undefined;
+    strip.append(h(p ? 'button' : 'div', { type: p ? 'button' : undefined, class: `shot ${p ? 'done' : ''} ${role === next ? 'nextshot' : ''}`, onclick: retake, 'aria-label': p ? `${SHOT_ROLES[role].label}: tap to retake` : undefined }, p?.url ? h('img', { src: p.url, alt: '' }) : h('span', {}, SHOT_ROLES[role].label), p ? h('span', { class: 'tag' }, `${SHOT_ROLES[role].label} ✓`) : null));
   }
   v.append(strip);
+  const nPhotos = Object.keys(cap.photos).length;
+  if (nPhotos && !runSaving) v.append(h('div', { class: 'row shotacts' },
+    h('span', { class: 'muted small' }, 'Tap a photo to retake it'),
+    h('button', { type: 'button', class: 'small ghost', onclick: async () => {
+      if (!confirm(`Discard this car (${plural(nPhotos, 'photo', 'photos')})? Nothing has been saved for it yet.`)) return;
+      for (const r of Object.keys(cap.photos)) await dropDraftPhoto(cap.photos[r].photoId);
+      cap.photos = {}; cap.barcode = null; cap.artSkipped = false; cap.runDecision = null; cap.brandPicked = false; cap.scalePicked = false;
+      if (localStorage.getItem('smg.brandPerCar') === '1') cap.brandId = '';
+      if (localStorage.getItem('smg.scalePerCar') === '1') cap.scaleId = '';
+      await saveDraft(); toast('Car discarded'); route();
+    } }, 'Discard this car')));
+  if (cap.restored && !next && nPhotos) v.append(h('div', { class: 'banner info' }, 'This car was kept while the app reloaded. Check the photos, then save it or discard it.'));
   if (cap.barcode) v.append(h('p', { class: 'muted' }, `Barcode ${cap.barcode.raw} (read from the rear photo)`));
   v.append(say);
 
@@ -942,8 +964,8 @@ async function renderRun(v) {
     const all = ref.brands;
     const quick = recentBrands().map(id => all.find(b => b.brand_id === id)).filter(Boolean).slice(0, 8);
     const done = async () => { saveDraftSoon(); if (cap.brandId && cap.scaleId) await afterRunPhoto(); else route(); };
-    const pickBrand = async (id) => { if (!id) return; cap.brandId = id; pushRecentBrand(id); await done(); };
-    const pickScale = async (id) => { if (!id) return; cap.scaleId = id; localStorage.setItem('smg.lastScale', id); await done(); };
+    const pickBrand = async (id) => { if (!id) return; cap.brandId = id; cap.brandPicked = true; pushRecentBrand(id); await done(); };
+    const pickScale = async (id) => { if (!id) return; cap.scaleId = id; cap.scalePicked = true; localStorage.setItem('smg.lastScale', id); await done(); };
     const card = h('div', { class: 'card brandpick' });
     if (perCar) {
       card.append(h('div', { class: 'hd' }, cap.brandId ? `Brand: ${all.find(b => b.brand_id === cap.brandId)?.name}` : 'Which brand is this car? (photos above)'));
@@ -1437,9 +1459,21 @@ async function renderCrop(v, photoId) {
     c.clearRect(0, 0, 240, 240); c.save(); c.beginPath(); c.arc(120, 120, 118, 0, Math.PI * 2); c.clip();
     const span = (W / img.clientWidth) * 80; // ~80 css px of photo around the corner, shown 3x
     c.drawImage(img, cx - span / 2, cy - span / 2, span, span, 0, 0, 240, 240);
-    c.restore(); c.strokeStyle = '#fff'; c.lineWidth = 3; c.beginPath(); c.moveTo(120, 96); c.lineTo(120, 144); c.moveTo(96, 120); c.lineTo(144, 120); c.stroke();
-    c.strokeStyle = 'rgba(31,29,26,.8)'; c.lineWidth = 1.5; c.stroke();
-    mag.classList.add('on'); mag.classList.toggle('right', q[i][0] < 0.5);
+    c.restore();
+    // Crosshair (B: "not visible"): bold accent lines with a white outline and a gap in the middle, so the exact
+    // point stays visible on any photo, light or dark.
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#2f6a4f';
+    const arms = [[120, 70, 120, 108], [120, 132, 120, 170], [70, 120, 108, 120], [132, 120, 170, 120]];
+    c.lineCap = 'round';
+    for (const [w, col] of [[9, '#ffffff'], [4.5, accent]]) { c.strokeStyle = col; c.lineWidth = w; c.beginPath(); for (const [x1, y1, x2, y2] of arms) { c.moveTo(x1, y1); c.lineTo(x2, y2); } c.stroke(); }
+    c.beginPath(); c.arc(120, 120, 4, 0, Math.PI * 2); c.fillStyle = '#ffffff'; c.fill(); c.lineWidth = 2; c.strokeStyle = accent; c.stroke();
+    c.beginPath(); c.arc(120, 120, 117, 0, Math.PI * 2); c.lineWidth = 4; c.strokeStyle = accent; c.stroke();
+    // Follows the finger, offset towards the middle of the photo: never under the finger, never on another corner.
+    const sw = stage.clientWidth, sh = stage.clientHeight, hx = q[i][0] * sw, hy = q[i][1] * sh;
+    const dx = sw / 2 - hx, dy = sh / 2 - hy, len = Math.hypot(dx, dy) || 1, dist = Math.min(130, len * 0.9), R = 66;
+    const mx = Math.max(R + 4, Math.min(sw - R - 4, hx + dx / len * dist)), my = Math.max(R + 4, Math.min(sh - R - 4, hy + dy / len * dist));
+    mag.style.left = `${mx - R}px`; mag.style.top = `${my - R}px`;
+    mag.classList.add('on');
   };
   handles.forEach((d, i) => {
     d.addEventListener('pointerdown', (e) => { e.preventDefault(); d.setPointerCapture(e.pointerId); d.classList.add('drag'); magDraw(i); });

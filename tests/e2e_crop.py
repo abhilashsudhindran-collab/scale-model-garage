@@ -77,6 +77,7 @@ def main():
             tx, ty = box['x'] + x / 900 * box['width'], box['y'] + y / 1200 * box['height']
             page.mouse.move((hb['x'] + tx) / 2, (hb['y'] + ty) / 2, steps=3)
             mag = page.is_visible('.cropmag.on')
+            if i == 2 and x == QUAD[2][0]: page.screenshot(path='/tmp/smg-crop/mag-drag.png')
             page.mouse.move(tx, ty, steps=4); page.mouse.up(); return mag
         # Crossed corners first: refused
         drag(0, 720, 310); drag(1, 200, 250)
