@@ -38,7 +38,14 @@ async function recordInSheet(config, at) {
 export const lastBackup = () => meta.get('lastBackup', {});
 
 // Called after a successful sync. Returns { daily, monthly } = which copies were made.
+// Only one check runs at a time: two syncs finishing together must not make two copies.
+let running = null;
 export async function backupIfDue(config, now = Date.now()) {
+  if (running) { await running.catch(() => {}); return { daily: false, monthly: false }; }
+  running = checkAndCopy(config, now);
+  try { return await running; } finally { running = null; }
+}
+async function checkAndCopy(config, now) {
   const last = await lastBackup();
   const month = new Date(now).toISOString().slice(0, 7);
   const out = { daily: false, monthly: false };

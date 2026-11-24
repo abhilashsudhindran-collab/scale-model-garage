@@ -6,13 +6,14 @@ import { liveScan, scanPhoto } from './barcode.js';
 import { codeCmp, barcodeCmp, gtinCheckOk, assignNamespace, duplicateCheckStatus, checkDuplicate, searchMatch } from './rules.js';
 import { SHOT_ROLES, CONDITIONS, SCHEMA_VERSION } from './schema.js';
 import { syncNow, isSyncing } from './sync.js';
-import { getClientId, setClientId, hasToken, signIn, tokenMinutesLeft } from './google.js';
+import { getClientId, setClientId, hasToken, signIn, tokenMinutesLeft, drive } from './google.js';
 import { getConfig, seedLocal } from './setup.js';
 import { newId } from './ids.js';
 import { newTimer, touch, seconds } from './timing.js';
 import { backupIfDue, backupNow, lastBackup } from './backup.js';
+import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.5.0';
+export const APP_VERSION = 's1-0.6.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 
@@ -617,12 +618,94 @@ async function saveRunBox() {
 // Name them: one nameless box at a time, big photo first (fills in after a Photo run).
 // =====================================================================
 const nameSkipped = new Set();
+// ---------- names from Gemini or Claude (D2; security doc §2.3–2.4) ----------
+// Only display copies (no location data) are shared; originals never leave Drive. The pasted answer is
+// untrusted text: parsed and validated in ai.js, used only to pre-fill fields; B saves each one himself.
+let aiPrep = null; // { batchId, ids, files, prompt } prepared in memory for the share tap
+const aiState = async () => ({ batch: await meta.get('aiBatch', null), sugg: await meta.get('aiSuggest', {}) });
+async function photoFileFor(p, name) {
+  let b = await blobs.get(`${p.photo_id}:display`);
+  if (!b && p.display_file_id && navigator.onLine && hasToken()) { try { b = await drive.download(p.display_file_id); } catch (e) { console.warn('display download', e.message); } }
+  if (!b) b = await blobs.get(`${p.photo_id}:thumb`);
+  return b ? new File([b], name, { type: 'image/jpeg' }) : null;
+}
+async function prepareAiBatch(todo, ref) {
+  const pick = todo.slice(0, MAX_BATCH);
+  const photos = await store.list('photos');
+  const files = [], boxes = [], ids = [], photoIds = [];
+  for (const m of pick) {
+    const mine = photos.filter(p => p.model_id === m.model_id);
+    const front = mine.find(p => p.photo_id === m.primary_photo_id) || mine.find(p => p.shot_role === 'box_front');
+    const rear = mine.find(p => p.shot_role === 'box_rear');
+    const k = ids.length + 1;
+    const ff = front && await photoFileFor(front, `box${k}-front.jpg`);
+    const rf = rear && await photoFileFor(rear, `box${k}-back.jpg`);
+    if (!ff) continue; // a box without a usable photo can't be read
+    files.push(ff, rf || ff); photoIds.push(front.photo_id, (rf ? rear : front).photo_id); ids.push(m.model_id);
+    boxes.push({ brand: ref.brands.find(b => b.brand_id === m.brand_id)?.name, scale: ref.scales.find(x => x.scale_id === m.scale_id)?.label });
+  }
+  return { batchId: newId('ai_log'), ids, files, photoIds, prompt: buildPrompt(boxes) };
+}
+async function copyText(t) { try { await navigator.clipboard.writeText(t); return true; } catch { return false; } }
+
 async function renderName(v) {
   const ref = await refData();
   const [models, inv, ids] = await Promise.all([store.list('models'), store.list('inventory'), store.list('product_identifiers')]);
   const todo = models.filter(m => !String(m.display_name || '').trim()).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   v.append(h('div', { class: 'row' }, h('h2', {}, 'Name them'), h('div', { class: 'muted', style: 'text-align:right' }, todo.length ? `${plural(todo.length, 'box needs', 'boxes need')} a name` : '')));
   if (!todo.length) { nameSkipped.clear(); v.append(h('div', { class: 'banner ok' }, 'Every box has a name ✓'), h('p', {}, h('a', { href: '#/' }, '← Garage'))); return; }
+
+  // --- AI panel: prepare → share → paste answer ---
+  const { batch, sugg } = await aiState();
+  const aiCard = h('div', { class: 'card aicard' }, h('h3', {}, '✨ Names from Gemini or Claude'));
+  const nSugg = todo.filter(x => sugg[x.model_id]).length;
+  if (batch) {
+    const ta = h('textarea', { placeholder: 'Paste the whole answer here', 'aria-label': 'AI answer' });
+    aiCard.append(h('p', { class: 'muted' }, `Waiting for the answer for ${plural(batch.ids.length, 'box', 'boxes')}. In Gemini or Claude, copy the whole reply, then paste it here.`), ta,
+      h('div', { class: 'row', style: 'margin-top:8px' },
+        h('button', { type: 'button', class: 'quiet', onclick: async () => { try { ta.value = await navigator.clipboard.readText(); } catch { toast('Long-press the box above and choose Paste', 3500, 'warn'); } } }, 'Paste from clipboard'),
+        h('button', { type: 'button', onclick: async () => {
+          const r = parseAnswer(ta.value, batch.ids.length);
+          if (!r.items.length) { toast('No answer lines found. It should look like: Box 1 | name | code | brand', 4500, 'warn'); return; }
+          const next = { ...(await meta.get('aiSuggest', {})) };
+          for (const it of r.items) next[batch.ids[it.n - 1]] = { name: it.name, code: it.code, brand: it.brand, notes: it.notes, logId: batch.logId };
+          await meta.set('aiSuggest', next);
+          await store.update('ai_log', batch.logId, { ai_response_raw: ta.value.slice(0, 5000), suggested_values: JSON.stringify(r.items.map(it => ({ model_id: batch.ids[it.n - 1], name: it.name, code: it.code, brand: it.brand }))), processed_at: store.nowIso() });
+          await meta.set('aiBatch', null);
+          toast(`Suggestions for ${r.items.length} of ${plural(batch.ids.length, 'box', 'boxes')}: check each one`, 3500); route(); autoSyncSoon();
+        } }, 'Use this answer')),
+      h('button', { type: 'button', class: 'ghost small', style: 'margin-top:8px', onclick: async () => { await meta.set('aiBatch', null); route(); } }, 'Cancel'));
+  } else if (aiPrep) {
+    const canFiles = !!(navigator.canShare && navigator.canShare({ files: aiPrep.files }));
+    aiCard.append(h('p', { class: 'muted' }, `${plural(aiPrep.ids.length, 'box', 'boxes')}, ${aiPrep.files.length} photos ready (copies without location data).`),
+      h('button', { type: 'button', class: 'wide', onclick: async () => {
+        const copied = await copyText(aiPrep.prompt);
+        try {
+          if (canFiles) await navigator.share({ files: aiPrep.files, text: aiPrep.prompt, title: 'Box names' });
+          else throw new Error('no-file-share');
+        } catch (e) {
+          if (e.name === 'AbortError') { toast('Share cancelled'); return; }
+          toast(copied ? 'This phone can\'t share photos from here. Instructions copied; download the photos below.' : 'Sharing isn\'t available here.', 5000, 'warn');
+          aiCard.append(h('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap' }, aiPrep.files.map(f => h('a', { class: 'btn quiet small', href: URL.createObjectURL(f), download: f.name }, f.name))));
+          return;
+        }
+        const log = await store.create('ai_log', { ai_log_id: aiPrep.batchId, capture_session_id: aiPrep.batchId, ai_tool: 'gemini_or_claude_app (copy-paste)', prompt_version: PROMPT_VERSION, input_photo_ids: aiPrep.photoIds.join(','), processed_at: store.nowIso() });
+        await meta.set('aiBatch', { logId: log.ai_log_id, ids: aiPrep.ids });
+        aiPrep = null; toast(copied ? 'Shared ✓ If the instructions are missing, paste them (already copied).' : 'Shared', 4000); route();
+      } }, canFiles ? 'Share to Gemini or Claude' : 'Copy instructions and get the photos'),
+      h('button', { type: 'button', class: 'ghost small', style: 'margin-top:8px', onclick: async () => { toast(await copyText(aiPrep.prompt) ? 'Instructions copied' : 'Could not copy', 2000); } }, 'Copy the instructions only'),
+      h('button', { type: 'button', class: 'ghost small', style: 'margin-top:8px', onclick: () => { aiPrep = null; route(); } }, 'Cancel'));
+  } else {
+    aiCard.append(h('p', { class: 'muted' }, nSugg ? `${plural(nSugg, 'box has', 'boxes have')} an AI suggestion waiting below.` : 'Send box photos to your Gemini or Claude app and paste the answer back. You check every name before it is saved.'),
+      h('button', { type: 'button', class: 'quiet wide', onclick: async (e) => {
+        e.target.disabled = true; e.target.textContent = 'Preparing photos…';
+        aiPrep = await prepareAiBatch(todo.filter(x => !sugg[x.model_id]), ref);
+        if (!aiPrep.ids.length) { aiPrep = null; toast('No photos found to send', 3000, 'warn'); }
+        route();
+      } }, `Get names for the next ${Math.min(MAX_BATCH, todo.filter(x => !sugg[x.model_id]).length) || 0} boxes`));
+  }
+  v.append(aiCard);
+
   let m = todo.find(x => !nameSkipped.has(x.model_id));
   if (!m) { nameSkipped.clear(); m = todo[0]; }
   const brand = ref.brands.find(b => b.brand_id === m.brand_id);
@@ -641,8 +724,14 @@ async function renderName(v) {
   v.append(others);
   const bc = ids.find(i => i.model_id === m.model_id && i.identifier_type === 'barcode');
   v.append(h('p', { class: 'muted' }, [brand?.name, scaleL, box, bc ? `barcode ${bc.value_raw}` : null].filter(Boolean).join(' · ')));
-  const nameIn = h('input', { placeholder: 'e.g. Nissan Skyline GT-R R34', 'aria-label': 'Name', autocapitalize: 'words' });
-  const codeIn = h('input', { placeholder: brand?.code_example ? `e.g. ${brand.code_example}` : 'Exactly as printed', autocapitalize: 'characters', 'aria-label': 'Product code' });
+  const sg = sugg[m.model_id];
+  if (sg) {
+    const note = brandNote(sg.brand, brand?.name);
+    v.append(h('div', { class: 'banner info' }, h('div', { class: 'hd' }, '✨ Suggested by AI: check it against the box before saving'),
+      ...[...(sg.notes || []), note].filter(Boolean).map(t => h('div', { class: 'muted' }, t))));
+  }
+  const nameIn = h('input', { placeholder: 'e.g. Nissan Skyline GT-R R34', 'aria-label': 'Name', autocapitalize: 'words', value: sg?.name || '' });
+  const codeIn = h('input', { placeholder: brand?.code_example ? `e.g. ${brand.code_example}` : 'Exactly as printed', autocapitalize: 'characters', 'aria-label': 'Product code', value: sg?.code || '' });
   v.append(h('label', { class: 'f' }, 'Name'), nameIn, h('label', { class: 'f' }, 'Product code (optional)'), codeIn);
   const save = async () => {
     const name = nameIn.value.trim(), code = codeIn.value.trim();
@@ -654,6 +743,13 @@ async function renderName(v) {
       await store.logChange('models', m.model_id, 'product_code', m.product_code, code, 'named in app');
       const r = checkDuplicate({ ...m, ...patch }, models, ids, []);
       if (r.status === 'duplicate') toast(`Same code as "${r.exact[0].display_name || r.exact[0].product_code}". Check both in the Garage.`, 5000, 'warn');
+    }
+    if (sg) {
+      // Record what B confirmed against what the AI suggested (AI_LOG, security doc §2.4).
+      patch.identification_status = 'confirmed';
+      const log = await store.get('ai_log', sg.logId);
+      if (log) { let c = {}; try { c = JSON.parse(log.confirmed_values || '{}'); } catch { c = {}; } c[m.model_id] = { name, code, edited: name !== sg.name || code !== sg.code }; await store.update('ai_log', sg.logId, { confirmed_values: JSON.stringify(c) }); }
+      const rest = { ...(await meta.get('aiSuggest', {})) }; delete rest[m.model_id]; await meta.set('aiSuggest', rest);
     }
     await store.update('models', m.model_id, patch);
     toast('Named ✓'); route(); autoSyncSoon();
