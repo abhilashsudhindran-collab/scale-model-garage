@@ -13,7 +13,7 @@ import { newTimer, touch, seconds } from './timing.js';
 import { backupIfDue, backupNow, lastBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.9.1';
+export const APP_VERSION = 's1-0.10.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 
@@ -199,6 +199,36 @@ function boxShape(count) {
   return el;
 }
 
+// Storage boxes in use (from owned copies of models not archived), in number order.
+const boxNum = (k) => { const n = String(k).match(/\d+/); return n ? Number(n[0]) : Infinity; };
+async function boxesInUse() {
+  const [models, inventory] = await Promise.all([store.listRecords('models'), store.list('inventory')]);
+  const live = new Set(models.filter(r => !r.data.deleted_at).map(r => r.id));
+  const counts = new Map();
+  for (const i of inventory) if (i.ownership_status === 'Owned' && live.has(i.model_id) && i.storage_location) counts.set(i.storage_location, (counts.get(i.storage_location) || 0) + 1);
+  return [...counts.entries()].sort((a, b) => boxNum(a[0]) - boxNum(b[0]) || a[0].localeCompare(b[0]));
+}
+// One tap to put the next car in any box already in use (B: moving on shouldn't need "box full").
+function boxPicker(current, used, names, pick) {
+  if (!used.length) return null;
+  return h('div', { class: 'chips scroll', style: 'margin-top:8px' }, used.map(([k]) => {
+    const id = k.replace(/^Box\s*/i, ''); const nm = names.get(k.toLowerCase())?.box_name;
+    const on = String(current).toLowerCase() === id.toLowerCase();
+    return h('button', { type: 'button', class: `chip ${on ? 'on' : ''}`, 'aria-pressed': on ? 'true' : 'false', onclick: () => pick(id) }, nm ? `${id} · ${nm}` : `Box ${id}`);
+  }));
+}
+// The shelf: each storage box as a SAMLA side view, count inside; size, number, name below.
+function shelfEl(boxes, names, onTap, { selected = '', scroll = false } = {}) {
+  return h('div', { class: `shelf${scroll ? ' scrollrow' : ''}` }, boxes.map(([k, n]) => {
+    const r = names.get(k.toLowerCase()) || {};
+    const sel = selected && selected.toLowerCase() === k.toLowerCase();
+    return h('button', { type: 'button', class: `boxtile${sel ? ' sel' : ''}`, 'aria-pressed': sel ? 'true' : 'false', onclick: () => onTap(k, sel), 'aria-label': `${k}${r.box_name ? ', ' + r.box_name : ''}${r.box_size ? ', size ' + r.box_size : ''}: ${plural(n, 'car', 'cars')}` },
+      boxShape(n),
+      h('span', { class: 'bxl' }, r.box_size ? h('em', {}, r.box_size) : null, k),
+      r.box_name ? h('i', {}, r.box_name) : null);
+  }));
+}
+
 // Dashboard (B, 24 Nov: "get this dashboard up"). Counts are physical boxes (owned copies of
 // models that aren't archived). Single-series bars: one hue, numbers in text colour, no legend.
 function barList(rows, { onTap } = {}) {
@@ -259,10 +289,7 @@ async function renderDash(v) {
   const names = await boxNames();
   const noBox = copies.filter(i => !i.storage_location).length;
   v.append(h('div', { class: 'card' }, h('h3', {}, 'Storage boxes · tap to open'),
-    boxes.length ? h('div', { class: 'shelf' }, boxes.map(([k, n]) => { const r = names.get(k.toLowerCase()) || {}; return h('button', { type: 'button', class: 'boxtile', onclick: () => goGarage('all', k), 'aria-label': `${k}${r.box_name ? ', ' + r.box_name : ''}${r.box_size ? ', size ' + r.box_size : ''}: ${plural(n, 'car', 'cars')}` },
-      boxShape(n),
-      h('span', { class: 'bxl' }, r.box_size ? h('em', {}, r.box_size) : null, k),
-      r.box_name ? h('i', {}, r.box_name) : null); })) : h('p', { class: 'muted' }, 'No storage boxes recorded yet.'),
+    boxes.length ? shelfEl(boxes, names, (k) => goGarage('all', k)) : h('p', { class: 'muted' }, 'No storage boxes recorded yet.'),
     noBox ? h('p', { class: 'muted' }, `${plural(noBox, 'box has', 'boxes have')} no storage box yet.`) : null));
 
   // Box state (sealed / opened / loose), when recorded
@@ -293,6 +320,15 @@ async function renderGarage(v) {
     h('div', { class: 'bar', role: 'progressbar', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': 'rough progress' }, h('span', { style: `width:${Math.max(pct, copies.length ? 1 : 0)}%` }))));
   const nameless = active.filter(r => !String(r.data.display_name || '').trim()).length;
   if (nameless) v.append(h('a', { href: '#/name', class: 'btn quiet wide', style: 'margin-bottom:10px' }, `✎ ${plural(nameless, 'box needs', 'boxes need')} a name: name them`));
+  // The shelf on the home screen (B, 24 Nov): tap a box to see what's inside; tap it again for everything.
+  {
+    const used = await boxesInUse();
+    if (used.length) {
+      const sel = (garageSearch.trim().match(/^box\s*[a-z0-9-]+$/i) || [''])[0];
+      v.append(h('div', { class: 'shelfhome' }, h('div', { class: 'row' }, h('h3', {}, 'Storage boxes'), sel ? h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; route(); } }, 'Show all') : null),
+        shelfEl(used, names, (k, isSel) => { garageFilter = 'all'; garageSearch = isSel ? '' : k; route(); }, { selected: sel, scroll: true })));
+    }
+  }
   const search = h('input', { type: 'search', placeholder: 'Search name, code, barcode, brand, scale…', value: garageSearch, oninput: (e) => { garageSearch = e.target.value; draw(); } });
   v.append(search);
   const photosByModel = new Map();
@@ -343,7 +379,7 @@ async function renderGarage(v) {
       const save = async () => { await saveBox(label, { box_name: nameIn.value }); toast('Box name saved ✓'); autoSyncSoon(); route(); };
       nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
       boxHead.append(h('div', { class: 'card boxcard' },
-        h('div', { class: 'row' }, h('h2', {}, `📦 ${label}${rec?.box_size ? ' · ' + rec.box_size : ''}`), h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; location.hash = '#/dash'; } }, 'All boxes')),
+        h('div', { class: 'row' }, h('h2', {}, `📦 ${label}${rec?.box_size ? ' · ' + rec.box_size : ''}`), h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; route(); } }, 'Close')),
         h('div', { class: 'muted' }, `${plural(inBox.length, 'car', 'cars')} inside${byBrand ? ' · ' + byBrand : ''}`),
         h('label', { class: 'f' }, 'Box size'),
         h('div', { class: 'chips' }, BOX_SIZES.map(sz => h('button', { type: 'button', class: `chip ${rec?.box_size === sz ? 'on' : ''}`, 'aria-pressed': rec?.box_size === sz ? 'true' : 'false', onclick: async () => { await saveBox(label, { box_size: rec?.box_size === sz ? '' : sz }); autoSyncSoon(); route(); } }, sz))),
@@ -498,12 +534,13 @@ async function renderAdd(v) {
   scaleChips.append(more);
   v.append(scaleChips);
 
-  // --- Storage box (optional, remembered; "Box full" moves to the next number) ---
+  // --- Storage box (optional, remembered; "Next box" moves on by one; chips jump to any box in use) ---
   v.append(h('label', { class: 'f' }, 'Storage box (optional)'));
   const setBox = (b) => { cap.box = String(b).trim(); localStorage.setItem('smg.lastBox', cap.box); capTouch(); saveDraftSoon(); };
   const boxRow = h('div', { class: 'row' }, h('input', { class: 'boxin', inputmode: 'text', placeholder: 'Box number, e.g. 12', value: cap.box, 'aria-label': 'Storage box number', oninput: (e) => setBox(e.target.value) }));
-  if (/^\d+$/.test(cap.box)) boxRow.append(h('button', { type: 'button', class: 'quiet', style: 'flex:0 0 auto', onclick: () => { setBox(Number(cap.box) + 1); toast(`Now filling Box ${cap.box}`); route(); } }, `Box full → ${Number(cap.box) + 1}`));
+  if (/^\d+$/.test(cap.box)) boxRow.append(h('button', { type: 'button', class: 'quiet', style: 'flex:0 0 auto', onclick: () => { setBox(Number(cap.box) + 1); toast(`Now filling Box ${cap.box}`); route(); } }, `Next box → ${Number(cap.box) + 1}`));
   v.append(boxRow);
+  { const used = await boxesInUse(); const pk = boxPicker(cap.box, used, await boxNames(), (id) => { setBox(id); route(); }); if (pk) v.append(pk); }
 
   // --- Barcode ---
   v.append(h('label', { class: 'f' }, 'Barcode (if the box has one)'));
@@ -679,8 +716,9 @@ async function renderRun(v) {
   set.append(h('label', { class: 'f' }, 'Storage box'));
   const setBox = (b) => { cap.box = String(b).trim(); localStorage.setItem('smg.lastBox', cap.box); saveDraftSoon(); };
   const boxRow = h('div', { class: 'row' }, h('input', { class: 'boxin', placeholder: 'Box number, e.g. 12', value: cap.box, 'aria-label': 'Storage box number', oninput: (e) => setBox(e.target.value) }));
-  if (/^\d+$/.test(cap.box)) boxRow.append(h('button', { type: 'button', class: 'quiet', style: 'flex:0 0 auto', onclick: () => { setBox(Number(cap.box) + 1); toast(`Now filling Box ${cap.box}`); route(); } }, `Box full → ${Number(cap.box) + 1}`));
+  if (/^\d+$/.test(cap.box)) boxRow.append(h('button', { type: 'button', class: 'quiet', style: 'flex:0 0 auto', onclick: () => { setBox(Number(cap.box) + 1); toast(`Now filling Box ${cap.box}`); route(); } }, `Next box → ${Number(cap.box) + 1}`));
   set.append(boxRow);
+  { const used = await boxesInUse(); const pk = boxPicker(cap.box, used, await boxNames(), (id) => { setBox(id); route(); }); if (pk) set.append(pk); }
   const setSealed = (yes) => { cap.sealed = yes; localStorage.setItem('smg.lastSealed', yes ? 'yes' : 'no'); saveDraftSoon(); route(); };
   set.append(h('div', { class: 'chips', style: 'margin-top:10px' },
     h('button', { type: 'button', class: `chip ${cap.sealed ? 'on' : ''}`, 'aria-pressed': cap.sealed ? 'true' : 'false', onclick: () => setSealed(true) }, 'Sealed box'),
@@ -689,7 +727,7 @@ async function renderRun(v) {
   if (brand && scale && !runSetOpen) {
     v.append(h('div', { class: 'runsum' },
       h('div', {}, h('b', {}, `${brand.name} · ${scale.label}`), ` · ${cap.box ? `Box ${cap.box}` : 'no storage box'} · ${cap.sealed ? 'Sealed' : 'Car visible'}`),
-      ...(/^\d+$/.test(cap.box) ? [h('button', { type: 'button', class: 'small quiet', onclick: () => { setBox(Number(cap.box) + 1); toast(`Now filling Box ${cap.box}`); route(); } }, `Box full → ${Number(cap.box) + 1}`)] : []),
+      ...(/^\d+$/.test(cap.box) ? [h('button', { type: 'button', class: 'small quiet', onclick: () => { setBox(Number(cap.box) + 1); toast(`Now filling Box ${cap.box}`); route(); } }, `Next box → ${Number(cap.box) + 1}`)] : []),
       h('button', { type: 'button', class: 'small ghost', onclick: () => { runSetOpen = true; route(); } }, 'Change')));
   } else {
     v.append(set);

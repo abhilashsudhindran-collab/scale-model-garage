@@ -113,6 +113,26 @@ def main():
         page.fill('input[aria-label=Name]', 'Mini GT sealed one'); page.get_by_role('button', name='Save & next').click(); page.wait_for_timeout(700)
         check(page.query_selector('#navname .badge').inner_text() == '1', 'badge drops to 1 after naming a box')
 
+        # The shelf on the home screen: tap a box to see inside, tap again for everything
+        page.goto(base + '#/'); page.wait_for_selector('.shelfhome'); page.fill('input[type=search]', ''); page.wait_for_timeout(200)
+        page.goto(base + '#/dash'); page.goto(base + '#/'); page.wait_for_selector('.shelfhome .boxtile')
+        home = [t.inner_text().replace('\n', ' ').replace(' ', '') for t in page.query_selector_all('.shelfhome .boxtile')]
+        check(len(home) == 3 and home[1].startswith('2LBox12'), f'home screen shows the shelf ({home})')
+        allt = len(page.query_selector_all('.tile'))
+        page.locator('.shelfhome .boxtile', has_text='Box 30').click(); page.wait_for_selector('.boxcard')
+        check(len(page.query_selector_all('.tile')) == 1 and page.locator('.shelfhome .boxtile.sel').count() == 1, 'tap a box on the home shelf: only its cars, box highlighted')
+        page.screenshot(path=f'{SHOTS}/06-home-shelf.png')
+        page.locator('.shelfhome .boxtile', has_text='Box 30').click(); page.wait_for_timeout(300)
+        check(len(page.query_selector_all('.tile')) == allt and page.query_selector('.boxcard') is None, 'tap it again: everything shown')
+        # Photo run: jump to any box in use with one tap (no "box full" needed)
+        page.goto(base + '#/run'); page.wait_for_selector('text=Photo run')
+        if page.is_visible('text=Change'): page.get_by_role('button', name='Change').click(); page.wait_for_timeout(200)
+        chips = [c.inner_text() for c in page.query_selector_all('.chips.scroll .chip')]
+        check('3' in ' '.join(chips) and any('Le Mans racers' in c for c in chips), f'box chips list boxes in use, with names ({chips})')
+        page.locator('.chips.scroll .chip', has_text='Le Mans racers').click(); page.wait_for_timeout(300)
+        check(page.input_value('input.boxin') == '12', 'tapping a box chip sets the storage box')
+        page.screenshot(path=f'{SHOTS}/07-run-chips.png')
+
         # Grouped views in the Garage
         page.goto(base + '#/'); page.wait_for_selector('.tile'); page.fill('input[type=search]', ''); page.wait_for_timeout(200)
         page.get_by_role('button', name='By brand', exact=True).click(); page.wait_for_timeout(300)
