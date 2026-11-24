@@ -3,7 +3,7 @@
 // then pastes the answer back. The answer is UNTRUSTED TEXT: parsed as data only, validated, and used
 // only to pre-fill fields as suggestions that B confirms or corrects. Nothing is saved automatically.
 
-export const PROMPT_VERSION = 'names-v2';
+export const PROMPT_VERSION = 'names-v3';
 // 5 boxes = 10 photos per share. B's phone (24 Nov 21:39) refused to share 20 photos at once (2 worked);
 // Chrome on Android appears to cap a share at about 10 files (not confirmed in its docs), so batches stay at 10 photos.
 export const MAX_BATCH = 5;
@@ -15,6 +15,9 @@ export function buildPrompt(boxes) {
   return [
     `Reply with one line per box in exactly this format, nothing else:`,
     fmt,
+    'Example: Box 1 | Toyota Supra (A80) 1997 Castrol | MGT00123-L | Mini GT',
+    'The car name is the real car (make, model, version, livery), never the brand. Keep the 4 parts in this order.',
+    'The product code is the maker\'s catalogue number (letters + digits, e.g. MGT00123-L, KHMG197, HYW58), usually on the box back or side near the barcode. It is not the barcode digits.',
     '',
     `I'm cataloguing my die-cast model car boxes. There are ${boxes.length} box${boxes.length === 1 ? '' : 'es'}, ${boxes.length * 2} photos, in this order:`,
     ...lines,
@@ -30,9 +33,41 @@ const blank = (s) => (!s || /^[-–—?]+$/.test(s) || /^(n\/?a|none|unknown|unr
 // Product codes: letters, digits and a few separators only, 2–40 characters (§2.4 validation).
 export function validCode(code) { return /^[A-Za-z0-9#][A-Za-z0-9#\-/. ]{1,39}$/.test(code); }
 
+// Which part of a reply line is which (B, 24 Nov: Gemini put the brand first, the car name in the code
+// slot and the livery as brand). Each part is judged by what it looks like, not only by its position.
+const sqz = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+export function looksLikeCode(f) {
+  const t = String(f || '').trim();
+  if (!t || !validCode(t) || /^(19|20)\d{2}$/.test(t)) return false;
+  const words = t.split(/\s+/);
+  return words.length <= 2 && t.length >= 4 && t.length <= 24 && (t.match(/\d/g) || []).length >= 2;
+}
+export function looksLikeBrand(f, brandNames = []) {
+  const t = String(f || '').trim();
+  if (!t || t.split(/\s+/).length > 6) return false;
+  const k = sqz(t);
+  // the whole part is brand names (e.g. "Kaido House × Mini GT", "Hot Wheels"), nothing else
+  // Extras that often ride along with a brand: "(TSM Model)", "by TSM", "Models", "×", "x".
+  const bare = sqz(t.replace(/\([^)]*\)/g, ' ').replace(/\b(by|tsm|true\s*scale(\s*miniatures)?|models?|diecast|die-cast|collection|limited|edition)\b/gi, ' '));
+  let rest = bare;
+  for (const b of [...brandNames].sort((a, c) => sqz(c).length - sqz(a).length)) { const bb = sqz(b); if (bb.length >= 2 && rest.includes(bb)) rest = rest.split(bb).join(''); }
+  return rest !== bare && rest.replace(/x/g, '').length <= 2;
+}
+function sortFields(fields, brandNames) {
+  const parts = fields.map(f => clean(f, 120)).filter(f => !blank(f) && !/^[=+@]/.test(f)); // formula-like parts never become text
+  let code = '', brand = '';
+  const name = [];
+  for (const f of parts) {
+    if (!code && looksLikeCode(f)) code = f;
+    else if (!brand && looksLikeBrand(f, brandNames)) brand = f;
+    else name.push(f);
+  }
+  return { name: name.join(' ').slice(0, 120), code, brand };
+}
+
 // Returns { items: [{ n, name, code, brand, notes: [] }], ignored: number }.
 // Accepts "Box 1 | name | code | brand", "1 | ...", "1. ... | ...", and markdown table rows "| 1 | ... |".
-export function parseAnswer(text, expected = MAX_BATCH) {
+export function parseAnswer(text, expected = MAX_BATCH, brandNames = []) {
   const items = new Map();
   let ignored = 0;
   for (const raw of String(text || '').split(/\r?\n/).slice(0, 200)) {
@@ -49,11 +84,21 @@ export function parseAnswer(text, expected = MAX_BATCH) {
     const notes = [];
     let name = clean(fields[0], 120);
     let code = clean(fields[1], 60);
-    const brand = clean(fields[2], 60);
+    let brand = clean(fields[2], 60);
     if (blank(name)) name = '';
     if (blank(code)) code = '';
+    if (blank(brand)) brand = '';
+    // Parts out of order (brand where the name should be, a car name where the code should be, extra parts): sort by look.
+    // Only on clear evidence: the brand sits in the name slot, or a code sits where the brand or an extra part is.
+    const wordy = (f) => f.split(/\s+/).length >= 3 && /[a-z]{3}/i.test(f); // a car name, not a code
+    const shifted = (name && looksLikeBrand(name, brandNames))
+      || (code && wordy(code))
+      || (brand && looksLikeCode(brand) && !looksLikeCode(code))
+      || (fields.length > 3 && !looksLikeCode(code) && fields.slice(3).some(f => looksLikeCode(clean(f, 60))));
+    if (shifted) ({ name, code, brand } = sortFields(fields, brandNames));
     if (code && !validCode(code)) { notes.push(`code "${code.slice(0, 20)}" ignored (unexpected characters)`); code = ''; }
-    if (!items.has(n)) items.set(n, { n, name, code, brand: blank(brand) ? '' : brand, notes });
+    if (!name) notes.push('no car name in the answer: type it from the box');
+    if (!items.has(n)) items.set(n, { n, name, code, brand, notes });
   }
   // Second pass: labelled lists ("Car Name: …", "Product Code: …", "Brand: …"), which Gemini often
   // sends instead of the requested lines. Grouped by "Box N" headings or by the photo names it cites.
