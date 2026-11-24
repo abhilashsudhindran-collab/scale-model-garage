@@ -53,7 +53,7 @@ def main():
 
         def shoot(label, path):
             with page.expect_file_chooser() as fc:
-                page.get_by_role('button', name=f'📷 {label}').click()
+                page.get_by_role('button', name=f'{label}').click()
             fc.value.set_files(path)
 
         # Three nameless boxes from a photo run (different photos, no barcodes)
@@ -63,7 +63,7 @@ def main():
         page.get_by_role('button', name='Car visible', exact=True).click(); page.wait_for_timeout(200)
         page.get_by_role('button', name='Done: start shooting').click(); page.wait_for_timeout(200)
         for i, (f, r) in enumerate([('a', 'b'), ('b', 'c'), ('c', 'a')]):
-            shoot('Box front', f'{tmp}/{f}.jpg'); page.wait_for_selector('button:has-text("📷 Box rear")')
+            shoot('Box front', f'{tmp}/{f}.jpg'); page.wait_for_selector('button:has-text("Box rear")')
             shoot('Box rear', f'{tmp}/{r}.jpg'); page.wait_for_selector(f'text=Car {i + 2} of this run')
         check(len(listm()) == 3, 'three nameless boxes to start')
 

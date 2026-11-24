@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.12.0
+## Status: Stage 1 (quick-capture slice), version s1-0.13.0
+
+**s1-0.13.0 (24 Nov 2026): car page as a product page; line icons.** The car page opens with brand · scale, the name and product code, one large photo and thumbnails (tap for photo options), then facts (copies, sealed/opened, storage box as a link, barcode, quick/complete). Details show name, brand, scale and code; variant, series, notes and barcode fold under "More details" while empty. Each copy and the record info fold into a summary line. Camera and box emoji replaced by line icons. Photo run: "Saving…" while a car is being saved, so it can't be saved twice.
 
 **s1-0.12.0 (24 Nov 2026): Showroom look (DV-0.1).** Following B's design direction (IKEA-like cleanliness, MUJI restraint, Apple-style product photos, Discogs collection logic; not their branding): warm neutral foundation, white cards without borders, pill controls, line icons, photo-first tiles with text underneath, sentence-case headings, soft message tints. Accent colour switchable in Settings → Look: forest green (default), cobalt blue, burnt orange; every text pair checked at 4.5:1 or better. Home order: search first, compact shelf, then photos. Box settings fold into one line once a box is set up (stay open while editing). Desktop: 4–5 photos across, floating menu bar. No features or flows removed. `tests/shots_design.py` makes the review screenshots.
 

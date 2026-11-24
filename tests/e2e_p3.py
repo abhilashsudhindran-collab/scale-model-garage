@@ -41,7 +41,7 @@ def main():
 
         def shoot(label, path):
             with page.expect_file_chooser() as fc:
-                page.get_by_role('button', name=f'📷 {label}').click()
+                page.get_by_role('button', name=f'{label}').click()
             fc.value.set_files(path)
 
         def wait_for(cond, ms=8000):
@@ -62,12 +62,12 @@ def main():
         page.get_by_role('button', name='Car visible', exact=True).click(); page.wait_for_timeout(250)
         page.get_by_role('button', name='Done: start shooting').click(); page.wait_for_timeout(300)
         check(page.is_visible('text=Car 1 of this run'), 'run ready: "Car 1 of this run"')
-        vis = page.evaluate("(() => { const b = [...document.querySelectorAll('button')].find(x => x.textContent.includes('📷 Box front')); const r = b.getBoundingClientRect(); return r.bottom <= innerHeight - 84; })()")
+        vis = page.evaluate("(() => { const b = [...document.querySelectorAll('button')].find(x => x.textContent.includes('Box front')); const r = b.getBoundingClientRect(); return r.bottom <= innerHeight - 84; })()")
         check(vis, 'camera button visible without scrolling once settings fold away')
         page.screenshot(path=f'{SHOTS}/01-run-ready.png')
 
         # Box 1: front + rear with barcode -> saves itself
-        shoot('Box front', f'{tmp}/a.jpg'); page.wait_for_selector('button:has-text("📷 Box rear")')
+        shoot('Box front', f'{tmp}/a.jpg'); page.wait_for_selector('button:has-text("Box rear")')
         shoot('Box rear', f'{tmp}/rear_bc.jpg')
         check(wait_for(lambda: page.is_visible('text=Car 2 of this run')), 'box 1 saved itself after the rear photo')
         ms = listm()
@@ -77,12 +77,12 @@ def main():
         check(inv == ['Box 3'] and bcs == [EAN], f'box 1 has storage box and barcode from the rear photo ({inv}, {bcs})')
 
         # Box 2: no barcode
-        shoot('Box front', f'{tmp}/c.jpg'); page.wait_for_selector('button:has-text("📷 Box rear")')
+        shoot('Box front', f'{tmp}/c.jpg'); page.wait_for_selector('button:has-text("Box rear")')
         shoot('Box rear', f'{tmp}/b.jpg')
         check(wait_for(lambda: page.is_visible('text=Car 3 of this run')), 'box 2 saved itself')
 
         # Box 3: same barcode as box 1 -> run pauses, "Different model" saves new
-        shoot('Box front', f'{tmp}/b.jpg'); page.wait_for_selector('button:has-text("📷 Box rear")')
+        shoot('Box front', f'{tmp}/b.jpg'); page.wait_for_selector('button:has-text("Box rear")')
         shoot('Box rear', f'{tmp}/rear_bc.jpg')
         check(wait_for(lambda: page.is_visible('text=You may already own this')), 'same barcode pauses the run with a choice')
         page.screenshot(path=f'{SHOTS}/02-run-match.png')
@@ -96,7 +96,7 @@ def main():
         check(len(active) == 2, f'"Undo last car" archives box 3 ({len(active)} active)')
 
         # Box 4: same barcode -> add as copy, no new model
-        shoot('Box front', f'{tmp}/c.jpg'); page.wait_for_selector('button:has-text("📷 Box rear")')
+        shoot('Box front', f'{tmp}/c.jpg'); page.wait_for_selector('button:has-text("Box rear")')
         shoot('Box rear', f'{tmp}/rear_bc.jpg')
         wait_for(lambda: page.is_visible('text=You may already own this'))
         n_inv = len(ev("(async () => (await (await import('./js/store.js')).list('inventory')))()"))
@@ -108,8 +108,8 @@ def main():
         page.get_by_role('button', name='Change').click(); page.wait_for_timeout(200)
         page.get_by_role('button', name='Sealed box', exact=True).click(); page.wait_for_timeout(300)
         page.get_by_role('button', name='Done: start shooting').click(); page.wait_for_timeout(300)
-        shoot('Box front', f'{tmp}/a.jpg'); page.wait_for_selector('button:has-text("📷 Box rear")')
-        shoot('Box rear', f'{tmp}/b.jpg'); page.wait_for_selector('button:has-text("📷 Box art")')
+        shoot('Box front', f'{tmp}/a.jpg'); page.wait_for_selector('button:has-text("Box rear")')
+        shoot('Box rear', f'{tmp}/b.jpg'); page.wait_for_selector('button:has-text("Box art")')
         check(page.get_by_role('button', name='Skip box art').count() == 1, 'sealed run asks for box art, with Skip')
         page.get_by_role('button', name='Skip box art').click()
         check(wait_for(lambda: len(listm()) == 3), 'skipping box art saves the box')
