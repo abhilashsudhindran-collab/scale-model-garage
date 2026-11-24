@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.11.0
+## Status: Stage 1 (quick-capture slice), version s1-0.12.0
+
+**s1-0.12.0 (24 Nov 2026): Showroom look (DV-0.1).** Following B's design direction (IKEA-like cleanliness, MUJI restraint, Apple-style product photos, Discogs collection logic; not their branding): warm neutral foundation, white cards without borders, pill controls, line icons, photo-first tiles with text underneath, sentence-case headings, soft message tints. Accent colour switchable in Settings → Look: forest green (default), cobalt blue, burnt orange; every text pair checked at 4.5:1 or better. Home order: search first, compact shelf, then photos. Box settings fold into one line once a box is set up (stay open while editing). Desktop: 4–5 photos across, floating menu bar. No features or flows removed. `tests/shots_design.py` makes the review screenshots.
 
 **s1-0.11.0 (24 Nov 2026): box scale; remove and restore boxes.** A box can be "Only 1:43" (the run presets the scale) or "Mixed scales" (after a car's photos, the app asks the scale, together with the brand if that's mixed too), e.g. mixed brands but only 1:43. Remove a box from its card: an empty box goes straight away; a box with cars asks first, and its cars stay in the collection under "No box yet". Dashboard → Removed boxes lists the history with Restore, which puts the box and its cars back. Every step is in CHANGE_LOG.
 

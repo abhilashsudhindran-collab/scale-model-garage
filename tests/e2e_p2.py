@@ -83,7 +83,7 @@ def main():
         check('2 boxes catalogued' in ov and '1,000' not in ov and '2 storage boxes in use' in ov, f'overview shows progress and boxes ("{ov}")')
         check(page.locator('.tile .b.box', has_text='Box 1').count() == 1, 'tile shows its storage box')
         page.get_by_role('button', name='By box').click(); page.wait_for_timeout(300)
-        heads = page.locator('h3.group').all_inner_texts()
+        heads = [x.upper() for x in page.locator('h3.group').all_inner_texts()]
         check(heads == ['BOX 1 · 1 MODEL ›', 'BOX 2 · 1 MODEL ›'] or heads == ['Box 1 · 1 model', 'Box 2 · 1 model'], f'"By box" groups in box order ({heads})')
         page.screenshot(path=f'{SHOTS}/02-by-box.png')
         page.get_by_role('button', name='All', exact=True).click(); page.wait_for_timeout(200)

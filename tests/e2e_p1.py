@@ -100,9 +100,9 @@ def main():
         check(h < 60, f'G5 filters fit one row (height {h:.0f}px)')
         check(page.locator('.tile .b', has_text='Quick').count() == 0, 'G6 no "Quick" badge on tiles')
         ratio = ev("(() => { const r = document.querySelector('.tile .ph').getBoundingClientRect(); return r.height / r.width; })()")
-        check(abs(ratio - 4 / 3) < 0.02, f'G2 tile photos are portrait 3:4 (ratio {ratio:.2f})')
+        check(abs(ratio - 5 / 4) < 0.02, f'G2 tile photos are portrait 4:5 (ratio {ratio:.2f})')
         bg = ev("getComputedStyle(document.querySelector('header.top')).backgroundColor")
-        check(bg == 'rgb(20, 20, 19)', f'V8 header fully opaque ({bg})')
+        check(bg.startswith('rgb(') and not bg.startswith('rgba'), f'V8 header fully opaque ({bg})')
         page.screenshot(path=f'{SHOTS}/02-garage.png')
 
         # G1: search
