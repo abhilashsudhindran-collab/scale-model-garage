@@ -528,5 +528,68 @@ button.syncbtn:disabled { opacity: .45; cursor: default; }
 .bl-scan { font-size: .8rem; color: var(--muted); margin-top: 2px; }
 @media print { .bl-scan { color: #333; } }
 
+/* ===== Moments & selection (s1-0.35.0; B's picks from the Garage delight kit) ===== */
+/* Open box = A (lift + fill + tick + shadow) + C (others fade back, green pad) */
+.shelf .boxtile { position: relative; border-radius: 16px; transition: transform .35s cubic-bezier(.05,.7,.1,1), opacity .3s ease, background .3s ease; }
+.shelf.hassel .boxtile:not(.sel):not(.newbox) { opacity: .45; }
+.shelf .boxtile.sel { transform: translateY(-6px); background: var(--accent-soft); padding: 4px 2px 6px; }
+.shelf .boxtile.sel svg { stroke: var(--accent); }
+.shelf .boxtile.sel svg .rim { fill: var(--accent); stroke: var(--accent); }
+.shelf .boxtile.sel svg .body { fill: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.shelf .boxtile.sel .boxshape b { color: var(--accent); }
+.shelf .boxtile.sel .bxl { color: var(--accent); }
+.shelf .boxtile.sel::after { content: ""; position: absolute; bottom: -7px; left: 24%; right: 24%; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 35%, transparent); filter: blur(3px); }
+.selck { position: absolute; top: -6px; right: 4px; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; font-size: .8rem; font-weight: 900; animation: m-pop .35s cubic-bezier(.05,.7,.1,1); box-shadow: 0 0 0 2px var(--bg); }
+/* Chips: fill sweeps in */
+.chip { position: relative; overflow: hidden; isolation: isolate; transition: color .3s ease, transform .15s ease; }
+.chip.on { background: var(--surface2); }
+.chip::before { content: ""; position: absolute; inset: 0; background: var(--accent); transform: scaleX(0); transform-origin: 0 50%; transition: transform .35s cubic-bezier(.05,.7,.1,1); z-index: -1; border-radius: inherit; }
+.chip.on::before { transform: scaleX(1); }
+.chip:active { transform: scale(.95); }
+/* layers */
+.moment { position: fixed; z-index: 80; pointer-events: auto; }
+@keyframes m-pop { 0% { transform: scale(.3); } 70% { transform: scale(1.15); } 100% { transform: none; } }
+/* drive-in */
+.m-drive { top: calc(64px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); width: min(320px, 86vw); }
+.md-road { position: relative; height: 70px; background: var(--surface); border-radius: 18px; box-shadow: 0 12px 30px rgba(0,0,0,.18); overflow: hidden; animation: m-in .25s ease, m-out .3s ease 1.4s forwards; }
+.md-car { position: absolute; left: -70px; bottom: 16px; width: 58px; color: var(--accent); animation: m-car 1.1s cubic-bezier(.2,0,0,1) forwards; }
+.md-car svg, .md-box svg { display: block; width: 100%; }
+.md-box { position: absolute; right: 16px; bottom: 10px; width: 78px; }
+.md-box .mb-rim { fill: var(--accent); stroke: var(--accent); stroke-width: 2.4; }
+.md-box .mb-body { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2.4; }
+.md-odo { position: absolute; inset: 22% 0 8% 0; display: grid; place-items: center; overflow: hidden; height: 1.3em; margin: auto; color: var(--accent); font-weight: 900; font-size: 1.15rem; }
+.md-odo span { display: grid; animation: m-odo .5s cubic-bezier(.05,.7,.1,1) .85s forwards; }
+.md-odo i { font-style: normal; height: 1.3em; line-height: 1.3em; text-align: center; }
+@keyframes m-car { 0% { left: -70px; } 75% { left: calc(100% - 140px); } 100% { left: calc(100% - 118px); transform: translateY(10px) scale(.6); opacity: 0; } }
+@keyframes m-odo { to { transform: translateY(-1.3em); } }
+@keyframes m-in { from { transform: translateY(-14px); opacity: 0; } }
+@keyframes m-out { to { transform: translateY(-14px); opacity: 0; } }
+/* packed */
+.m-pack { inset: 0; display: grid; place-items: center; background: rgba(20,20,19,.25); animation: m-in .2s ease, m-fade .3s ease 1.7s forwards; }
+.mp-card { position: relative; width: 220px; height: 170px; background: var(--surface); border-radius: 22px; box-shadow: 0 20px 50px rgba(0,0,0,.25); }
+.mp-box { position: absolute; left: 45px; top: 40px; width: 130px; fill: var(--surface2); stroke: var(--muted); stroke-width: 2.4; stroke-linejoin: round; }
+.mp-lid { transform-origin: 3px 18px; transform: rotate(-30deg) translate(-4px,-8px); animation: m-lid .45s cubic-bezier(.05,.7,.1,1) .15s forwards; }
+.mp-tape { position: absolute; left: 50%; top: 52px; height: 11px; width: 0; transform: translateX(-50%); background: #d9b36b; border-radius: 2px; animation: m-tape .4s ease .55s forwards; }
+.mp-lbl { position: absolute; left: 50%; top: 82px; transform: translate(-50%,0) scale(2.2) rotate(-12deg); opacity: 0; background: var(--surface); border: 1.5px dashed var(--text); border-radius: 6px; padding: 2px 8px; font-size: .8rem; font-weight: 900; white-space: nowrap; animation: m-stamp .35s cubic-bezier(.05,.7,.1,1) .9s forwards; }
+@keyframes m-lid { to { transform: none; } }
+@keyframes m-tape { to { width: 124px; } }
+@keyframes m-stamp { to { opacity: 1; transform: translate(-50%,0) scale(1) rotate(-4deg); } }
+@keyframes m-fade { to { opacity: 0; } }
+/* flag */
+.m-flag { left: 50%; top: 40%; translate: -50% -50%; background: var(--text); color: var(--bg); padding: 14px 20px; border-radius: 16px; font-weight: 900; font-size: 1.05rem; white-space: nowrap; animation: m-pop .4s cubic-bezier(.05,.7,.1,1), m-fade .3s ease 2.3s forwards;
+  background-image: repeating-conic-gradient(rgba(255,255,255,.08) 0 25%, transparent 0 50%); background-size: 16px 16px; }
+.m-cf { position: fixed; width: 9px; height: 9px; z-index: 79; pointer-events: none; border: 1px solid #888; border-radius: 1px; }
+/* sync start lights in the status pill */
+.lights { display: inline-flex; gap: 3px; margin-right: 6px; vertical-align: -1px; }
+.lights .sl { width: 8px; height: 8px; border-radius: 50%; background: #3a3833; display: inline-block; transition: background .15s; }
+.lights .sl.r { background: #e2382f; box-shadow: 0 0 6px #e2382f; }
+.lights .sl.g { background: #2fb36a; box-shadow: 0 0 6px #2fb36a; }
+/* Gemini names: rows flip in */
+.nl-row.flipin { animation: m-flip .6s cubic-bezier(.2,.8,.2,1) backwards; transform-origin: 50% 50%; }
+@keyframes m-flip { from { transform: perspective(700px) rotateY(80deg); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .moment, .moment *, .shelf .boxtile, .selck, .chip::before, .nl-row.flipin { animation: none !important; transition: none !important; } }
+
+/* room above the lifted open box and its tick badge in the scrolling shelf row */
+.shelf.scrollrow { padding-top: 12px; }
 /* Tick boxes (s1-0.34.1): the general input rule made them 100% wide and 48 px tall (B's screenshot, Check sync) */
 input[type=checkbox] { width: 22px; height: 22px; min-height: 0; padding: 0; margin: 0; flex: none; accent-color: var(--accent); }

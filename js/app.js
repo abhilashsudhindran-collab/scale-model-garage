@@ -15,10 +15,11 @@ import { newTimer, touch, seconds, paceFromTimes } from './timing.js';
 import { straighten, validQuad } from './crop.js';
 import { toCsv, zip, collectionRows } from './export.js';
 import { runAudit } from './audit.js';
+import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn } from './moments.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.34.1';
+export const APP_VERSION = 's1-0.35.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -142,11 +143,17 @@ async function refreshStatus() {
   else if (config) { txt = 'All synced'; cls = 'ok'; }
   else { txt = 'Nothing to sync'; cls = 'muted'; }
   pill.textContent = txt; pill.style.color = `var(--${cls})`;
+  // Start lights (moments): fill while syncing, all green for a moment when done
+  if (motionOn() && (isSyncing() || (cls === 'ok' && Date.now() - syncDoneAt < 1600))) {
+    const lights = document.createElement('span'); lights.className = 'lights'; lights.setAttribute('aria-hidden', 'true');
+    lights.innerHTML = lightsHtml(syncFrac, isSyncing() ? 'run' : 'done'); // fixed markup
+    pill.prepend(lights);
+  }
   pill.setAttribute('aria-label', `${txt}. Tap to sync.`);
   $('header.top').classList.toggle('compact', txt.length > 16); // e.g. "Sign in to sync · 3 boxes"
 }
 
-let lastSyncMsg = '';
+let lastSyncMsg = '', syncFrac = 0, syncDoneAt = 0;
 let colourOpenFor = null; // car page: the model whose colour picker is open
 let moveBoxFor = null; // car page: the model whose "Move box" panel is open
 // Sync button state (B, 24 Nov): greyed out with "Syncing…" while a sync runs.
@@ -185,11 +192,14 @@ async function runSync(interactive) {
 async function runSyncOnce(interactive, attempt) {
   // The status pill re-reads what's waiting; at most once a second during a sync (perf: once per photo grew with the backlog).
   let lastPill = 0;
-  const setMsg = (m) => { lastSyncMsg = m; const el = $('#syncMsg'); if (el) el.textContent = m; const t = Date.now(); if (t - lastPill > 1000) { lastPill = t; refreshStatus(); } };
+  syncFrac = 0.05;
+  const setMsg = (m) => { const ph = /photo (\d+) of (\d+)/.exec(m); syncFrac = ph ? 0.1 + 0.7 * (+ph[1] / +ph[2]) : /Reading your sheet/.test(m) ? 0.85 : /Synced:/.test(m) ? 1 : syncFrac;
+    lastSyncMsg = m; const el = $('#syncMsg'); if (el) el.textContent = m; const t = Date.now(); if (t - lastPill > 1000) { lastPill = t; refreshStatus(); } };
   try {
     const s = await syncNow({ interactive, progress: setMsg });
     setMsg(`Synced: ${s.photosUploaded} photo(s), ${s.rowsAppended} new row(s), ${s.rowsUpdated} update(s), ${s.pulled} pulled${s.conflicts ? `, ${s.conflicts} clash(es) to review` : ''}${s.errors.length ? `, ${s.errors.length} error(s) — will retry` : ''} · ${(s.ms / 1000).toFixed(1)} s`);
     if (s.errors.length && attempt === 1 && navigator.onLine && !document.hidden) { setMsg(`${s.errors.length} item(s) didn't go through · trying again…`); return true; }
+    if (!s.errors.length) { syncDoneAt = Date.now(); setTimeout(refreshStatus, 1700); }
     if (interactive) toast(s.errors.length ? 'Synced with some errors — will retry' : 'Synced ✓', 1800, s.errors.length ? 'warn' : 'ok');
     refreshStatus();
     // Daily/monthly sheet backup (D25) once a sync has succeeded; a failure here never affects the sync.
@@ -303,6 +313,7 @@ const BOX_SIZES = ['S', 'M', 'L', 'XL'];
 const packedDate = (r) => (r?.box_packed_at ? new Date(r.box_packed_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '');
 async function setPacked(label, on) {
   await saveBox(label, { box_packed_at: on ? store.nowIso() : '' });
+  if (on) packedMoment(label, (await carsInBox(label)).length);
   toast(on ? `${label} marked as packed ✓` : `${label} is open again`); autoSyncSoon();
 }
 function packButton(label, rec) {
@@ -314,7 +325,7 @@ function packButton(label, rec) {
 // A storage box drawn like the real see-through box (B's sketch, 24 Nov): count big inside; size, number and name below.
 const BOX_SVG = '<svg viewBox="0 0 100 66" aria-hidden="true">'
   + '<path class="rim" d="M2 11 L5 5 H95 L98 11 Z" />'            // wide lip, like the SAMLA lid edge
-  + '<path d="M8 11 L13 57 H87 L92 11" />'                          // gently tapering body
+  + '<path class="body" d="M8 11 L13 57 H87 L92 11" />'                          // gently tapering body
   + '<path class="rib" d="M19 14 L22 50 M81 14 L78 50" />'          // vertical ribs near each end
   + '<path d="M16 57 V61 H27 V57 M73 57 V61 H84 V57" />'            // small feet
   + '</svg>';
@@ -398,11 +409,11 @@ let brandNameCache = {}, scaleLabelCache = {};
 // Box settings stay as B left them (open while he's setting a box up), instead of folding mid-way.
 const boxSettingsOpen = new Map();
 function shelfEl(boxes, names, onTap, { selected = '', scroll = false, onNew = null } = {}) {
-  return h('div', { class: `shelf${scroll ? ' scrollrow' : ''}` }, ...boxes.map(([k, n]) => {
+  return h('div', { class: `shelf${scroll ? ' scrollrow' : ''}${selected && boxes.some(([k]) => k.toLowerCase() === selected.toLowerCase()) ? ' hassel' : ''}` }, ...boxes.map(([k, n]) => {
     const r = names.get(k.toLowerCase()) || {};
     const sel = selected && selected.toLowerCase() === k.toLowerCase();
     return h('button', { type: 'button', class: `boxtile${sel ? ' sel' : ''}`, 'aria-pressed': sel ? 'true' : 'false', onclick: () => onTap(k, sel), 'aria-label': `${k}${r.box_name ? ', ' + r.box_name : ''}${r.box_size ? ', size ' + r.box_size : ''}: ${plural(n, 'car', 'cars')}` },
-      boxShape(n),
+      boxShape(n), sel ? h('span', { class: 'selck', 'aria-hidden': 'true' }, '✓') : null,
       h('span', { class: 'bxl' }, r.box_size ? h('em', {}, r.box_size) : null, k, r.box_packed_at ? h('b', { class: 'packedmark', title: `Packed ${packedDate(r)}` }, ' ✓') : null),
       (() => { const t = r.box_name || [r.box_brand === 'mixed' ? 'Mixed' : brandNameCache[r.box_brand], r.box_scale === 'mixed' ? '' : scaleLabelCache[r.box_scale]].filter(Boolean).join(' · '); return t ? h('i', {}, t) : null; })());
   }), onNew ? h('button', { type: 'button', class: 'boxtile newbox', onclick: onNew, 'aria-label': 'Add a new storage box' }, boxShape('＋'), h('span', { class: 'bxl' }, 'New box')) : null);
@@ -1441,7 +1452,7 @@ function extrasCard(models, ref, readings) {
 }
 // Save a name (and code) for one car, with everything Gemini suggested that B accepts by saving:
 // colour, note, brand for a brand-less car (single clear match only). Used by the one-at-a-time and the list view.
-let nameView = 'list', nameAutoNext = false;
+let nameView = 'list', nameAutoNext = false, nameFlipIn = false;
 const nameDrafts = new Map(); // typed edits in the list view survive a redraw (e.g. after a discard)
 async function nameList(cars, sugg, ref, models, inv, ids) {
   const wrap = h('div', { class: 'namelist' });
@@ -1480,6 +1491,7 @@ async function nameList(cars, sugg, ref, models, inv, ids) {
           ...notes.map(t => h('div', { class: 'muted small nl-note' }, t)))),
       h('div', { class: 'row', style: 'align-items:center;margin-top:8px' }, h('label', { class: 'nl-tick', style: 'flex:1;margin:0' }, tick, ' Save this one'),
         h('button', { type: 'button', class: 'ghost small', onclick: async () => { const rest = { ...(await meta.get('aiSuggest', {})) }; delete rest[m.model_id]; await meta.set('aiSuggest', rest); nameDrafts.delete(m.model_id); toast('Suggestion discarded. This car can go in the next Gemini batch.', 3000); route(); } }, 'Discard suggestion')));
+    if (nameFlipIn && motionOn()) { card.classList.add('flipin'); card.style.animationDelay = `${rows.length * 120}ms`; }
     tick.addEventListener('change', () => card.classList.toggle('off', !tick.checked));
     if (!tick.checked) card.classList.add('off');
     rows.push({ m, sg, nameIn, codeIn, tick });
@@ -1498,6 +1510,7 @@ async function nameList(cars, sugg, ref, models, inv, ids) {
   function sync() { const n = rows.filter(r => r.tick.checked).length; btn.textContent = n ? `Save ${n}` : 'Nothing ticked'; btn.classList.toggle('quiet', !n); }
   rows.forEach(r => r.tick.addEventListener('change', sync));
   sync();
+  nameFlipIn = false;
   wrap.append(h('div', { class: 'savebar' }, h('div', { class: 'need' }, 'Unticked ones stay here for later'), btn));
   return wrap;
 }
@@ -1568,6 +1581,7 @@ async function renderName(v) {
           await meta.set('aiSuggest', next);
           await store.update('ai_log', batch.logId, { ai_response_raw: ta.value.slice(0, 5000), suggested_values: JSON.stringify(r.items.map(it => ({ model_id: batch.ids[it.n - 1], name: it.name, code: it.code, brand: it.brand }))), processed_at: store.nowIso() });
           await meta.set('aiBatch', null);
+          nameFlipIn = true;
           toast(`Suggestions for ${r.items.length} of ${plural(batch.ids.length, 'box', 'boxes')}: check each one`, 3500); route(); autoSyncSoon();
         } }, 'Use this answer')),
       h('button', { type: 'button', class: 'ghost small', style: 'margin-top:8px', onclick: async () => { await meta.set('aiBatch', null); route(); } }, 'Cancel'));
@@ -1684,6 +1698,17 @@ async function savePhotoRecords(modelId, photos) {
       source: 'camera', original_filename: p.prep.original_filename, captured_at: p.capturedAt, ai_processed: 'no' } });
   }
   return items;
+}
+
+// Moments after cars are added: drive into the box (with its new count), then any milestone flag.
+async function celebrateSave(box) {
+  try {
+    const [models, inv] = await Promise.all([store.list('models'), store.list('inventory')]);
+    const live = new Set(models.filter(m => !m.deleted_at).map(m => m.model_id));
+    const label = boxLoc(box);
+    if (label) driveIn(inv.filter(i => !i.deleted_at && i.ownership_status === 'Owned' && live.has(i.model_id) && i.storage_location === label).length);
+    setTimeout(() => checkMilestone(live.size), label ? 1500 : 0);
+  } catch (e) { console.warn('moment', e); }
 }
 
 // ---------- Box contents sheet & label (D30: pack the boxes) ----------
@@ -1822,6 +1847,7 @@ async function renderImport(v) {
       }
     } finally { importBusy = false; }
     importFiles?.forEach(f => URL.revokeObjectURL(f.url)); importFiles = null;
+    celebrateSave(box);
     toast(`Imported ${plural(done, 'car', 'cars')} ✓ · barcode read on ${withBc} of ${done}${withBc < done ? ' (see To check → No barcode)' : ''}`, 5000);
     location.hash = '#/name';
   } }, `Import ${plural(groups.length, 'car', 'cars')}`));
@@ -1876,8 +1902,9 @@ async function saveCapture({ quiet = false } = {}) {
   if (!quiet) await logTiming(secs); // gallery imports aren't timed per box here: their pace comes from photo times
   await clearDraft();
   if (boughtGet().on) rememberShop(boughtGet().source);
+  const savedBox = cap.box;
   cap = freshCapture({ brandId: nextBrandId(), scaleId: nextScaleId(), count: cap.count + 1 });
-  if (!quiet) { toast(`Saved ✓ (${secs} s)${cap.box ? ` · Box ${cap.box}` : ''} — next car`); window.scrollTo(0, 0); route(); }
+  if (!quiet) { toast(`Saved ✓ (${secs} s)${cap.box ? ` · Box ${cap.box}` : ''} — next car`); window.scrollTo(0, 0); route(); celebrateSave(savedBox); }
   autoSyncSoon();
   return true;
 }
@@ -2688,7 +2715,12 @@ async function renderSettings(v) {
   v.append(h('div', { class: 'card' }, h('h3', {}, 'Look'),
     h('p', { class: 'muted' }, 'Accent colour, used for the main buttons and where you are in the app.'),
     h('div', { class: 'swatches' }, ACCENTS.map(([k, label, hex]) => h('button', { type: 'button', class: `swatch ${curAccent === k ? 'on' : ''}`, style: `background:${hex}`, 'aria-label': label, 'aria-pressed': curAccent === k ? 'true' : 'false', title: label, onclick: () => { localStorage.setItem('smg.accent', k); applyAccent(); route(); } }))),
-    h('p', { class: 'muted', style: 'margin-top:8px' }, ACCENTS.find(x => x[0] === curAccent)?.[1] || '')));
+    h('p', { class: 'muted', style: 'margin-top:8px' }, ACCENTS.find(x => x[0] === curAccent)?.[1] || ''),
+    h('label', { class: 'f', style: 'margin-top:12px' }, 'Moments (car drives into its box, start lights, chequered flag…)'),
+    (() => { const off = (() => { try { return localStorage.getItem('smg.motion') === 'off'; } catch { return false; } })();
+      const set = (v) => { try { localStorage.setItem('smg.motion', v); } catch {} route(); };
+      return h('div', { class: 'chips' }, h('button', { type: 'button', class: `chip ${!off ? 'on' : ''}`, onclick: () => set('on') }, 'On'), h('button', { type: 'button', class: `chip ${off ? 'on' : ''}`, onclick: () => set('off') }, 'Off')); })(),
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? h('p', { class: 'muted small' }, 'Your phone asks for less motion, so moments stay off.') : null));
   const estIn = h('input', { inputmode: 'numeric', value: String(collectionEstimate()), 'aria-label': 'About how many boxes in your collection' });
   v.append(h('div', { class: 'card' }, h('h3', {}, 'Your collection'),
     h('label', { class: 'f' }, 'Rough guess: how many boxes in total?'), estIn,
