@@ -19,7 +19,7 @@ import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn }
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.34.0';
+export const APP_VERSION = 's1-0.35.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -567,17 +567,17 @@ async function renderDash(v) {
       return h('div', { class: 'packing' },
         h('div', { class: 'row', style: 'align-items:baseline' }, h('b', { style: 'flex:1' }, `📦 Packed: ${packed.length} of ${plural(used.length, 'box', 'boxes')}`), h('span', { class: 'muted' }, `${pct}% of cars`)),
         h('div', { class: 'packbar', role: 'img', 'aria-label': `${carsPacked} of ${copies.length} cars packed` }, h('span', { style: `width:${pct}%` })),
-        h('div', { class: 'muted small' }, `${plural(carsPacked, 'car', 'cars')} packed · ${loose} still to pack${noBox ? ` (${noBox} not in a storage box yet)` : ''}`));
+        h('div', { class: 'muted small' }, `${plural(carsPacked, 'car', 'cars')} packed · ${loose} still to pack${noBox ? ` (${noBox} of them not in a storage box yet)` : ''}`));
     })(),
-    noBox ? h('p', { class: 'muted' }, `${plural(noBox, 'box has', 'boxes have')} no storage box yet.`) : null));
+    noBox && !boxes.some(([, n]) => n > 0) ? h('p', { class: 'muted' }, `${plural(noBox, 'car is', 'cars are')} not in a storage box yet.`) : null));
 
   // Shooting pace (Stage 1 check 5): from photo times; the last session first
   const pc = await shootingPace();
   if (pc.medianSec != null) {
     const last = pc.sessions[pc.sessions.length - 1];
     v.append(h('div', { class: 'card pacecard' }, h('h3', {}, '⏱ Shooting pace'),
-      h('p', {}, h('b', {}, `${pc.medianSec} s per box`), h('span', { class: 'muted' }, ` median, ${plural(pc.measured + pc.sessions.length, 'box', 'boxes')} timed`)),
-      h('p', { class: 'muted small' }, `Last session: ${plural(last.boxes, 'box', 'boxes')} in ${last.minutes} min (${last.medianSec} s each) · ${new Date(last.start).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`),
+      h('p', {}, h('b', {}, `${pc.medianSec} s per box`), h('span', { class: 'muted' }, ` typical (median) · ${pc.avgSec} s on average incl. short pauses · ${plural(pc.measured + pc.sessions.length, 'box', 'boxes')} timed`)),
+      h('p', { class: 'muted small' }, `Last session: ${plural(last.boxes, 'box', 'boxes')} in ${last.minutes} min · typical ${last.medianSec} s, average ${last.avgSec} s · ${new Date(last.start).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`),
       h('p', { class: 'muted small' }, 'Measured from when each box\'s front photo was taken. Pauses over 10 minutes start a new session.')));
   }
 

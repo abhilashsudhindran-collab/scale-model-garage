@@ -591,3 +591,5 @@ button.syncbtn:disabled { opacity: .45; cursor: default; }
 
 /* room above the lifted open box and its tick badge in the scrolling shelf row */
 .shelf.scrollrow { padding-top: 12px; }
+/* Tick boxes (s1-0.34.1): the general input rule made them 100% wide and 48 px tall (B's screenshot, Check sync) */
+input[type=checkbox] { width: 22px; height: 22px; min-height: 0; padding: 0; margin: 0; flex: none; accent-color: var(--accent); }

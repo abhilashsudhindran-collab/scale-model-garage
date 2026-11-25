@@ -5,7 +5,11 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.34.0
+## Status: Stage 1 (quick-capture slice), version s1-0.35.0
+
+**s1-0.35.0 (25 Nov 2026): open-box selection + moments (B's picks from the Garage delight kit).** The open storage box is now obvious (A + C): it lifts, its lid fills with the accent, a ✓ badge and soft shadow appear, it sits on a green pad, and the other boxes fade back. Moments, each about a second and only at real events: a car **drives into its box** after a save or import (the box count rolls like an odometer); Gemini's suggestions **flip in** one by one after Paste & use; **Mark as packed** closes the lid, tapes it and stamps the label; sync shows **five start lights** filling in the status pill, all green when done; a **chequered flag** at 25, 50, 100, 250, 500, 750, 1,000… cars (once each; existing cars never trigger one); chips **fill with a sweep**. Settings → Look → Moments On/Off; all off when the phone asks for reduced motion. js/moments.js; tests: tests/moments.test.mjs, tests/e2e_moments.py.
+
+**s1-0.34.1 (25 Nov 2026): fixes from B's phone checks.** Shooting pace now says "typical (median)" and also shows the average including short pauses (B's 24 Nov session: 28 s typical; "(28 s each)" read like an average of 16 boxes in 17 min). The Dashboard no longer repeats "1 box has no storage box yet" under the packing line (and says "car", not "box"). Tick boxes are normal size again (the general input style made the Check sync tick box huge).
 
 **s1-0.34.0 (25 Nov 2026): photos upload 3 at a time.** Sync used to upload photos one after another (~8.6 s per photo on B's phone in R0, mostly waiting on the network). Now up to 3 photos upload at the same time; each keeps its own safety (marked as attempted before upload, looked up before any retry, checksum checked), and a sign-in failure still stops the run. How much faster on B's phone and network is **not measured yet** (the fake network in the tests doesn't model mobile upload speed).
 

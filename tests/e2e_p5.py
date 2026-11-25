@@ -70,7 +70,7 @@ def main():
         check(sc[0] == '1:64 4' and len(sc) == 3, f'by scale ({sc})')
         tiles = [t.inner_text().replace('\n', ' ') for t in page.query_selector_all('.boxtile:not(.newbox)')]
         check(tiles == ['3 Box 3', '2 Box 12', '1 Box 30'], f'storage boxes in number order, count inside ({tiles})')
-        check(page.is_visible('text=1 box has no storage box yet'), 'boxes without a storage box are counted')
+        check(page.is_visible('text=1 of them not in a storage box yet'), 'cars without a storage box are counted (in the packing line)')
         check(not page.is_visible('text=Last 7 days'), 'no "last 7 days" chart (B: not useful)')
         st = [r.inner_text().replace('\n', ' ') for r in page.query_selector_all('.card:has(h3:text("Box state")) .barrow')]
         check(st == ['Opened 3', 'Sealed 1'], f'box state ({st})')
