@@ -465,3 +465,12 @@ button.syncbtn:disabled { opacity: .45; cursor: default; }
 .card.bought { border: 2px solid var(--accent); }
 .purchases .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .purchases .pgrid b { display: block; font-size: 1.5rem; margin: 2px 0; }
+
+/* Import from gallery (s1-0.26.0) */
+.importlink { margin: 6px 0 8px; }
+.importgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.importcar { background: var(--surface); border-radius: 14px; padding: 8px; }
+.importpair { display: flex; gap: 6px; }
+.importpair figure { margin: 0; flex: 1; }
+.importpair img { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 8px; display: block; background: var(--surface2); }
+.importpair figcaption { font-size: .75rem; color: var(--muted); text-align: center; margin-top: 2px; }
