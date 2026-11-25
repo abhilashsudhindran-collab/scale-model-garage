@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.36.3
+## Status: Stage 1 (quick-capture slice), version s1-0.36.4
+
+**s1-0.36.4 (25 Nov 2026): one outline for every photo tile.** B: a straightened photo (shown whole on its light pad) had no visible edge, so its card looked smaller than the others. All photo tiles now share the same thin stroke. Car of the day is now one card: one white surface and outline, the photo inset inside it (B: photo and text looked like two separate cards).
 
 **s1-0.36.3 (25 Nov 2026): updates arrive whole.** B's phone showed s1-0.36.2 (new code) with the old Car of the day layout: the browser had kept the old style file (GitHub Pages lets browsers reuse files for ~10 minutes). The service worker now always asks the server for app files when online (`cache: 'no-cache'`, a quick 'not modified' when nothing changed), so code and styles of a release always match. Offline use is unchanged (cache fallback).
 
