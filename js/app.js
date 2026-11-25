@@ -17,7 +17,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.21.1';
+export const APP_VERSION = 's1-0.22.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -1547,6 +1547,12 @@ async function renderItem(v, modelId) {
         onclick: () => { colourOpenFor = colourOpenFor === modelId ? null : modelId; route(); } }, m.colour_family ? '' : '+') : null),
     m.product_code ? h('div', { class: 'pdp-code' }, m.product_code) : null));
   const colourSlot = h('div'); v.append(colourSlot); // the colour picker opens here, right under the name
+  if (!m.deleted_at && mergeFor !== modelId) {
+    const top = (await mergeCandidates(m))[0];
+    if (top && top.score >= 2) v.append(h('div', { class: 'banner info samecar' },
+      h('div', {}, `Looks like the same car as `, h('a', { href: `#/item/${encodeURIComponent(top.m.model_id)}` }, top.m.display_name || '(no name)'), ` (${top.why.join(', ')}).`),
+      h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: () => { mergeFor = modelId; route(); setTimeout(() => $('#mergePanel')?.scrollIntoView({ behavior: 'smooth' }), 300); } }, 'Compare & merge')));
+  }
   // Car note (B, 24 Nov): fun fact / history / pop culture / casting, a sub-note under the name.
   // Gemini's note is shown labelled "from Gemini, not checked" until B keeps, edits or hides it.
   const aiAll = m.deleted_at ? {} : ((await aiColours(ref)).get(modelId) || {});
@@ -1802,9 +1808,85 @@ async function renderItem(v, modelId) {
     h('dt', {}, 'Duplicate check'), h('dd', {}, { checkable: 'Checkable', not_checkable: 'Not checkable yet (no code)', needs_review: 'Brand needs review' }[m.duplicate_check_status] || m.duplicate_check_status),
     h('dt', {}, 'Added'), h('dd', {}, new Date(m.created_at).toLocaleString()),
     h('dt', {}, 'Sync'), h('dd', {}, rec.dirty ? 'Waiting to sync' : 'Synced'),
-    h('dt', {}, 'ID'), h('dd', { class: 'muted' }, m.model_id))));
+    h('dt', {}, 'ID'), h('dd', { class: 'muted' }, m.model_id)),
+    !m.deleted_at ? h('button', { type: 'button', class: 'quiet small', style: 'margin-top:10px', onclick: () => { mergeFor = modelId; route(); } }, 'Merge with another entry…') : null));
+  if (!m.deleted_at && mergeFor === modelId) v.append(await mergePanel(m, ref));
   v.append(m.deleted_at ? h('button', { class: 'wide', onclick: restore }, 'Restore to garage')
     : h('button', { class: 'ghost wide', onclick: archiveModel }, 'Remove from garage'));
+}
+
+// ---------- Merge two entries (B, 24 Nov) ----------
+// Two entries that are the same car become one car with all their copies and photos. Only ever by B's choice
+// (D10.1 rule 5: no automatic merging). The emptied entry is archived, never deleted; every move is logged.
+const nameKey = (t) => normTxt(t).replace(/\b(19|20)\d{2}\b/g, ' ').replace(/\s+/g, ' ').trim();
+async function mergeCandidates(m) {
+  const [models, ids] = await Promise.all([store.list('models'), store.list('product_identifiers')]);
+  const bc = (mid) => new Set(ids.filter(i => i.model_id === mid && i.identifier_type === 'barcode').map(i => i.value_cmp || i.value_raw));
+  const mine = bc(m.model_id), myKey = nameKey(m.display_name), myWords = new Set(myKey.split(' ').filter(w => w.length > 1));
+  const out = [];
+  for (const o of models) {
+    if (o.model_id === m.model_id) continue;
+    const why = [];
+    let score = 0;
+    if (m.product_code_cmp && o.product_code_cmp === m.product_code_cmp) { score += 3; why.push('same code'); }
+    if ([...bc(o.model_id)].some(b => mine.has(b))) { score += 3; why.push('same barcode'); }
+    const k = nameKey(o.display_name);
+    if (myKey && k === myKey) { score += 2; why.push('same name'); }
+    else if (myWords.size) { const w = k.split(' ').filter(x => myWords.has(x)).length / myWords.size; if (w >= 0.6) { score += 1; why.push('similar name'); } }
+    if (score && o.brand_id && o.brand_id === m.brand_id) score += 0.5;
+    out.push({ m: o, score, why });
+  }
+  return out.sort((a, b) => b.score - a.score || String(a.m.display_name).localeCompare(String(b.m.display_name)));
+}
+async function mergeInto(sourceId, targetId) {
+  const [src, tgt] = await Promise.all([store.get('models', sourceId), store.get('models', targetId)]);
+  if (!src || !tgt) throw new Error('entry not found');
+  const [inv, photos, ids] = await Promise.all([store.list('inventory'), store.list('photos'), store.list('product_identifiers')]);
+  let copies = 0, pics = 0;
+  for (const c of inv.filter(i => i.model_id === sourceId)) { await store.update('inventory', c.inventory_id, { model_id: targetId }); await store.logChange('inventory', c.inventory_id, 'model_id', sourceId, targetId, 'merged'); copies++; }
+  for (const p of photos.filter(x => x.model_id === sourceId)) { await store.update('photos', p.photo_id, { model_id: targetId }); await store.logChange('photos', p.photo_id, 'model_id', sourceId, targetId, 'merged'); pics++; }
+  const have = new Set(ids.filter(i => i.model_id === targetId).map(i => `${i.identifier_type}:${i.value_cmp || i.value_raw}`));
+  for (const i of ids.filter(x => x.model_id === sourceId)) {
+    if (have.has(`${i.identifier_type}:${i.value_cmp || i.value_raw}`)) await store.archive('product_identifiers', i.identifier_id);
+    else await store.update('product_identifiers', i.identifier_id, { model_id: targetId });
+  }
+  // Fill only what the kept entry is missing; nothing it already has is overwritten.
+  const patch = {};
+  for (const k of ['product_code', 'product_code_cmp', 'variant', 'series', 'release_year', 'colour_family', 'colour_name', 'car_note', 'car_note_source', 'primary_photo_id'])
+    if (!String(tgt[k] || '').trim() && String(src[k] || '').trim()) patch[k] = src[k];
+  if (patch.product_code) patch.duplicate_check_status = duplicateCheckStatus({ ...tgt, ...patch });
+  if (Object.keys(patch).length) await store.update('models', targetId, patch);
+  await store.update('models', sourceId, { notes: [src.notes, `Merged into "${tgt.display_name || targetId}" (${new Date().toLocaleDateString()})`].filter(Boolean).join(' · ') });
+  await store.archive('models', sourceId);
+  await store.logChange('models', sourceId, 'merged_into', '', targetId, `merged into ${tgt.display_name || targetId}: ${copies} copies, ${pics} photos`);
+  autoSyncSoon();
+  return { copies, pics };
+}
+let mergeFor = null; // car page: the model whose merge panel is open
+async function mergePanel(m, ref) {
+  const cands = await mergeCandidates(m);
+  const [inv, photos] = await Promise.all([store.list('inventory'), store.list('photos')]);
+  const brandN = (id) => ref.brands.find(b => b.brand_id === id)?.name || '';
+  const nCopies = inv.filter(i => i.model_id === m.model_id).length, nPhotos = photos.filter(p => p.model_id === m.model_id).length;
+  const list = h('div', { class: 'mergelist' });
+  const draw = (q) => {
+    const t = normTxt(q);
+    const rows = (t ? cands.filter(c => normTxt([c.m.display_name, c.m.product_code, brandN(c.m.brand_id)].join(' ')).includes(t)) : cands.filter(c => c.score > 0)).slice(0, 8);
+    list.replaceChildren(...(rows.length ? rows.map(c => {
+      const box = inv.find(i => i.model_id === c.m.model_id && i.storage_location)?.storage_location;
+      return h('button', { type: 'button', class: 'mergerow', onclick: async () => {
+        if (!confirm(`Merge this entry into "${c.m.display_name || '(no name)'}"?\n\nIts ${plural(nCopies, 'copy', 'copies')} and ${plural(nPhotos, 'photo', 'photos')} move there; anything that entry is missing (code, colour, note) is filled in. This entry is then archived (Garage → Archived), not deleted.`)) return;
+        try { const r = await mergeInto(m.model_id, c.m.model_id); mergeFor = null; toast(`Merged ✓ ${plural(r.copies, 'copy', 'copies')} and ${plural(r.pics, 'photo', 'photos')} moved`, 3500); location.hash = `#/item/${encodeURIComponent(c.m.model_id)}`; }
+        catch (e) { toast(`Couldn't merge: ${e.message}`, 4000, 'bad'); }
+      } }, h('div', { class: 'nm' }, c.m.display_name || '(no name)'),
+        h('div', { class: 'muted small' }, [brandN(c.m.brand_id), c.m.product_code, box, c.why.join(', ')].filter(Boolean).join(' · ')));
+    }) : [h('p', { class: 'muted' }, t ? 'No entry matches that search.' : 'No likely matches. Search by name or code.')]));
+  };
+  const q = h('input', { type: 'search', placeholder: 'Search the entry to merge into', 'aria-label': 'Search entry to merge into', oninput: (e) => draw(e.target.value) });
+  draw('');
+  return h('div', { class: 'card mergepanel', id: 'mergePanel' }, h('h3', {}, 'Merge into another entry'),
+    h('p', { class: 'muted' }, `Pick the entry to keep. This one's ${plural(nCopies, 'copy', 'copies')} and ${plural(nPhotos, 'photo', 'photos')} move into it.`),
+    q, list, h('button', { type: 'button', class: 'ghost small', style: 'margin-top:8px', onclick: () => { mergeFor = null; route(); } }, 'Cancel'));
 }
 
 // ---------- Export downloads ----------

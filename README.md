@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.21.1
+## Status: Stage 1 (quick-capture slice), version s1-0.22.0
+
+**s1-0.22.0 (25 Nov 2026): merge two entries.** For the same car entered twice (often without a barcode): the car page says "Looks like the same car as … (same code / barcode / name)" with "Compare & merge", and Record info has "Merge with another entry…" (likely matches first, or search). Merging moves this entry's copies (each keeps its own box) and photos into the chosen entry, fills only what that entry is missing (code, colour, note, variant…), and archives the emptied entry with a note. Only ever on B's tap (D10.1 rule 5); every move logged.
 
 **s1-0.21.1 (25 Nov 2026): straightened photos shown whole (B).** A straightened or rotated photo is just the box, so the tall Garage tile cut the ends off wide boxes (e.g. the 1:18 WERK83). Such photos are now shown whole, centred on a light background with a soft shadow (product-shot style), in Garage tiles and the car page thumbnails. Raw photos still fill the tile, so table clutter stays hidden. Also: prompt `names-v8` (headings first and last, a full example row, a Note that asks for casting rarity / Treasure Hunts / limited editions / collaborations, race history, pop culture), because Gemini made up its own table without Colour or Note when the instructions didn't arrive; the waiting screen now says to paste the instructions in Gemini, with "Copy the instructions again".
 
