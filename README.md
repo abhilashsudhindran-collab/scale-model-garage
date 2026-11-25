@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.38.0
+## Status: Stage 1 (quick-capture slice), version s1-0.38.1
+
+**s1-0.38.1 (25 Nov 2026): the "no barcode" tick box only shows when the barcode is empty.** B read "This box has no barcode printed on it" (an unticked option) under a real barcode as the app claiming there was none. It now hides while a barcode is filled in and reads "No barcode on this box? Tick so the app stops asking."
 
 **s1-0.38.0 (25 Nov 2026): faster naming check + box journey fix.** On the Name tab's check page, each car now shows its **front and back side by side** (the code is on the back; tap either to enlarge) and checks from what the app already knows, under the code box: the **scanned barcode** (or "No barcode read"); **"Code … is already in your garage: <car>"** before saving; **"Barcode … is also on <car>: same car?"**; and **"Unusual for your <brand> codes (they look like MGT00988)"** when the code's shape (letters/digits) matches none of your other codes for that brand, or ✓ "looks like your other codes". Learned only from your own cars; checks update as you type. **Fix:** the box journey (s1-0.37.0) read barcodes from the wrong place, so every car would have shown "needs a barcode"; e2e_journey now uses a real scanned barcode. Test: tests/e2e_namecheck.py.
 
