@@ -19,7 +19,7 @@ import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn }
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.38.0';
+export const APP_VERSION = 's1-0.38.1';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -2321,11 +2321,14 @@ async function renderItem(v, modelId) {
   // Barcode can be corrected (audit I2), with the same check-digit warning as quick capture.
   const bcWarn = h('div', { class: 'muted' });
   const bcCheck = () => { const ok = gtinCheckOk(f.barcode); bcWarn.textContent = f.barcode.trim() && ok === false ? '⚠ These digits don\'t add up (check digit). Please re-check.' : ''; bcWarn.style.color = 'var(--warn)'; };
-  field2('Barcode', h('input', { inputmode: 'numeric', value: f.barcode, placeholder: 'None yet', oninput: (e) => { set('barcode')(e); bcCheck(); } }));
+  // "No barcode on this box" only shows while the barcode is empty (B, 25 Nov: next to a real barcode it read like a claim)
+  const noBc = h('label', { class: 'checkline', style: 'display:flex;gap:8px;align-items:center;margin-top:8px' },
+    h('input', { type: 'checkbox', 'aria-label': 'No barcode on this box', checked: f.barcode_absent === 'yes' ? true : undefined, onchange: (e) => { f.barcode_absent = e.target.checked ? 'yes' : ''; productDirty = true; markDirty(); } }),
+    'No barcode on this box? Tick so the app stops asking.');
+  const showNoBc = () => { noBc.style.display = String(f.barcode || '').trim() ? 'none' : 'flex'; };
+  field2('Barcode', h('input', { inputmode: 'numeric', value: f.barcode, placeholder: 'None yet', oninput: (e) => { set('barcode')(e); bcCheck(); showNoBc(); } }));
   moreBox.append(bcWarn); bcCheck();
-  moreBox.append(h('label', { class: 'checkline', style: 'display:flex;gap:8px;align-items:center;margin-top:8px' },
-    h('input', { type: 'checkbox', 'aria-label': 'This box has no barcode', checked: f.barcode_absent === 'yes' ? true : undefined, onchange: (e) => { f.barcode_absent = e.target.checked ? 'yes' : ''; productDirty = true; markDirty(); } }),
-    'This box has no barcode printed on it'));
+  moreBox.append(noBc); showNoBc();
   if (barcodes.length > 1) moreBox.append(h('p', { class: 'muted' }, `Other barcodes: ${barcodes.slice(1).map(i => i.value_raw).join(', ')}`));
   async function saveBarcode() {
     const nb = f.barcode.trim(), ob = bc0?.value_raw || '';
