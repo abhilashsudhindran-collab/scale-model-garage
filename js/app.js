@@ -19,7 +19,7 @@ import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn }
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.35.0';
+export const APP_VERSION = 's1-0.36.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -253,6 +253,7 @@ async function route() {
     else if (hash.startsWith('#/settings')) await renderSettings(v);
     else if (hash.startsWith('#/brands')) await renderBrands(v);
     else if (hash.startsWith('#/import')) await renderImport(v);
+    else if (hash.startsWith('#/showroom/')) await renderShowroom(v, decodeURIComponent(hash.slice(11)));
     else if (hash.startsWith('#/boxsheet/')) await renderBoxSheet(v, decodeURIComponent(hash.slice(11)));
     else if (hash.startsWith('#/box/')) { garageFilter = 'all'; garageSearch = `Box ${decodeURIComponent(hash.slice(6)).replace(/^box\s*/i, '').toUpperCase()}`; location.replace('#/'); return; }
     else await renderGarage(v);
@@ -627,6 +628,7 @@ async function renderGarage(v) {
         { selected: sel, scroll: true, onNew: async () => { const label = await newBox(); garageFilter = 'all'; garageSearch = label; toast(`${label} added`); route(); } })));
     if (sel) setTimeout(() => document.querySelector('.shelfhome .boxtile.sel')?.scrollIntoView({ inline: 'center', block: 'nearest' }), 0);
   }
+  if (!garageSearch.trim() && garageFilter === 'all') { const cd = await carOfTheDay(active.map(r => r.data), photos, names); if (cd) v.append(cd); }
   if (nameless) v.append(h('a', { href: '#/name', class: 'namelink' }, `✎ ${plural(nameless, 'box needs', 'boxes need')} a name: name them`, h('span', { 'aria-hidden': 'true' }, ' ›')));
   const photosByModel = new Map();
   photos.forEach(p => { if (p.model_id) (photosByModel.get(p.model_id) || photosByModel.set(p.model_id, []).get(p.model_id)).push(p); });
@@ -691,6 +693,7 @@ async function renderGarage(v) {
         h('button', { type: 'button', class: 'wide', style: 'margin-top:10px', onclick: () => fillBox(label) }, icon('camera'), `Fill ${label}`),
         h('button', { type: 'button', class: 'ghost wide', style: 'margin-top:6px', onclick: () => importBox(label) }, `📥 Import photos into ${label}`),
         inBox.length ? h('a', { href: `#/boxsheet/${encodeURIComponent(oneBox[1].toUpperCase())}`, class: 'btn ghost wide', style: 'margin-top:6px' }, `🧾 Contents sheet & label`) : null,
+        inBox.length > 1 ? h('a', { href: `#/showroom/${encodeURIComponent(oneBox[1].toUpperCase())}`, class: 'btn ghost wide', style: 'margin-top:6px' }, `▶ Showroom: swipe through ${label}`) : null,
         inBox.length ? packButton(label, rec) : null,
         // Progressive disclosure (DV-0.1): settings stay open until the box knows its brands and scale, then fold away.
         h('details', { class: 'more', open: (boxSettingsOpen.has(label) ? boxSettingsOpen.get(label) : !(rec?.box_brand && rec?.box_scale)) ? true : undefined, ontoggle: (e) => boxSettingsOpen.set(label, e.target.open) },
@@ -1709,6 +1712,89 @@ async function celebrateSave(box) {
     if (label) driveIn(inv.filter(i => !i.deleted_at && i.ownership_status === 'Owned' && live.has(i.model_id) && i.storage_location === label).length);
     setTimeout(() => checkMilestone(live.size), label ? 1500 : 0);
   } catch (e) { console.warn('moment', e); }
+}
+
+// ---------- Car of the day + Showroom (B's picks from the Garage delight kit, 25 Nov) ----------
+const NOTE_ICON = { fun: '🎉', history: '🏛', pop: '🎬', casting: '🧩' };
+const noteOf = (m, readings) => (m.car_note_source === 'hidden' ? '' : (m.car_note || readings?.get(m.model_id)?.note || ''));
+const frontPhoto = (m, photos) => { const mine = photos.filter(p => p.model_id === m.model_id && !p.deleted_at); return mine.find(p => p.photo_id === m.primary_photo_id) || mine.find(p => p.shot_role === 'box_front') || mine[0]; };
+// Same car all day, a different one tomorrow: a stable pick from today's date among named cars with a photo.
+function dayPick(n, dateStr) { let x = 0; for (const ch of dateStr) x = (x * 31 + ch.charCodeAt(0)) >>> 0; return n ? x % n : -1; }
+async function carOfTheDay(models, photos, names) {
+  const today = new Date().toISOString().slice(0, 10);
+  try { if (localStorage.getItem('smg.cotdHide') === today) return null; } catch {}
+  const pool = models.filter(m => !m.deleted_at && String(m.display_name || '').trim() && frontPhoto(m, photos)).sort((a, b) => a.model_id.localeCompare(b.model_id));
+  if (pool.length < 3) return null;
+  const m = pool[dayPick(pool.length, today)];
+  const ref = await refData();
+  const readings = await aiColours(ref).catch(() => new Map());
+  const brand = ref.brands.find(b => b.brand_id === m.brand_id)?.name || m.printed_brand_text || '';
+  const scale = ref.scales.find(x => x.scale_id === m.scale_id)?.label || '';
+  const inv = (await store.list('inventory')).find(i => i.model_id === m.model_id && i.storage_location && !i.deleted_at);
+  const note = noteOf(m, readings); const np = note ? noteParts(note) : null;
+  const img = h('img', { alt: '', class: 'cd-img' });
+  photoUrl(frontPhoto(m, photos), 'display').then(u => { if (u) img.src = u; }).catch(() => {});
+  const card = h('div', { class: 'cotd', role: 'button', tabindex: '0', 'aria-label': `Car of the day: ${m.display_name}. Tap to flip.` });
+  const flip = () => card.classList.toggle('on');
+  card.addEventListener('click', (e) => { if (!e.target.closest('a,.cd-x')) flip(); });
+  card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); } });
+  card.append(h('div', { class: 'cd-in' },
+    h('div', { class: 'cd-fr' }, img, h('div', { class: 'cd-txt' }, h('span', { class: 'cd-k' }, 'Car of the day'),
+      h('b', {}, m.display_name), h('span', { class: 'cd-sub' }, [brand, scale, inv?.storage_location].filter(Boolean).join(' · ')), h('span', { class: 'cd-tap' }, note ? 'Tap for the story ↻' : 'Tap to flip ↻'))),
+    h('div', { class: 'cd-bk' },
+      np ? h('div', { class: 'cd-tag' }, NOTE_ICON[np.kind], ' ', np.label) : h('div', { class: 'cd-tag' }, 'No note yet'),
+      h('p', {}, np ? np.body : 'Name tab → Notes & colours asks Gemini for a fun fact, history or casting note.'),
+      h('div', { class: 'row', style: 'margin-top:auto' }, np && m.car_note_source !== 'you' && !m.car_note ? h('span', { class: 'muted small' }, 'from Gemini, not checked') : null,
+        h('a', { href: `#/item/${encodeURIComponent(m.model_id)}`, class: 'btn ghost small' }, 'Open car')))),
+    h('button', { type: 'button', class: 'cd-x', 'aria-label': 'Hide car of the day until tomorrow', onclick: () => { try { localStorage.setItem('smg.cotdHide', today); } catch {} route(); } }, '×'));
+  return card;
+}
+
+let showroomTimer = null;
+async function renderShowroom(v, id) {
+  clearTimeout(showroomTimer);
+  const label = `Box ${String(id).replace(/^box\s*/i, '').toUpperCase()}`;
+  const ref = await refData();
+  const [models, inv, photos] = await Promise.all([store.list('models'), store.list('inventory'), store.list('photos')]);
+  const live = new Map(models.filter(m => !m.deleted_at).map(m => [m.model_id, m]));
+  const ids = [...new Set(inv.filter(i => !i.deleted_at && i.ownership_status === 'Owned' && live.has(i.model_id) && String(i.storage_location || '').toLowerCase() === label.toLowerCase()).map(i => i.model_id))];
+  const brandName = (m) => ref.brands.find(b => b.brand_id === m.brand_id)?.name || m.printed_brand_text || '';
+  const cars = ids.map(x => live.get(x)).sort((a, b) => brandName(a).localeCompare(brandName(b)) || String(a.display_name || '~').localeCompare(String(b.display_name || '~')));
+  const back = `#/box/${encodeURIComponent(label.replace(/^Box\s*/i, ''))}`;
+  if (!cars.length) { v.append(h('p', {}, `${label} is empty. `, h('a', { href: back }, 'Back'))); return; }
+  const readings = await aiColours(ref).catch(() => new Map());
+  let i = 0;
+  const stage = h('div', { class: 'showroom', role: 'dialog', 'aria-label': `Showroom: ${label}` });
+  const ticks = h('div', { class: 'sr-ticks' }), img = h('img', { class: 'sr-img', alt: '' }), info = h('div', { class: 'sr-info' });
+  const close = () => { clearTimeout(showroomTimer); location.hash = back; };
+  stage.append(h('div', { class: 'sr-top' }, ticks, h('div', { class: 'row', style: 'align-items:center' }, h('b', { class: 'sr-box', style: 'flex:1' }, label),
+      h('button', { type: 'button', class: 'sr-x', 'aria-label': 'Close showroom', onclick: close }, '×'))),
+    h('div', { class: 'sr-photo' }, img), info,
+    h('button', { type: 'button', class: 'sr-prev', 'aria-label': 'Previous car', onclick: () => show(i - 1) }), h('button', { type: 'button', class: 'sr-next', 'aria-label': 'Next car', onclick: () => show(i + 1) }));
+  const show = (k) => {
+    clearTimeout(showroomTimer);
+    if (k >= cars.length) { close(); return; }
+    i = Math.max(0, k); const m = cars[i];
+    ticks.replaceChildren(...cars.map((_, j) => h('i', { class: j < i ? 'd' : j === i ? (motionOn() ? 'c' : 'd') : '' })));
+    img.classList.remove('in'); img.removeAttribute('src');
+    const ph = frontPhoto(m, photos); if (ph) photoUrl(ph, 'display').then(u => { if (u && cars[i] === m) { img.src = u; void img.offsetWidth; img.classList.add('in'); } }).catch(() => {});
+    const fam = m.colour_family; const note = noteOf(m, readings); const np = note ? noteParts(note) : null;
+    const n = inv.filter(x => x.model_id === m.model_id && !x.deleted_at && x.ownership_status === 'Owned').length;
+    info.replaceChildren(
+      h('div', { class: 'sr-k' }, [brandName(m), ref.scales.find(x => x.scale_id === m.scale_id)?.label, m.product_code].filter(Boolean).join(' · ')),
+      h('h2', { class: 'sr-name' }, fam ? h('span', { class: 'cdot', style: `background:${familySwatch(fam)}` }) : null, m.display_name || 'Name not set', n > 1 ? h('span', { class: 'sr-n' }, ` ×${n}`) : null),
+      np ? h('p', { class: 'sr-note' }, h('b', {}, `${NOTE_ICON[np.kind]} ${np.label} · `), np.body) : null,
+      h('div', { class: 'row', style: 'justify-content:space-between;align-items:center' }, h('span', { class: 'muted small' }, `${i + 1} of ${cars.length}`),
+        h('a', { href: `#/item/${encodeURIComponent(m.model_id)}`, class: 'btn ghost small', onclick: () => clearTimeout(showroomTimer) }, 'Open car')));
+    if (motionOn()) showroomTimer = setTimeout(() => { if (location.hash.startsWith('#/showroom/')) show(i + 1); }, 5000);
+  };
+  // swipe left / right
+  let x0 = null;
+  stage.addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; }, { passive: true });
+  stage.addEventListener('touchend', (e) => { if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 50) show(i + (dx < 0 ? 1 : -1)); });
+  stage.tabIndex = -1;
+  stage.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') show(i + 1); else if (e.key === 'ArrowLeft') show(i - 1); else if (e.key === 'Escape') close(); });
+  v.append(stage); show(0); setTimeout(() => stage.focus(), 0);
 }
 
 // ---------- Box contents sheet & label (D30: pack the boxes) ----------

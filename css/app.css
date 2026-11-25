@@ -593,3 +593,45 @@ button.syncbtn:disabled { opacity: .45; cursor: default; }
 .shelf.scrollrow { padding-top: 12px; }
 /* Tick boxes (s1-0.34.1): the general input rule made them 100% wide and 48 px tall (B's screenshot, Check sync) */
 input[type=checkbox] { width: 22px; height: 22px; min-height: 0; padding: 0; margin: 0; flex: none; accent-color: var(--accent); }
+
+/* ===== Car of the day + Showroom (s1-0.36.0) ===== */
+.cotd { position: relative; perspective: 900px; margin: 10px 0 12px; cursor: pointer; }
+.cd-in { position: relative; display: grid; transform-style: preserve-3d; transition: transform .7s cubic-bezier(.2,.8,.2,1); min-height: 132px; }
+.cotd.on .cd-in { transform: rotateY(180deg); }
+.cd-fr, .cd-bk { grid-area: 1/1; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: var(--radius); overflow: hidden; }
+.cd-fr { display: grid; grid-template-columns: 112px minmax(0,1fr); background: var(--surface); box-shadow: 0 6px 20px rgba(0,0,0,.06); }
+.cd-img { width: 112px; height: 100%; min-height: 132px; object-fit: cover; background: var(--surface2); display: block; }
+.cd-txt { padding: 12px 36px 12px 14px; display: grid; align-content: center; gap: 3px; }
+.cd-k { font-size: .75rem; font-weight: 800; color: var(--accent); }
+.cd-txt b { font-size: 1.1rem; line-height: 1.2; }
+.cd-sub { color: var(--muted); font-size: .85rem; }
+.cd-tap { color: var(--accent); font-size: .82rem; font-weight: 700; margin-top: 4px; }
+.cd-bk { transform: rotateY(180deg); background: var(--accent-soft); padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.cd-tag { font-weight: 800; color: var(--accent); font-size: .85rem; }
+.cd-bk p { margin: 0; line-height: 1.4; }
+.cd-x { position: absolute; top: 6px; right: 6px; width: 32px; height: 32px; border-radius: 50%; background: transparent; border: 0; color: var(--muted); font-size: 1.2rem; z-index: 2; }
+.showroom { position: fixed; inset: 0; z-index: 70; background: var(--bg); display: grid; grid-template-rows: auto minmax(0,1fr) auto; padding: calc(10px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom)); outline: none; }
+.sr-top { display: grid; gap: 8px; position: relative; z-index: 3; }
+.sr-ticks { display: flex; gap: 4px; }
+.sr-ticks i { flex: 1; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; position: relative; }
+.sr-ticks i.d { background: var(--accent); }
+.sr-ticks i.c::after { content: ""; position: absolute; inset: 0; background: var(--accent); transform-origin: 0 50%; animation: sr-tick 5s linear forwards; }
+@keyframes sr-tick { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.sr-box { font-weight: 800; color: var(--muted); }
+.sr-x { width: 40px; height: 40px; border-radius: 50%; border: 0; background: var(--surface2); font-size: 1.4rem; color: var(--text); }
+.sr-photo { display: grid; place-items: center; min-height: 0; padding: 12px 0; }
+.sr-img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 16px; box-shadow: 0 18px 40px rgba(0,0,0,.14); opacity: 0; transform: scale(.97); transition: opacity .35s ease, transform .5s cubic-bezier(.05,.7,.1,1); }
+.sr-img.in { opacity: 1; transform: none; }
+.sr-info { display: grid; gap: 6px; position: relative; z-index: 3; background: var(--surface); border-radius: var(--radius); padding: 14px 16px; }
+.sr-k { color: var(--muted); font-size: .85rem; font-weight: 700; }
+.sr-name { margin: 0; font-size: 1.45rem; line-height: 1.15; text-wrap: balance; }
+.sr-name .cdot { margin-right: 8px; vertical-align: 2px; }
+.sr-n { color: var(--accent); font-weight: 800; }
+.sr-note { margin: 0; line-height: 1.4; font-size: .95rem; }
+.sr-prev, .sr-next { position: absolute; top: 70px; bottom: 40%; width: 40%; background: transparent; border: 0; z-index: 2; }
+.sr-prev { left: 0; } .sr-next { right: 0; }
+@media (min-width: 900px) { .showroom { padding-left: 20vw; padding-right: 20vw; } }
+@media (prefers-reduced-motion: reduce) { .cd-in, .sr-img { transition: none; } .sr-ticks i.c::after { animation: none; } }
+.sr-x { flex: none !important; width: 40px !important; min-width: 40px; padding: 0; }
+.sr-img { width: 100%; height: 100%; }
+.sr-photo { overflow: hidden; }
