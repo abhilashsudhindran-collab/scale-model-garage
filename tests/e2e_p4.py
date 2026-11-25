@@ -85,8 +85,9 @@ def main():
 
         # Paste the answer back
         ev(f"window.__clip = {json.dumps(ANSWER)}")
-        page.get_by_role('button', name='Paste from clipboard').click(); page.wait_for_timeout(200)
-        page.get_by_role('button', name='Use this answer').click(); page.wait_for_selector('text=Suggested by AI')
+        page.get_by_role('button', name='📋 Paste & use').click(); page.wait_for_selector('.namelist')
+        check(page.locator('.nl-row').count() == 3, 'Paste & use: all 3 suggestions shown on one page')
+        page.get_by_role('button', name='One at a time').click(); page.wait_for_selector('text=Suggested by AI')
         check(page.input_value('input[aria-label=Name]') == 'Nissan Skyline GT-R R34' and page.input_value('input[aria-label="Product code"]') == 'MGT00341-L', 'box 1: name and code pre-filled as a suggestion')
         check(len([x for x in listm() if x['display_name']]) == 0, 'nothing saved until B taps Save')
         page.wait_for_timeout(300); page.screenshot(path=f'{SHOTS}/02-suggestion.png')

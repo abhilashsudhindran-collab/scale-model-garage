@@ -17,7 +17,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.27.1';
+export const APP_VERSION = 's1-0.28.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -1364,6 +1364,97 @@ function extrasCard(models, ref, readings) {
       route();
     } }, `Get notes & colours for the next ${Math.min(MAX_BATCH, need.length)} cars`));
 }
+// Save a name (and code) for one car, with everything Gemini suggested that B accepts by saving:
+// colour, note, brand for a brand-less car (single clear match only). Used by the one-at-a-time and the list view.
+let nameView = 'list', nameAutoNext = false;
+const nameDrafts = new Map(); // typed edits in the list view survive a redraw (e.g. after a discard)
+async function nameList(cars, sugg, ref, models, inv, ids) {
+  const wrap = h('div', { class: 'namelist' });
+  const photos = await store.list('photos');
+  const rows = [];
+  wrap.append(h('div', { class: 'row', style: 'align-items:center;margin-bottom:6px' },
+    h('h3', { style: 'flex:1;margin:0' }, `Check ${plural(cars.length, 'suggestion', 'suggestions')}`),
+    h('button', { type: 'button', class: 'ghost small', onclick: () => { nameView = 'one'; route(); } }, 'One at a time')),
+    h('p', { class: 'muted' }, 'Compare each name with its box photo (tap a photo to enlarge). Fix anything wrong, untick what you are unsure of, then save.'));
+  for (const m of cars) {
+    const sg = sugg[m.model_id];
+    const brand = ref.brands.find(b => b.brand_id === m.brand_id);
+    const ph = photos.filter(p => p.model_id === m.model_id && !p.deleted_at);
+    const front = ph.find(p => p.photo_id === m.primary_photo_id) || ph.find(p => p.shot_role === 'box_front') || ph[0];
+    const rear = ph.find(p => p.shot_role === 'box_rear');
+    const img = h('img', { alt: 'Box front', class: 'nl-ph' });
+    if (front) photoUrl(front, 'display').then(u => { if (u) img.src = u; });
+    let showing = 'front';
+    img.addEventListener('click', () => img.classList.toggle('big'));
+    const flip = rear ? h('button', { type: 'button', class: 'ghost small nl-flip', onclick: () => { showing = showing === 'front' ? 'rear' : 'front'; flip.textContent = showing === 'front' ? 'See back' : 'See front'; photoUrl(showing === 'front' ? front : rear, 'display').then(u => { if (u) img.src = u; }); } }, 'See back') : null;
+    const dr = nameDrafts.get(m.model_id) || {};
+    const nameIn = h('input', { value: dr.name ?? (sg.name || ''), 'aria-label': 'Name', autocapitalize: 'words' });
+    const codeIn = h('input', { value: dr.code ?? (m.product_code || sg.code || ''), 'aria-label': 'Product code', autocapitalize: 'characters', placeholder: 'Code (optional)' });
+    const tick = h('input', { type: 'checkbox', checked: dr.tick === false ? undefined : true, 'aria-label': 'Save this one' });
+    const keep = () => nameDrafts.set(m.model_id, { name: nameIn.value, code: codeIn.value, tick: tick.checked });
+    nameIn.addEventListener('input', keep); codeIn.addEventListener('input', keep); tick.addEventListener('change', keep);
+    const codeNote = m.product_code && sg.code && sg.code !== m.product_code ? `AI read "${sg.code}"; keeping the saved code.` : null;
+    const notes = [...(sg.notes || []), brandNote(sg.brand, brand?.name), codeNote].filter(Boolean);
+    const fam = familyFrom(sg.colour);
+    const card = h('div', { class: 'nl-row' },
+      h('div', { class: 'nl-top' }, h('div', { class: 'nl-left' }, img, flip),
+        h('div', { class: 'nl-f' },
+          h('div', { class: 'muted small' }, [brand?.name || (sg.brand ? `${sg.brand}?` : 'Brand not set'), ref.scales.find(x => x.scale_id === m.scale_id)?.label, inv.find(i => i.model_id === m.model_id && i.storage_location)?.storage_location].filter(Boolean).join(' · ')),
+          nameIn, codeIn,
+          fam ? h('div', { class: 'muted small' }, h('span', { class: 'cdot', style: `background:${familySwatch(fam)}` }), ` ${sg.colour}`) : null,
+          ...notes.map(t => h('div', { class: 'muted small nl-note' }, t)))),
+      h('div', { class: 'row', style: 'align-items:center;margin-top:8px' }, h('label', { class: 'nl-tick', style: 'flex:1;margin:0' }, tick, ' Save this one'),
+        h('button', { type: 'button', class: 'ghost small', onclick: async () => { const rest = { ...(await meta.get('aiSuggest', {})) }; delete rest[m.model_id]; await meta.set('aiSuggest', rest); nameDrafts.delete(m.model_id); toast('Suggestion discarded. This car can go in the next Gemini batch.', 3000); route(); } }, 'Discard suggestion')));
+    tick.addEventListener('change', () => card.classList.toggle('off', !tick.checked));
+    if (!tick.checked) card.classList.add('off');
+    rows.push({ m, sg, nameIn, codeIn, tick });
+    wrap.append(card);
+  }
+  const btn = h('button', { class: 'save', id: 'nameSaveAll', onclick: async () => {
+    const go = rows.filter(r => r.tick.checked);
+    if (go.some(r => !r.nameIn.value.trim())) { toast('A ticked car has no name: type one or untick it', 3500, 'warn'); return; }
+    if (!go.length) { toast('Nothing ticked', 2000, 'warn'); return; }
+    btn.disabled = true; btn.textContent = 'Saving…';
+    for (const r of go) { await applyName(r.m, r.nameIn.value.trim(), r.codeIn.value.trim(), r.sg, ref, models, ids); nameDrafts.delete(r.m.model_id); }
+    nameAutoNext = true;
+    toast(`Named ${plural(go.length, 'car', 'cars')} ✓${go.length < rows.length ? ` · ${rows.length - go.length} left for later` : ''}`, 3000);
+    route(); autoSyncSoon();
+  } }, `Save ${rows.length}`);
+  function sync() { const n = rows.filter(r => r.tick.checked).length; btn.textContent = n ? `Save ${n}` : 'Nothing ticked'; btn.classList.toggle('quiet', !n); }
+  rows.forEach(r => r.tick.addEventListener('change', sync));
+  sync();
+  wrap.append(h('div', { class: 'savebar' }, h('div', { class: 'need' }, 'Unticked ones stay here for later'), btn));
+  return wrap;
+}
+
+async function applyName(m, name, code, sg, ref, models, ids) {
+  const brand = ref.brands.find(b => b.brand_id === m.brand_id);
+  const ns = assignNamespace(brand, null);
+  const patch = { display_name: name, product_code: code, product_code_cmp: codeCmp(code), code_namespace_type: ns.type, code_namespace_id: ns.id, namespace_status: ns.status };
+  patch.duplicate_check_status = duplicateCheckStatus(patch);
+  if (code !== (m.product_code || '')) await store.logChange('models', m.model_id, 'product_code', m.product_code, code, 'named in app');
+  if (code) {
+    const r = checkDuplicate({ ...m, ...patch }, models, ids, []);
+    if (r.status === 'duplicate') toast(`Same code as "${r.exact[0].display_name || r.exact[0].product_code}". Check both in the Garage.`, 5000, 'warn');
+  }
+  const fam = familyFrom(sg?.colour);
+  if (fam && !m.colour_family) { patch.colour_family = fam; patch.colour_name = sg.colour; }
+  if (sg?.carNote && !m.car_note && m.car_note_source !== 'hidden') { patch.car_note = sg.carNote; patch.car_note_source = 'gemini'; }
+  // Imported with "brands later": take the brand Gemini read, only when exactly one of B's brands is in it
+  if (!m.brand_id && sg?.brand) {
+    const hits = ref.brands.filter(b => normName(b.name).length >= 2 && normName(sg.brand).includes(normName(b.name)));
+    if (hits.length === 1) { const nb = hits[0]; const ns2 = assignNamespace(nb, null); Object.assign(patch, { brand_id: nb.brand_id, printed_brand_text: m.printed_brand_text || nb.name, code_namespace_type: ns2.type, code_namespace_id: ns2.id, namespace_status: ns2.status }); patch.duplicate_check_status = duplicateCheckStatus({ ...m, ...patch }); }
+  }
+  if (sg) {
+    // Record what B confirmed against what the AI suggested (AI_LOG, security doc §2.4).
+    patch.identification_status = 'confirmed';
+    const log = await store.get('ai_log', sg.logId);
+    if (log) { let c = {}; try { c = JSON.parse(log.confirmed_values || '{}'); } catch { c = {}; } c[m.model_id] = { name, code, edited: name !== sg.name || code !== sg.code }; await store.update('ai_log', sg.logId, { confirmed_values: JSON.stringify(c) }); }
+    const rest = { ...(await meta.get('aiSuggest', {})) }; delete rest[m.model_id]; await meta.set('aiSuggest', rest);
+  }
+  await store.update('models', m.model_id, patch);
+}
+
 async function renderName(v) {
   const ref = await refData();
   try { const n = await rereadSuggestions(ref); if (n) toast(`${plural(n, 'AI suggestion', 'AI suggestions')} read again with the improved reader`, 3500); } catch (e) { console.warn('re-read', e); }
@@ -1388,8 +1479,8 @@ async function renderName(v) {
         batch.prompt ? h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: async () => { toast(await copyText(batch.prompt) ? 'Instructions copied ✓ Paste them in Gemini' : 'Could not copy', 2500); } }, 'Copy the instructions again') : null),
       h('p', { class: 'muted' }, `Then copy Gemini's whole reply for ${plural(batch.ids.length, 'box', 'boxes')} and paste it here.`), ta,
       h('div', { class: 'row', style: 'margin-top:8px' },
-        h('button', { type: 'button', class: 'quiet', onclick: async () => { try { ta.value = await navigator.clipboard.readText(); } catch { toast('Long-press the box above and choose Paste', 3500, 'warn'); } } }, 'Paste from clipboard'),
-        h('button', { type: 'button', onclick: async () => {
+        h('button', { type: 'button', onclick: async () => { try { ta.value = await navigator.clipboard.readText(); } catch { toast('Long-press the box above and choose Paste', 3500, 'warn'); return; } if (ta.value.trim()) aiCard.querySelector('.useanswer').click(); else toast('Nothing copied yet. In Gemini, tap Copy under the reply.', 3500, 'warn'); } }, '📋 Paste & use'),
+        h('button', { type: 'button', class: 'quiet useanswer', onclick: async () => {
           const r = parseAnswer(ta.value, batch.ids.length, [...ref.brands.map(x => x.name), ...ref.lines.map(x => x.name), ...KNOWN_BRANDS]);
           if (!r.items.length) { toast('No answer lines found. It should look like: Box 1 | name | code | brand', 4500, 'warn'); return; }
           if (batch.mode === 'extras') { // named cars: keep the reply; notes and colours are read from it on each car page
@@ -1426,8 +1517,16 @@ async function renderName(v) {
       h('button', { type: 'button', class: 'ghost small', style: 'margin-top:8px', onclick: async () => { toast(await copyText(aiPrep.prompt) ? 'Instructions copied' : 'Could not copy', 2000); } }, 'Copy the instructions only'),
       h('button', { type: 'button', class: 'ghost small', style: 'margin-top:8px', onclick: () => { aiPrep = null; route(); } }, 'Cancel'));
   } else {
+    const left = todo.filter(x => !sugg[x.model_id]);
+    if (nameAutoNext && left.length) { // straight after "Save all": the next photos are got ready without a tap
+      nameAutoNext = false;
+      aiPrep = await prepareAiBatch(left, ref);
+      if (aiPrep.ids.length) { route(); return; }
+      aiPrep = null;
+    }
+    nameAutoNext = false;
     aiCard.append(h('p', { class: 'muted' }, nSugg ? `${plural(nSugg, 'box has', 'boxes have')} an AI suggestion waiting below.` : 'Send box photos to your Gemini or Claude app and paste the answer back. You check every name before it is saved.'),
-      h('button', { type: 'button', class: 'quiet wide', onclick: async (e) => {
+      h('button', { type: 'button', class: nSugg ? 'quiet wide' : 'wide', onclick: async (e) => {
         e.target.disabled = true; e.target.textContent = 'Preparing photos…';
         aiPrep = await prepareAiBatch(todo.filter(x => !sugg[x.model_id]), ref);
         if (!aiPrep.ids.length) { aiPrep = null; toast('No photos found to send', 3000, 'warn'); }
@@ -1438,6 +1537,14 @@ async function renderName(v) {
   v.append(aiCard);
   if (!todo.length) { if (scoreCard) v.append(scoreCard); return; }
 
+  // Check all suggestions on one page (faster rounds, 25 Nov): one look per car, one Save for the batch.
+  const withSugg = todo.filter(x => sugg[x.model_id]);
+  if (withSugg.length >= 2 && nameView === 'list') {
+    v.append(await nameList(withSugg, sugg, ref, models, inv, ids));
+    if (scoreCard) v.append(scoreCard);
+    return;
+  }
+  if (withSugg.length >= 2) v.append(h('button', { type: 'button', class: 'ghost small', style: 'margin:0 0 8px', onclick: () => { nameView = 'list'; route(); } }, `Check all ${withSugg.length} suggestions on one page`));
   let m = todo.find(x => !nameSkipped.has(x.model_id));
   if (!m) { nameSkipped.clear(); m = todo[0]; }
   const brand = ref.brands.find(b => b.brand_id === m.brand_id);
@@ -1474,30 +1581,7 @@ async function renderName(v) {
   const save = async () => {
     const name = nameIn.value.trim(), code = codeIn.value.trim();
     if (!name) { toast('Type a name, or tap Skip', 2500, 'warn'); return; }
-    const ns = assignNamespace(brand, null);
-    const patch = { display_name: name, product_code: code, product_code_cmp: codeCmp(code), code_namespace_type: ns.type, code_namespace_id: ns.id, namespace_status: ns.status };
-    patch.duplicate_check_status = duplicateCheckStatus(patch);
-    if (code !== (m.product_code || '')) await store.logChange('models', m.model_id, 'product_code', m.product_code, code, 'named in app');
-    if (code) {
-      const r = checkDuplicate({ ...m, ...patch }, models, ids, []);
-      if (r.status === 'duplicate') toast(`Same code as "${r.exact[0].display_name || r.exact[0].product_code}". Check both in the Garage.`, 5000, 'warn');
-    }
-    const fam = familyFrom(sg?.colour);
-    if (fam && !m.colour_family) { patch.colour_family = fam; patch.colour_name = sg.colour; }
-    if (sg?.carNote && !m.car_note && m.car_note_source !== 'hidden') { patch.car_note = sg.carNote; patch.car_note_source = 'gemini'; }
-    // Imported with "brands later": take the brand Gemini read, only when exactly one of B's brands is in it
-    if (!m.brand_id && sg?.brand) {
-      const hits = ref.brands.filter(b => normName(b.name).length >= 2 && normName(sg.brand).includes(normName(b.name)));
-      if (hits.length === 1) { const nb = hits[0]; const ns2 = assignNamespace(nb, null); Object.assign(patch, { brand_id: nb.brand_id, printed_brand_text: m.printed_brand_text || nb.name, code_namespace_type: ns2.type, code_namespace_id: ns2.id, namespace_status: ns2.status }); patch.duplicate_check_status = duplicateCheckStatus({ ...m, ...patch }); }
-    }
-    if (sg) {
-      // Record what B confirmed against what the AI suggested (AI_LOG, security doc §2.4).
-      patch.identification_status = 'confirmed';
-      const log = await store.get('ai_log', sg.logId);
-      if (log) { let c = {}; try { c = JSON.parse(log.confirmed_values || '{}'); } catch { c = {}; } c[m.model_id] = { name, code, edited: name !== sg.name || code !== sg.code }; await store.update('ai_log', sg.logId, { confirmed_values: JSON.stringify(c) }); }
-      const rest = { ...(await meta.get('aiSuggest', {})) }; delete rest[m.model_id]; await meta.set('aiSuggest', rest);
-    }
-    await store.update('models', m.model_id, patch);
+    await applyName(m, name, code, sg, ref, models, ids);
     toast('Named ✓'); route(); autoSyncSoon();
   };
   nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); codeIn.focus(); } });
