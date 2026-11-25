@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.17.5
+## Status: Stage 1 (quick-capture slice), version s1-0.18.0
+
+**s1-0.18.0 (25 Nov 2026): How Gemini did + ＋1 copies.** (1) Name tab: "How Gemini did" card: every Gemini reply in AI_LOG is read again with today's reader and compared with what B saved (right as suggested / small fixes / rewritten; codes right), so old reader bugs don't count against Gemini. (2) Prompt `names-v6`: Hot Wheels hint (the car's own 5-character code, also on the India import sticker as "Item No."; two cars of one set never share a code). (3) ＋1 copies: car page "N copies · ＋ Add a copy" (a real copy record in the same box, state copied, price/date unknown, logged); Photo run "Got another of car N? ＋1" after a car saves (no new photos, repeatable); "Remove this copy" (archived) when there are several; Sold/Gifted stays the way to record disposals.
 
 **s1-0.17.5 (24 Nov 2026): button look rule (B).** Greyed out = can't work right now (syncing, offline); quiet outline = works but not needed (Sync when all synced still pulls changes from another device; Save with nothing changed); bold = something for you to do ("Sync now · 3 boxes", Save after a change, Save & next once a name is typed). Settings has one Sync button (the second one in the Google account card is gone); signed in, the Client ID folds under "Change Client ID"; signed out, the page has one bold button, Sign in & set up. "0 photos not uploaded" is no longer shown.
 

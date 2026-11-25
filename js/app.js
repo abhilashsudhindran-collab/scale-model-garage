@@ -16,7 +16,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.17.5';
+export const APP_VERSION = 's1-0.18.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -1108,6 +1108,10 @@ async function renderRun(v) {
   } else {
     v.append(runSaving ? h('button', { class: 'wide', disabled: true, 'aria-busy': 'true' }, 'Saving…') : h('button', { class: 'wide', onclick: () => afterRunPhoto() }, 'Save this car'));
   }
+  if (runLast) v.append(h('button', { class: 'wide quiet plusone', style: 'margin-top:10px', onclick: async () => {
+    const { n, box } = await addCopy(runLast.id); runLast.copies = n; // same box as the car just saved
+    toast(`Another ${runLast.label} added · now ${n} copies${box ? ` in ${box}` : ''} ✓`, 3000); route();
+  } }, runLast.copies ? `＋1 more of ${runLast.label} (now ${runLast.copies})` : `Got another of ${runLast.label}? ＋1`));
   if (runLast) v.append(h('button', { class: 'wide ghost', style: 'margin-top:10px', onclick: async () => {
     if (!confirm(`Undo the last box (${runLast.label})? It is archived, not deleted, and can be restored from Garage → Archived.`)) return;
     await store.archive('models', runLast.id); toast('Last car undone (archived)'); runLast = null; route(); autoSyncSoon();
@@ -1125,6 +1129,17 @@ async function renderRun(v) {
     if (r.possible.length) { cap.runDecision = r.possible; route(); return; }
     await saveRunBox();
   }
+}
+// ＋1 copies (B, 24 Nov): each tap adds a real copy record (own box, state, price, date), never just a number.
+// A new copy starts in the given box (or the last copy's box), state copied, price and date unknown; logged.
+async function addCopy(modelId, box) {
+  const owned = (await store.list('inventory')).filter(i => i.model_id === modelId && i.ownership_status === 'Owned' && !i.deleted_at);
+  const like = owned[owned.length - 1] || {};
+  const c = await store.create('inventory', { model_id: modelId, ownership_status: 'Owned', storage_location: box ?? like.storage_location ?? '',
+    packaging_state: like.packaging_state || '', purchase_date_precision: 'unknown' });
+  await store.logChange('inventory', c.inventory_id, 'created', '', 'copy added', '＋1 copy');
+  autoSyncSoon();
+  return { n: owned.length + 1, box: c.storage_location || '' };
 }
 let runSaving = false; // a car is being saved: no second "Save" tap can start another save of the same car
 async function saveRunBox() {
@@ -1171,6 +1186,49 @@ async function rereadSuggestions(ref) {
   await meta.set('aiSuggest', sugg);
   return n;
 }
+// "How Gemini did" (B, 25 Nov): every Gemini reply kept in AI_LOG is read again with today's reader and compared
+// with what B saved, so old reader bugs don't count against Gemini. Cars named without AI are not counted.
+const normTxt = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+async function geminiScore(ref) {
+  const [logs, models, photos] = await Promise.all([store.list('ai_log'), store.list('models'), store.list('photos')]);
+  const modelById = new Map(models.map(m => [m.model_id, m]));
+  const modelOfPhoto = new Map(photos.map(p => [p.photo_id, p.model_id]));
+  const names = [...ref.brands.map(x => x.name), ...ref.lines.map(x => x.name), ...KNOWN_BRANDS];
+  const per = new Map(); // model_id -> outcome (latest reply wins)
+  for (const log of logs.sort((a, b) => String(a.processed_at || '').localeCompare(String(b.processed_at || '')))) {
+    let confirmed = {}; try { confirmed = JSON.parse(log.confirmed_values || '{}'); } catch {}
+    if (!Object.keys(confirmed).length || !log.ai_response_raw) continue;
+    const order = String(log.input_photo_ids || '').split(',').filter((_, i) => i % 2 === 0).map(id => modelOfPhoto.get(id));
+    const parsed = parseAnswer(log.ai_response_raw, order.length || 10, names).items;
+    for (const mid of Object.keys(confirmed)) {
+      const m = modelById.get(mid); if (!m || !String(m.display_name || '').trim()) continue;
+      const it = parsed.find(x => order[x.n - 1] === mid) || {};
+      const sName = normTxt(it.name), mName = normTxt(m.display_name);
+      const shared = sName && mName ? mName.split(' ').filter(w => sName.split(' ').includes(w)).length / mName.split(' ').length : 0;
+      const savedCode = String(m.product_code || '').trim(), sCode = String(it.code || '').trim();
+      const codeOk = savedCode ? normTxt(sCode) === normTxt(savedCode) : !sCode;
+      const outcome = sName === mName && codeOk ? 'right' : shared >= 0.5 ? 'fix' : 'wrong';
+      per.set(mid, { outcome, hasCode: !!savedCode, codeRight: !!savedCode && normTxt(sCode) === normTxt(savedCode) });
+    }
+  }
+  const all = [...per.values()];
+  return { n: all.length, right: all.filter(x => x.outcome === 'right').length, fix: all.filter(x => x.outcome === 'fix').length,
+    wrong: all.filter(x => x.outcome === 'wrong').length, codes: all.filter(x => x.hasCode).length, codesRight: all.filter(x => x.codeRight).length };
+}
+async function geminiScoreCard(ref) {
+  let sc; try { sc = await geminiScore(ref); } catch (e) { console.warn('score', e); return null; }
+  if (!sc.n) return null;
+  const pct = (k) => Math.round(100 * k / sc.n);
+  return h('details', { class: 'card more gscore' }, h('summary', {}, `How Gemini did · ${sc.right} of ${sc.n} right as suggested`),
+    h('div', { class: 'scorebar', role: 'img', 'aria-label': `${sc.right} right, ${sc.fix} small fixes, ${sc.wrong} rewritten` },
+      h('span', { class: 'ok', style: `width:${pct(sc.right)}%` }), h('span', { class: 'fix', style: `width:${pct(sc.fix)}%` }), h('span', { class: 'bad', style: `width:${pct(sc.wrong)}%` })),
+    h('div', { class: 'scorelegend' },
+      h('div', {}, h('b', {}, `✅ ${sc.right}`), ' right as suggested'),
+      h('div', {}, h('b', {}, `✏️ ${sc.fix}`), ' small fixes'),
+      h('div', {}, h('b', {}, `❌ ${sc.wrong}`), ' rewritten')),
+    h('p', {}, h('b', {}, `Codes right: ${sc.codesRight} of ${sc.codes}`), h('span', { class: 'muted' }, ' (cars where you saved a code)')),
+    h('p', { class: 'muted small' }, `Counts the ${plural(sc.n, 'car', 'cars')} you named from a Gemini answer, comparing Gemini's reply (read with today's reader) with what you saved.`));
+}
 const aiState = async () => ({ batch: await meta.get('aiBatch', null), sugg: await meta.get('aiSuggest', {}) });
 async function photoFileFor(p, name) {
   let b = await blobs.get(`${p.photo_id}:display`);
@@ -1203,7 +1261,8 @@ async function renderName(v) {
   const [models, inv, ids] = await Promise.all([store.list('models'), store.list('inventory'), store.list('product_identifiers')]);
   const todo = models.filter(m => !String(m.display_name || '').trim()).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   v.append(h('div', { class: 'row' }, h('h2', {}, 'Name them'), h('div', { class: 'muted', style: 'text-align:right' }, todo.length ? `${plural(todo.length, 'box needs', 'boxes need')} a name` : '')));
-  if (!todo.length) { nameSkipped.clear(); v.append(h('div', { class: 'banner ok' }, 'Every box has a name ✓'), h('p', {}, h('a', { href: '#/' }, '← Garage'))); return; }
+  const scoreCard = await geminiScoreCard(ref);
+  if (!todo.length) { nameSkipped.clear(); v.append(h('div', { class: 'banner ok' }, 'Every box has a name ✓'), scoreCard || '', h('p', {}, h('a', { href: '#/' }, '← Garage'))); return; }
 
   // --- AI panel: prepare → share → paste answer ---
   const { batch, sugg } = await aiState();
@@ -1317,6 +1376,7 @@ async function renderName(v) {
     h('div', { class: 'need' }, h('a', { href: `#/item/${encodeURIComponent(m.model_id)}` }, 'Open full page')),
     h('button', { class: `save ${nameIn.value.trim() ? '' : 'quiet'}`, id: 'nameSave', onclick: save }, 'Save & next')));
   nameIn.addEventListener('input', () => $('#nameSave')?.classList.toggle('quiet', !nameIn.value.trim()));
+  if (scoreCard) v.append(scoreCard);
   setTimeout(() => nameIn.focus(), 50);
 }
 
@@ -1555,6 +1615,12 @@ async function renderItem(v, modelId) {
     } }, m.completeness_status === 'complete' ? 'Mark as quick' : 'Mark complete')));
   v.append(form);
   const copies = [];
+  // Copies header with ＋ Add a copy (B, 24 Nov: "I buy another one later")
+  if (!m.deleted_at) v.append(h('div', { class: 'row copyhead' },
+    h('h3', {}, owned.length === 1 ? '1 copy' : `${owned.length} copies`),
+    h('button', { type: 'button', class: 'quiet small', onclick: async () => {
+      const { n, box } = await addCopy(modelId); toast(`Copy ${n} added${box ? ` to ${box}` : ''} ✓ · set its box, state and price below`, 3500); route();
+    } }, '＋ Add a copy')));
 
   // Copies (physical)
   for (const [idx, c] of inv.entries()) {
@@ -1585,9 +1651,14 @@ async function renderItem(v, modelId) {
       return true;
     };
     copies.push(cc);
-    card.append(h('button', { style: 'margin-top:12px', onclick: async () => {
-      if (await cc.save(false)) { toast('Copy saved ✓'); route(); autoSyncSoon(); }
-    } }, 'Save copy'));
+    card.append(h('div', { class: 'row', style: 'margin-top:12px' },
+      h('button', { onclick: async () => { if (await cc.save(false)) { toast('Copy saved ✓'); route(); autoSyncSoon(); } } }, 'Save copy'),
+      inv.length > 1 ? h('button', { class: 'ghost small', onclick: async () => {
+        if (!confirm('Remove this copy (added by mistake)?\n\nIt is archived, not deleted. If you sold or gave it away, set Status to Sold or Gifted instead, so your history stays right.')) return;
+        await store.archive('inventory', c.inventory_id);
+        await store.logChange('inventory', c.inventory_id, 'deleted_at', '', 'archived', 'copy removed');
+        toast('Copy removed (archived)'); route(); autoSyncSoon();
+      } }, 'Remove this copy') : null));
     v.append(card);
   }
   const dirtyHere = () => productDirty || copies.some(x => x.dirty);

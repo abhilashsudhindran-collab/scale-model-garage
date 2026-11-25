@@ -3,7 +3,7 @@
 // then pastes the answer back. The answer is UNTRUSTED TEXT: parsed as data only, validated, and used
 // only to pre-fill fields as suggestions that B confirms or corrects. Nothing is saved automatically.
 
-export const PROMPT_VERSION = 'names-v5';
+export const PROMPT_VERSION = 'names-v6';
 // 5 boxes = 10 photos per share. B's phone (24 Nov 21:39) refused to share 20 photos at once (2 worked);
 // Chrome on Android appears to cap a share at about 10 files (not confirmed in its docs), so batches stay at 10 photos.
 export const MAX_BATCH = 5;
@@ -21,6 +21,7 @@ export function buildPrompt(boxes) {
     '',
     'Car name = the real car (make, model, version, livery), never the brand.',
     'Product code = this car\'s own catalogue number exactly as printed (e.g. MGT00123-L, KHMG197, PR64-240, JKY27), usually on the box back or side. Not the barcode digits, and not an assortment or case code shared by a whole set (e.g. "Asst. HRT81" or the code at the top of a Hot Wheels card). If you cannot read it clearly, write -.',
+    'Hot Wheels: the car\'s own code (5 characters, e.g. JKY27) is often on the back, and on an India import sticker as "Item No.". Two cars from one set never share a code.',
     'Colour = the main colour of the car itself (not the box).',
     'Use - for anything you cannot read. Do not guess. No other text before or after the table.',
   ].join('\n');
