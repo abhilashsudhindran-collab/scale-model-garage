@@ -447,3 +447,21 @@ button.syncbtn:disabled { opacity: .45; cursor: default; }
 .checkrow:last-child { border-bottom: 0; }
 .checkrow b { font-size: 1.1rem; }
 .checkrow .chev { color: var(--muted); font-size: 1.3rem; }
+
+/* Brands screen (s1-0.24.0) */
+.linkcard { display: flex; justify-content: space-between; align-items: center; text-decoration: none; color: var(--text); }
+.linkcard .chev, .brandhead .chev { color: var(--muted); font-size: 1.3rem; }
+.brandlist { padding: 4px 14px; }
+.brandrow { border-bottom: 1px solid var(--line); }
+.brandrow:last-child { border-bottom: 0; }
+.brandhead { display: grid; grid-template-columns: 1fr auto auto 18px; gap: 8px; align-items: center; width: 100%; background: none; border: 0; border-radius: 0; padding: 12px 2px; min-height: 48px; font-weight: 400; text-align: left; color: var(--text); }
+.brandhead .bn { font-weight: 700; }
+.tag.warn { font-size: .75rem; background: #fdf0d5; color: #7a5200; border-radius: 999px; padding: 2px 8px; }
+.brandacts { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 2px 14px; }
+.brandacts select { flex: 1; }
+
+/* Just bought + Purchases (s1-0.25.0) */
+.boughtbtn { margin: 10px 0 4px; }
+.card.bought { border: 2px solid var(--accent); }
+.purchases .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.purchases .pgrid b { display: block; font-size: 1.5rem; margin: 2px 0; }

@@ -5,7 +5,11 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.23.0
+## Status: Stage 1 (quick-capture slice), version s1-0.25.0
+
+**s1-0.25.0 (25 Nov 2026): Just bought + Purchases.** Quick capture and Photo run have "🛍 Just bought? Add price and shop": price per car (empty = unknown, never ₹0), shop or seller (kept for the next cars, recent shops as quick picks) and date (today by default). The copy is saved as a purchase (acquisition type, price, date with day precision, source). It switches itself off on another day, so older cars are never recorded as bought today. Dashboard "Purchases": this month (total, cars, how many with a price) and all known prices with coverage ("price known for X of Y cars", D12.1).
+
+**s1-0.24.0 (25 Nov 2026): Brands screen.** Settings → Brands (or Dashboard → By brand → Manage brands): brands by number of cars; "Same brand?" flags look-alike names in use; per brand: See cars, Rename (refused if the name already exists: merge instead), Mark as checked (clears "needs review" on its cars), Merge into another brand (cars, storage-box brand settings and duplicate-check status move; the brand text printed on each car is not changed, D10.1 rule 1), Remove (only with no cars). Old and merged names are kept as aliases (ALIASES tab now synced) and are recognised when typed in any brand list. Every change logged.
 
 **s1-0.23.0 (25 Nov 2026): To check.** Dashboard card listing every gap with its count: no brand, no scale, no product code, not in a storage box, no colour, possible duplicates (two or more entries sharing a code, a barcode or a name, years ignored). Each row opens the Garage showing just those cars, with a "… ✕" chip to go back. Cheap checks only (Dashboard 0.46 s at ~1,500 cars, desktop).
 
