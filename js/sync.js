@@ -18,6 +18,8 @@ export const isSyncing = () => !!running;
 const str = (v) => (v === null || v === undefined ? '' : String(v));
 const rowToObj = (headers, row) => { const o = {}; headers.forEach((h, i) => { o[h] = str(row[i]); }); return o; };
 
+export const PHOTO_POOL = 3;
+
 export function syncNow(opts = {}) {
   if (running) return running;
   running = doSync(opts).finally(() => { running = null; notifyChange(); });
@@ -37,17 +39,23 @@ async function doSync({ interactive = false, progress = () => {} } = {}) {
 
   // 1. Photos: upload files first (rows need the Drive file IDs).
   const photoRecs = (await records.byEntity('photos')).filter(r => r.dirty && !r.data.deleted_at);
-  let i = 0;
-  for (const rec of photoRecs) {
-    i++;
-    progress(`Uploading photo ${i} of ${photoRecs.length}…`);
-    try { await uploadPhoto(rec, config, summary); }
-    catch (e) {
-      rec.lastError = e.message; await records.put(rec);
-      summary.errors.push(`Photo ${rec.id}: ${e.message}`);
-      if (!e.retryable && e.status === 401) throw e;
+  // Up to PHOTO_POOL photos upload at the same time (s1-0.34.0; was one at a time). Each photo keeps its own
+  // safety: "attempted" mark before upload, look-before-retry, checksum check. A sign-in failure stops the rest.
+  const queue = photoRecs.slice(); let started = 0, fatal = null;
+  const worker = async () => {
+    while (queue.length && !fatal) {
+      const rec = queue.shift();
+      progress(`Uploading photo ${++started} of ${photoRecs.length}…`);
+      try { await uploadPhoto(rec, config, summary); }
+      catch (e) {
+        rec.lastError = e.message; await records.put(rec);
+        summary.errors.push(`Photo ${rec.id}: ${e.message}`);
+        if (!e.retryable && e.status === 401) fatal = e;
+      }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(PHOTO_POOL, photoRecs.length) }, worker));
+  if (fatal) throw fatal;
 
   // 2. Read every synced tab in ONE request.
   progress('Reading your sheet…');

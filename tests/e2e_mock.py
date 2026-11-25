@@ -106,7 +106,7 @@ class FakeGoogle:
                 self.blobs[fid] = data
                 self.files[fid] = dict(name=meta['name'], mimeType='image/jpeg', parents=meta.get('parents', []), appProperties=meta.get('appProperties', {}), md5=md5, size=len(data), trashed=False)
                 if self.fail_next_upload_after_store:
-                    self.fail_next_upload_after_store = False
+                    self.fail_next_upload_after_store -= 1  # True = once; an int = that many lost replies
                     return route.abort('connectionreset')  # simulate a lost reply after the upload happened (R0 F1)
                 return ok({'id': fid, 'md5Checksum': md5, 'size': str(len(data))})
             if path == '/drive/v3/files' and method == 'GET':
