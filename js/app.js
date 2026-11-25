@@ -17,7 +17,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.22.0';
+export const APP_VERSION = 's1-0.23.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -434,7 +434,7 @@ const tally = (items, keyOf) => { const m = new Map(); for (const it of items) {
 const topN = (entries, n) => entries.length <= n + 1 ? entries : [...entries.slice(0, n), ['Other', entries.slice(n).reduce((t, e) => t + e[1], 0), '__other']];
 
 async function renderDash(v) {
-  const [models, inventory, photos, ref] = await Promise.all([store.listRecords('models'), store.list('inventory'), store.list('photos'), refData()]);
+  const [models, inventory, photos, ref, ids] = await Promise.all([store.listRecords('models'), store.list('inventory'), store.list('photos'), refData(), store.list('product_identifiers')]);
   const brandName = Object.fromEntries(ref.brands.map(b => [b.brand_id, b.name]));
   brandNameCache = brandName; scaleLabelCache = Object.fromEntries(ref.scales.map(x => [x.scale_id, x.label]));
   const scaleLabel = Object.fromEntries(ref.scales.map(s => [s.scale_id, s.label]));
@@ -470,6 +470,14 @@ async function renderDash(v) {
     tile('✎', 'need a name', active.length - named, 'warn', () => { location.hash = '#/name'; }),
     tile('⚑', 'need review', review, 'warn', () => goGarage('review')),
     tile('⇅', 'waiting to sync', pending, 'info', () => goGarage('pending'))));
+
+  // To check: every gap in one list, each opens the matching Garage list
+  const ctx = checkContext(active.map(r => r.data), inventory, ids);
+  const gaps = CHECKS.map(([k, label, test]) => [k, label, active.filter(r => test(r.data, ctx)).length]).filter(g => g[2] > 0);
+  v.append(h('div', { class: 'card tocheck' }, h('h3', {}, 'To check'),
+    gaps.length ? h('div', { class: 'checklist' }, gaps.map(([k, label, n]) => h('button', { type: 'button', class: 'checkrow', onclick: () => goGarage(k) },
+      h('span', {}, label), h('b', {}, n.toLocaleString('en-IN')), h('span', { class: 'chev', 'aria-hidden': 'true' }, '›'))))
+      : h('p', { class: 'muted' }, 'Nothing to check ✓')));
 
   // By brand, by scale
   v.append(h('div', { class: 'card' }, h('h3', {}, 'By brand'),
@@ -538,11 +546,13 @@ async function renderGarage(v) {
   photos.forEach(p => { if (p.model_id) (photosByModel.get(p.model_id) || photosByModel.set(p.model_id, []).get(p.model_id)).push(p); });
   const isPending = (r) => r.dirty || (photosByModel.get(r.data.model_id) || []).some(p => !p.original_file_id);
   // One scrolling row of filters (audit G5); a filter only appears when it has something in it.
+  const checkCtx = checkContext(active.map(r => r.data), inventory, ids);
   const n = { noname: active.filter(r => !String(r.data.display_name || '').trim()).length, review: active.filter(r => r.data.namespace_status === 'needs_review').length, pending: active.filter(isPending).length, clash: active.filter(r => r.conflict).length, archived: archived.length };
   if (n[garageFilter] === 0) garageFilter = 'all'; // e.g. after restoring the last archived model, don't leave an empty list
-  const filters = [['all', 'All'], ['box', 'By box'], ['brand', 'By brand'], ['scale', 'By scale'], ['colour', 'By colour'], ['quick', 'Quick'], ['noname', `Needs a name (${n.noname})`, n.noname], ['review', `Needs review (${n.review})`, n.review], ['pending', `Waiting to sync (${n.pending})`, n.pending], ['clash', `Clashes (${n.clash})`, n.clash], ['archived', `Archived (${n.archived})`, n.archived]]
+  const filters = [['all', 'All'], ['box', 'By box'], ['brand', 'By brand'], ['scale', 'By scale'], ['colour', 'By colour'], ['quick', 'Quick'], ['noname', `Needs a name (${n.noname})`, n.noname], ['review', `Needs review (${n.review})`, n.review], ['pending', `Waiting to sync (${n.pending})`, n.pending], ['clash', `Clashes (${n.clash})`, n.clash], ['archived', `Archived (${n.archived})`, n.archived],
+    ...CHECKS.filter(c => c[0] === garageFilter).map(c => [c[0], `${c[1]} ✕`, 1])]
     .filter(([k, , c]) => c === undefined || c > 0 || garageFilter === k);
-  const chips = h('div', { class: 'chips scroll', style: 'margin:10px 0' }, filters.map(([k, label]) => h('button', { class: `chip ${garageFilter === k ? 'on' : ''}`, onclick: () => { garageFilter = k; route(); } }, label)));
+  const chips = h('div', { class: 'chips scroll', style: 'margin:10px 0' }, filters.map(([k, label]) => h('button', { class: `chip ${garageFilter === k ? 'on' : ''}`, onclick: () => { garageFilter = garageFilter === k && CHECKS.some(c => c[0] === k) ? 'all' : k; route(); } }, label)));
   v.append(chips);
   const boxHead = h('div');
   const grid = h('div', { class: 'grid' });
@@ -570,6 +580,7 @@ async function renderGarage(v) {
       if (garageFilter === 'review' && m.namespace_status !== 'needs_review') return false;
       if (garageFilter === 'pending' && !isPending(r)) return false;
       if (garageFilter === 'clash' && !r.conflict) return false;
+      const chk = CHECKS.find(c => c[0] === garageFilter); if (chk && !chk[2](m, checkCtx)) return false;
       if (!q) return true;
       // "box 3" (typed, or a tap on the Dashboard) means exactly storage Box 3, not Box 30 or scale 1:43
       const boxQ = q.match(/^box\s*([a-z0-9-]+)$/i);
@@ -1813,6 +1824,28 @@ async function renderItem(v, modelId) {
   if (!m.deleted_at && mergeFor === modelId) v.append(await mergePanel(m, ref));
   v.append(m.deleted_at ? h('button', { class: 'wide', onclick: restore }, 'Restore to garage')
     : h('button', { class: 'ghost wide', onclick: archiveModel }, 'Remove from garage'));
+}
+
+// ---------- To check (roadmap DR-0.2 next build #2) ----------
+// One place for every gap, each opening the matching Garage list. Cheap checks only, so it stays fast at 1,000+ cars.
+const CHECKS = [
+  ['nobrand', 'No brand', (m) => !m.brand_id],
+  ['noscale', 'No scale', (m) => !m.scale_id],
+  ['nocode', 'No product code', (m) => !String(m.product_code || '').trim()],
+  ['nobox', 'Not in a storage box', (m, x) => x.ownedNoBox.has(m.model_id)],
+  ['nocolour', 'No colour', (m) => !m.colour_family],
+  ['dupes', 'Possible duplicates', (m, x) => x.dupes.has(m.model_id)],
+];
+function checkContext(models, inventory, ids) {
+  const owned = inventory.filter(i => i.ownership_status === 'Owned' && !i.deleted_at);
+  const ownedNoBox = new Set(owned.filter(i => !String(i.storage_location || '').trim()).map(i => i.model_id));
+  // possible duplicates: two or more entries sharing a code, a barcode or a name (years ignored)
+  const groups = new Map(); const add = (k, mid) => { if (!k) return; (groups.get(k) || groups.set(k, new Set()).get(k)).add(mid); };
+  for (const m of models) { add(m.product_code_cmp && `c:${m.product_code_cmp}`, m.model_id); add(nameKey(m.display_name) && `n:${nameKey(m.display_name)}`, m.model_id); }
+  for (const i of ids) if (i.identifier_type === 'barcode' && !i.deleted_at) add(`b:${i.value_cmp || i.value_raw}`, i.model_id);
+  const live = new Set(models.map(m => m.model_id)); const dupes = new Set();
+  for (const g of groups.values()) { const inG = [...g].filter(x => live.has(x)); if (inG.length > 1) inG.forEach(x => dupes.add(x)); }
+  return { ownedNoBox, dupes };
 }
 
 // ---------- Merge two entries (B, 24 Nov) ----------
