@@ -37,7 +37,8 @@ def main():
             [ms[1].id]: { name: 'Mini GT (TSM Model)', code: 'Chevrolet Corvette Z06 GT3.R #4', brand: '2025 IMSA Daytona 24 Hrs', notes: [], logId: 'ai_test1' } });
         })()""")
         page.goto(base + '#/name'); page.wait_for_timeout(1500)
-        name = page.locator('input[aria-label="Name"], .card input').first.input_value() if page.locator('input[aria-label="Name"]').count() else page.locator('input').first.input_value()
+        names = page.locator('input[aria-label="Name"]').evaluate_all('els => els.map(e => e.value)')
+        name = next((x for x in names if 'Skyline' in x), names[0] if names else '')
         print('   name field:', name)
         check(name == 'Nissan Skyline GT-R Kaido Star Racing V1', 'old wrong suggestion re-read: car name, not the brand')
         sugg = page.evaluate("(async () => (await (await import('./js/idb.js')).meta.get('aiSuggest')))()")
@@ -45,7 +46,7 @@ def main():
         check(all(v[3] == 5 for v in vals) and any(v[0].startswith('Chevrolet Corvette Z06') and v[1] == '' and v[2] == 'Mini GT (TSM Model)' for v in vals), f'second car re-read too ({vals[0][:3]})')
         page.reload(); page.wait_for_timeout(1200)
         check(not page.is_visible('text=read again with the improved reader'), 're-read happens once, not on every visit')
-        page.get_by_role('button', name='Discard suggestion').click(); page.wait_for_timeout(800)
+        page.get_by_role('button', name='Discard suggestion').first.click(); page.wait_for_timeout(800)
         left = page.evaluate("(async () => Object.keys((await (await import('./js/idb.js')).meta.get('aiSuggest'))).length)()")
         check(left == 1, 'Discard suggestion removes it for that car only')
         check(page.is_visible('text=Get names for the next 1 boxes'), 'the discarded car can go in the next batch')

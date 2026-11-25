@@ -499,3 +499,16 @@ button.syncbtn:disabled { opacity: .45; cursor: default; }
   .cdot, .bs-ph img { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   @page { size: A4; margin: 12mm; }
 }
+
+/* Name: check all suggestions on one page (s1-0.28.0) */
+.nl-row { background: var(--surface); border-radius: 14px; padding: 10px; margin-bottom: 10px; }
+.nl-row.off { opacity: .5; }
+.nl-top { display: flex; gap: 10px; align-items: flex-start; }
+.nl-ph { width: 84px; height: 84px; object-fit: cover; border-radius: 10px; flex: none; background: var(--surface2); cursor: zoom-in; }
+.nl-ph.big { position: fixed; inset: 8vh 4vw auto 4vw; width: 92vw; height: auto; max-height: 76vh; object-fit: contain; z-index: 50; background: #000; box-shadow: 0 0 0 100vmax rgba(0,0,0,.6); cursor: zoom-out; }
+.nl-f { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.nl-f input { width: 100%; }
+.nl-note { line-height: 1.3; }
+.nl-tick { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: .9rem; }
+.nl-left { display: flex; flex-direction: column; gap: 4px; align-items: center; flex: none; }
+.nl-flip { padding: 2px 8px; font-size: .78rem; }
