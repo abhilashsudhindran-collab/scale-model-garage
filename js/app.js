@@ -14,10 +14,11 @@ import { COLOUR_FAMILIES, familyFrom, familyLabel, familySwatch } from './colour
 import { newTimer, touch, seconds } from './timing.js';
 import { straighten, validQuad } from './crop.js';
 import { toCsv, zip, collectionRows } from './export.js';
+import { runAudit } from './audit.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.30.0';
+export const APP_VERSION = 's1-0.31.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -2523,6 +2524,48 @@ function renderConflict(v, rec) {
 // =====================================================================
 // Settings
 // =====================================================================
+// Sync check (Stage 1 check 2): read-only comparison of this phone with the Sheet and Drive.
+const TAB_WORDS = { MODELS: ['car', 'cars'], INVENTORY: ['copy', 'copies'], PHOTOS: ['photo record', 'photo records'], PRODUCT_IDENTIFIERS: ['barcode', 'barcodes'], STORAGE_BOXES: ['storage box', 'storage boxes'], BRANDS: ['brand', 'brands'], PRODUCT_LINES: ['product line', 'product lines'], SCALES: ['scale', 'scales'], CATEGORIES: ['category', 'categories'], AI_LOG: ['Gemini round', 'Gemini rounds'], CHANGE_LOG: ['change-log row', 'change-log rows'], ALIASES: ['brand alias', 'brand aliases'] };
+function auditSummary(a) {
+  const when = new Date(a.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const cars = a.tabs.MODELS?.sheetRows ?? 0;
+  const lines = [];
+  for (const [tab, t] of Object.entries(a.tabs)) {
+    const [one, many] = TAB_WORDS[tab] || [`${tab.toLowerCase()} row`, `${tab.toLowerCase()} rows`];
+    if (t.missing.length) lines.push(`❌ ${plural(t.missing.length, `${one} is`, `${many} are`)} on this phone but not in the sheet`);
+    if (t.dupes.length) lines.push(`❌ ${plural(t.dupes.length, `${one} appears`, `${many} appear`)} twice in the sheet`);
+  }
+  for (const [k, txt] of [['missing', 'missing from Drive'], ['trashed', 'in the Drive bin'], ['changed', 'different from what was uploaded']]) if (a.photos[k].length) lines.push(`❌ ${plural(a.photos[k].length, 'photo file is', 'photo files are')} ${txt}`);
+  const extra = Object.values(a.tabs).reduce((n, t) => n + t.extra.length, 0);
+  return h('div', { class: `banner ${a.ok ? 'ok' : 'warn'} auditres`, style: 'margin-top:8px' },
+    h('div', { class: 'hd' }, a.ok ? `✅ All good: ${plural(cars, 'car', 'cars')} in the sheet once${a.photos.checked ? `, ${a.photos.ok} photo files intact` : ''}` : `${plural(a.problems, 'problem', 'problems')} found`),
+    ...lines.map(t => h('div', {}, t)),
+    a.pending ? h('div', { class: 'muted' }, `${plural(a.pending, 'change is', 'changes are')} still waiting to sync, so they weren't checked. Sync, then check again.`) : null,
+    a.photos.notUploaded ? h('div', { class: 'muted' }, `${plural(a.photos.notUploaded, 'photo is', 'photos are')} not uploaded yet.`) : null,
+    extra ? h('div', { class: 'muted' }, `${plural(extra, 'row', 'rows')} in the sheet ${extra === 1 ? 'is' : 'are'} not on this phone (normal if you also use another device).`) : null,
+    h('div', { class: 'muted small' }, `Checked ${when} · reads only, changes nothing`));
+}
+async function auditCard() {
+  const last = await meta.get('lastAudit', null);
+  const card = h('div', { class: 'card', id: 'auditCard' }, h('h3', {}, 'Check sync'),
+    h('p', { class: 'muted' }, 'Compares this phone with your sheet and Drive: every car once, nothing missing, photo files intact.'));
+  const res = h('div', {}, last ? auditSummary(last) : '');
+  const msg = h('p', { class: 'muted', id: 'auditMsg' });
+  const nPhotos = (await store.list('photos')).filter(p => p.original_file_id).length;
+  const files = h('input', { type: 'checkbox', 'aria-label': 'Also check photo files', checked: nPhotos <= 400 ? true : undefined });
+  const btn = h('button', { type: 'button', class: 'quiet wide', disabled: hasToken() ? undefined : true, onclick: async () => {
+    btn.disabled = true; btn.textContent = 'Checking…';
+    try {
+      const a = await runAudit({ checkFiles: files.checked, progress: (t) => { msg.textContent = t; } });
+      await meta.set('lastAudit', a); msg.textContent = ''; res.replaceChildren(auditSummary(a));
+    } catch (e) { msg.textContent = ''; toast(`Check stopped: ${e.message}`, 5000, 'bad'); }
+    btn.disabled = false; btn.textContent = 'Check again';
+  } }, last ? 'Check again' : 'Check that everything reached Google');
+  card.append(h('label', { style: 'display:flex;gap:8px;align-items:center;margin:0 0 8px' }, files, `Also check ${plural(nPhotos, 'photo file', 'photo files')} on Drive${nPhotos > 400 ? ' (slower: one Drive request per photo)' : ''}`), btn, msg, res);
+  if (!hasToken()) card.append(h('p', { class: 'muted small' }, 'Sign in above to run the check.'));
+  return card;
+}
+
 async function renderSettings(v) {
   v.append(h('h2', {}, 'Settings'));
   const config = await getConfig();
@@ -2549,6 +2592,7 @@ async function renderSettings(v) {
     hasToken() ? h('button', { class: 'syncbtn', onclick: () => runSync(true) }, 'Sync now')
       : h('p', { class: 'muted' }, 'Sign in above to sync.')); // signed out: one bold button on the page, not two
   v.append(sync);
+  v.append(await auditCard());
 
   v.append(h('a', { href: '#/brands', class: 'card linkcard' }, h('span', {}, h('b', {}, 'Brands'), h('span', { class: 'muted' }, ' · rename, merge look-alikes')), h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
   const where = h('div', { class: 'card' }, h('h3', {}, 'Your data'),

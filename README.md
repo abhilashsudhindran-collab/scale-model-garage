@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.30.0
+## Status: Stage 1 (quick-capture slice), version s1-0.31.0
+
+**s1-0.31.0 (25 Nov 2026): Check sync (Stage 1 acceptance check 2).** Settings → Check sync compares this phone with the Sheet and Drive, **read-only**: every synced record appears in its tab exactly once (duplicates and missing rows named by type: cars, copies, photo records, barcodes…), and, optionally, each original photo file still exists on Drive, is not in the bin, and has the checksum recorded at upload. Changes still waiting to sync are listed, not judged; rows in the sheet that this phone doesn't have are shown as information (another device). The last result is kept. js/audit.js (pure parts unit-tested: tests/audit.test.mjs); end-to-end: tests/e2e_audit.py (fake Google with deliberate damage).
 
 **s1-0.30.0 (25 Nov 2026): packing progress (D30).** "📦 Mark as packed" on a box card and at the bottom of its contents sheet saves the date (STORAGE_BOXES.box_packed_at, synced; change logged); "Open again" clears it. Packed boxes show ✓ on their tile; the Dashboard shows boxes packed, % of cars packed, and how many are still to pack (including cars with no storage box). Adding cars to a packed box is allowed, with a reminder. Developer test: tests/e2e_packing.py (fake data, not a phone test).
 
