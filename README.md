@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.38.1
+## Status: Stage 1 (quick-capture slice), version s1-0.39.0
+
+**s1-0.39.0 (25 Nov 2026): one Gemini round does everything.** B: "make sure it happens in a single step… in a single run it should take care of all these aspects." The Name tab's one button ("Do the next N boxes with Gemini") now picks every car that's missing **anything**: boxes with no name first, then named cars missing a product code, colour or note. One share, one Paste & use, one check page, one Save: each car gets its name, code, colour and note together (named cars keep their name; Gemini's reading is shown; a saved code is never replaced; the note to be saved is previewed). A car Gemini has already been asked about isn't sent again (some boxes truly have no code). The separate "Notes & colours" round is gone. Test: tests/e2e_oneround.py.
 
 **s1-0.38.1 (25 Nov 2026): the "no barcode" tick box only shows when the barcode is empty.** B read "This box has no barcode printed on it" (an unticked option) under a real barcode as the app claiming there was none. It now hides while a barcode is filled in and reads "No barcode on this box? Tick so the app stops asking."
 

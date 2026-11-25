@@ -19,7 +19,7 @@ import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn }
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.38.1';
+export const APP_VERSION = 's1-0.39.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -1490,7 +1490,7 @@ async function prepareAiBatch(todo, ref, { extras = false } = {}) {
     if (!ff) continue; // a box without a usable photo can't be read
     if (combined) files.push(await combinePair(ff, rf || ff, `box${k}.jpg`)); else files.push(ff, rf || ff);
     photoIds.push(front.photo_id, (rf ? rear : front).photo_id); ids.push(m.model_id); // pairs kept in AI_LOG either way
-    boxes.push({ brand: ref.brands.find(b => b.brand_id === m.brand_id)?.name, scale: ref.scales.find(x => x.scale_id === m.scale_id)?.label, name: extras ? m.display_name : '' });
+    boxes.push({ brand: ref.brands.find(b => b.brand_id === m.brand_id)?.name, scale: ref.scales.find(x => x.scale_id === m.scale_id)?.label, name: m.display_name || '' });
   }
   return { batchId: newId('ai_log'), ids, files, photoIds, combined, mode: extras ? 'extras' : 'names', prompt: buildPrompt(boxes, { extras, combined }) };
 }
@@ -1571,7 +1571,7 @@ async function nameList(cars, sugg, ref, models, inv, ids) {
     if (back) { photoUrl(rear, 'display').then(u => { if (u) back.src = u; }); back.addEventListener('click', () => back.classList.toggle('big')); }
     const flip = rear ? h('button', { type: 'button', class: 'ghost small nl-flip', onclick: () => { showing = showing === 'front' ? 'rear' : 'front'; flip.textContent = showing === 'front' ? 'See back' : 'See front'; photoUrl(showing === 'front' ? front : rear, 'display').then(u => { if (u) img.src = u; }); } }, 'See back') : null;
     const dr = nameDrafts.get(m.model_id) || {};
-    const nameIn = h('input', { value: dr.name ?? (sg.name || ''), 'aria-label': 'Name', autocapitalize: 'words' });
+    const nameIn = h('input', { value: dr.name ?? (m.display_name || sg.name || ''), 'aria-label': 'Name', autocapitalize: 'words' });
     const codeIn = h('input', { value: dr.code ?? (m.product_code || sg.code || ''), 'aria-label': 'Product code', autocapitalize: 'characters', placeholder: 'Code (optional)' });
     const tick = h('input', { type: 'checkbox', checked: dr.tick === false ? undefined : true, 'aria-label': 'Save this one' });
     const keep = () => nameDrafts.set(m.model_id, { name: nameIn.value, code: codeIn.value, tick: tick.checked });
@@ -1580,7 +1580,8 @@ async function nameList(cars, sugg, ref, models, inv, ids) {
     const chk = h('div', { class: 'nl-checks' });
     const drawChecks = () => chk.replaceChildren(...checksFor(m, codeIn.value).map(([k, t]) => h('div', { class: `nl-chip ${k}` }, k === 'ok' ? '✓ ' : k === 'warn' ? '⚠ ' : '', t)));
     drawChecks(); codeIn.addEventListener('input', drawChecks);
-    const notes = [...(sg.notes || []), brandNote(sg.brand, brand?.name), codeNote].filter(Boolean);
+    const nameNote = m.display_name && sg.name && normTxt(sg.name) !== normTxt(m.display_name) ? `Gemini read the name as "${sg.name}"; keeping yours.` : null;
+    const notes = [...(sg.notes || []), brandNote(sg.brand, brand?.name), codeNote, nameNote].filter(Boolean);
     const fam = familyFrom(sg.colour);
     const card = h('div', { class: 'nl-row' },
       h('div', { class: 'nl-top' }, h('div', { class: 'nl-left' }, h('div', { class: 'nl-pair' }, img, back), h('span', { class: 'muted small' }, back ? 'Front · Back' : 'Front')),
@@ -1588,6 +1589,7 @@ async function nameList(cars, sugg, ref, models, inv, ids) {
           h('div', { class: 'muted small' }, [brand?.name || (sg.brand ? `${sg.brand}?` : 'Brand not set'), ref.scales.find(x => x.scale_id === m.scale_id)?.label, inv.find(i => i.model_id === m.model_id && i.storage_location)?.storage_location].filter(Boolean).join(' · ')),
           nameIn, codeIn, chk,
           fam ? h('div', { class: 'muted small' }, h('span', { class: 'cdot', style: `background:${familySwatch(fam)}` }), ` ${sg.colour}`) : null,
+          sg.carNote && !m.car_note ? h('div', { class: 'muted small nl-carnote' }, `Note: ${sg.carNote.length > 110 ? sg.carNote.slice(0, 108) + '…' : sg.carNote}`) : null,
           ...notes.map(t => h('div', { class: 'muted small nl-note' }, t)))),
       h('div', { class: 'row', style: 'align-items:center;margin-top:8px' }, h('label', { class: 'nl-tick', style: 'flex:1;margin:0' }, tick, ' Save this one'),
         h('button', { type: 'button', class: 'ghost small', onclick: async () => { const rest = { ...(await meta.get('aiSuggest', {})) }; delete rest[m.model_id]; await meta.set('aiSuggest', rest); nameDrafts.delete(m.model_id); toast('Suggestion discarded. This car can go in the next Gemini batch.', 3000); route(); } }, 'Discard suggestion')));
@@ -1602,7 +1604,7 @@ async function nameList(cars, sugg, ref, models, inv, ids) {
     if (go.some(r => !r.nameIn.value.trim())) { toast('A ticked car has no name: type one or untick it', 3500, 'warn'); return; }
     if (!go.length) { toast('Nothing ticked', 2000, 'warn'); return; }
     btn.disabled = true; btn.textContent = 'Saving…';
-    for (const r of go) { await applyName(r.m, r.nameIn.value.trim(), r.codeIn.value.trim(), r.sg, ref, models, ids); nameDrafts.delete(r.m.model_id); }
+    for (const r of go) { const kept = r.m.display_name && r.nameIn.value.trim() === r.m.display_name; await applyName(r.m, r.nameIn.value.trim(), r.codeIn.value.trim(), kept ? { ...r.sg, name: r.m.display_name } : r.sg, ref, models, ids); nameDrafts.delete(r.m.model_id); }
     nameAutoNext = true;
     toast(`Named ${plural(go.length, 'car', 'cars')} ✓${go.length < rows.length ? ` · ${rows.length - go.length} left for later` : ''}`, 3000);
     route(); autoSyncSoon();
@@ -1639,6 +1641,7 @@ async function applyName(m, name, code, sg, ref, models, ids) {
     const log = await store.get('ai_log', sg.logId);
     if (log) { let c = {}; try { c = JSON.parse(log.confirmed_values || '{}'); } catch { c = {}; } c[m.model_id] = { name, code, edited: name !== sg.name || code !== sg.code }; await store.update('ai_log', sg.logId, { confirmed_values: JSON.stringify(c) }); }
     const rest = { ...(await meta.get('aiSuggest', {})) }; delete rest[m.model_id]; await meta.set('aiSuggest', rest);
+    const asked = { ...(await meta.get('aiAsked', {})) }; asked[m.model_id] = store.nowIso(); await meta.set('aiAsked', asked);
   }
   await store.update('models', m.model_id, patch);
 }
@@ -1647,15 +1650,24 @@ async function renderName(v) {
   const ref = await refData();
   try { const n = await rereadSuggestions(ref); if (n) toast(`${plural(n, 'AI suggestion', 'AI suggestions')} read again with the improved reader`, 3500); } catch (e) { console.warn('re-read', e); }
   const [models, inv, ids] = await Promise.all([store.list('models'), store.list('inventory'), store.list('product_identifiers')]);
-  const todo = models.filter(m => !String(m.display_name || '').trim()).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
-  v.append(h('div', { class: 'row' }, h('h2', {}, 'Name them'), h('div', { class: 'muted', style: 'text-align:right' }, todo.length ? `${plural(todo.length, 'box needs', 'boxes need')} a name` : '')));
-  const scoreCard = await geminiScoreCard(ref);
+  // One Gemini round does everything (B, 25 Nov: "a single step… take care of all these aspects"): any car missing a
+  // name, code, colour or note goes in the same round; nameless boxes first. A named car already asked about isn't
+  // sent again (a box may truly have no code), unless B sends it from its car page.
   const { batch, sugg } = await aiState();
   const readings = await aiColours(ref);
-  if (!todo.length && !batch && !aiPrep) { nameSkipped.clear(); v.append(h('div', { class: 'banner ok' }, 'Every box has a name ✓'), extrasCard(models, ref, readings) || '', scoreCard || '', h('p', {}, h('a', { href: '#/' }, '← Garage'))); return; }
+  const asked = await meta.get('aiAsked', {});
+  const live = models.filter(m => !m.deleted_at);
+  const nameless = live.filter(m => !String(m.display_name || '').trim()).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  const incomplete = live.filter(m => String(m.display_name || '').trim() && !asked[m.model_id] && (
+    !String(m.product_code || '').trim() || (!m.colour_family && !readings.get(m.model_id)?.family) || (!m.car_note && m.car_note_source !== 'hidden' && !readings.get(m.model_id)?.note)))
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  const todo = [...nameless, ...incomplete];
+  v.append(h('div', { class: 'row' }, h('h2', {}, 'Name them'), h('div', { class: 'muted', style: 'text-align:right' }, [nameless.length ? `${plural(nameless.length, 'box needs', 'boxes need')} a name` : '', incomplete.length ? `${plural(incomplete.length, 'named car misses', 'named cars miss')} a code, colour or note` : ''].filter(Boolean).join(' · '))));
+  const scoreCard = await geminiScoreCard(ref);
+  if (!todo.length && !batch && !aiPrep && !live.some(m => sugg[m.model_id])) { nameSkipped.clear(); v.append(h('div', { class: 'banner ok' }, 'Every car has its name, code, colour and note (or Gemini has had a go) ✓'), scoreCard || '', h('p', {}, h('a', { href: '#/' }, '← Garage'))); return; }
 
   // --- AI panel: prepare → share → paste answer ---
-  const aiCard = h('div', { class: 'card aicard' }, h('h3', {}, '✨ Names from Gemini or Claude'));
+  const aiCard = h('div', { class: 'card aicard' }, h('h3', {}, '✨ Names, codes, colours and notes from Gemini'));
   const nSugg = todo.filter(x => sugg[x.model_id]).length;
   if (batch) {
     const ta = h('textarea', { placeholder: 'Paste the whole answer here', 'aria-label': 'AI answer' });
@@ -1714,29 +1726,30 @@ async function renderName(v) {
       aiPrep = null;
     }
     nameAutoNext = false;
-    aiCard.append(h('p', { class: 'muted' }, nSugg ? `${plural(nSugg, 'box has', 'boxes have')} an AI suggestion waiting below.` : 'Send box photos to your Gemini or Claude app and paste the answer back. You check every name before it is saved.'),
+    aiCard.append(h('p', { class: 'muted' }, nSugg ? `${plural(nSugg, 'box has', 'boxes have')} an AI suggestion waiting below.` : 'One round: share the photos, paste Gemini\'s answer, check, save. Each car gets its name, code, colour and note together; nothing is saved until you check it.'),
       combineChips(),
       h('button', { type: 'button', class: nSugg ? 'quiet wide' : 'wide', onclick: async (e) => {
         e.target.disabled = true; e.target.textContent = 'Preparing photos…';
         aiPrep = await prepareAiBatch(todo.filter(x => !sugg[x.model_id]), ref);
         if (!aiPrep.ids.length) { aiPrep = null; toast('No photos found to send', 3000, 'warn'); }
         route();
-      } }, `Get names for the next ${Math.min(batchSize(), todo.filter(x => !sugg[x.model_id]).length) || 0} boxes`));
+      } }, `Do the next ${plural(Math.min(batchSize(), todo.filter(x => !sugg[x.model_id]).length) || 0, 'box', 'boxes')} with Gemini`));
   }
   if (batch?.mode === 'extras' || aiPrep?.mode === 'extras') aiCard.querySelector('h3').textContent = '🎉 Notes & colours from Gemini';
   v.append(aiCard);
   if (!todo.length) { if (scoreCard) v.append(scoreCard); return; }
 
   // Check all suggestions on one page (faster rounds, 25 Nov): one look per car, one Save for the batch.
-  const withSugg = todo.filter(x => sugg[x.model_id]);
-  if (withSugg.length >= 2 && nameView === 'list') {
+  const withSugg = live.filter(x => sugg[x.model_id]).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  if (withSugg.length >= 1 && (nameView === 'list' || withSugg.some(x => String(x.display_name || '').trim()))) {
     v.append(await nameList(withSugg, sugg, ref, models, inv, ids));
     if (scoreCard) v.append(scoreCard);
     return;
   }
   if (withSugg.length >= 2) v.append(h('button', { type: 'button', class: 'ghost small', style: 'margin:0 0 8px', onclick: () => { nameView = 'list'; route(); } }, `Check all ${withSugg.length} suggestions on one page`));
-  let m = todo.find(x => !nameSkipped.has(x.model_id));
-  if (!m) { nameSkipped.clear(); m = todo[0]; }
+  if (!nameless.length) { if (scoreCard) v.append(scoreCard); return; }
+  let m = nameless.find(x => !nameSkipped.has(x.model_id));
+  if (!m) { nameSkipped.clear(); m = nameless[0]; }
   const brand = ref.brands.find(b => b.brand_id === m.brand_id);
   const scaleL = ref.scales.find(x => x.scale_id === m.scale_id)?.label;
   const box = inv.find(i => i.model_id === m.model_id && i.storage_location)?.storage_location;
@@ -1781,7 +1794,7 @@ async function renderName(v) {
     h('div', { class: 'need' }, h('a', { href: `#/item/${encodeURIComponent(m.model_id)}` }, 'Open full page')),
     h('button', { class: `save ${nameIn.value.trim() ? '' : 'quiet'}`, id: 'nameSave', onclick: save }, 'Save & next')));
   nameIn.addEventListener('input', () => $('#nameSave')?.classList.toggle('quiet', !nameIn.value.trim()));
-  if (!batch && !aiPrep) { const xc = extrasCard(models, ref, readings); if (xc) v.append(xc); }
+  // (Notes & colours now come in the same Gemini round as names and codes, s1-0.39.0)
   if (scoreCard) v.append(scoreCard);
   setTimeout(() => nameIn.focus(), 50);
 }

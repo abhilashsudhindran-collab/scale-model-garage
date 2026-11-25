@@ -62,8 +62,8 @@ def main():
         log = page.evaluate("(async () => (await (await import('./js/store.js')).list('change_log')).filter(r => r.field === 'colour_family').length)()")
         check(log == 3, 'every colour change is logged')
         # Name tab: saving takes the suggested colour
-        page.goto(base + '#/name'); page.wait_for_selector('#nameSave')
-        page.locator('#nameSave').click(); page.wait_for_timeout(900)
+        page.goto(base + '#/name'); page.wait_for_selector('#nameSaveAll')
+        page.locator('#nameSaveAll').click(); page.wait_for_timeout(900)
         check(fam(ids[1]) == 'pink', 'Name tab save takes Gemini\'s colour (Pink / Dark Blue → pink)')
         # Garage By colour + Use all
         page.goto(base + '#/'); page.wait_for_selector('.grid .tile'); page.locator('.chip', has_text='By colour').click(); page.wait_for_timeout(700)

@@ -49,7 +49,7 @@ def main():
         page.get_by_role('button', name='Discard suggestion').first.click(); page.wait_for_timeout(800)
         left = page.evaluate("(async () => Object.keys((await (await import('./js/idb.js')).meta.get('aiSuggest'))).length)()")
         check(left == 1, 'Discard suggestion removes it for that car only')
-        check(page.is_visible('text=Get names for the next 1 boxes'), 'the discarded car can go in the next batch')
+        check(page.is_visible('text=Do the next 1 box with Gemini'), 'the discarded car can go in the next batch')
         check(not errors, f'no page errors {errors[:2]}')
         b.close()
     httpd.shutdown()

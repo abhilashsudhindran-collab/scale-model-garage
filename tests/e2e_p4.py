@@ -71,9 +71,9 @@ def main():
         ev("(async () => { const s = await import('./js/store.js'); const ms = (await s.list('models')).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))); await s.update('models', ms[2].model_id, { product_code: 'TEST-003' }); })()")
 
         # Prepare and share
-        page.goto(base + '#/name'); page.wait_for_selector('text=Names from Gemini or Claude')
+        page.goto(base + '#/name'); page.wait_for_selector('text=Names, codes, colours and notes from Gemini')
         page.wait_for_timeout(300); page.screenshot(path=f'{SHOTS}/00-name.png')
-        page.get_by_role('button', name='Get names for the next 3 boxes').click(); page.wait_for_selector('text=6 photos ready')
+        page.get_by_role('button', name='Do the next 3 boxes with Gemini').click(); page.wait_for_selector('text=6 photos ready')
         page.wait_for_timeout(200); page.locator('.aicard').screenshot(path=f'{SHOTS}/00b-ready.png')
         page.get_by_role('button', name='Share to Gemini or Claude').click(); page.wait_for_selector('.pastehint')
         shared = ev('window.__shared')
@@ -103,7 +103,7 @@ def main():
         check(page.input_value('input[aria-label="Product code"]') == 'TEST-003', 'box 3: code saved earlier is shown, not replaced by the AI reading')
         check(page.is_visible('text=Keeping the code already saved'), 'box 3: different AI code shown as a note only')
         page.fill('input[aria-label=Name]', 'Honda Civic EF'); page.get_by_role('button', name='Save & next').click(); page.wait_for_timeout(600)
-        check(page.is_visible('text=Every box has a name'), 'all three named')
+        check(not page.is_visible('text=need a name'), 'all three named')
 
         ms = {x['display_name']: x for x in listm()}
         check(ms['Nissan Skyline GT-R R34']['product_code'] == 'MGT00341-L' and ms['Nissan Skyline GT-R R34']['identification_status'] == 'confirmed', 'confirmed AI name and code saved, marked confirmed')
