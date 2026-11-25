@@ -15,9 +15,9 @@ import { newTimer, touch, seconds } from './timing.js';
 import { straighten, validQuad } from './crop.js';
 import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
-import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
+import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.19.0';
+export const APP_VERSION = 's1-0.20.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -633,7 +633,7 @@ async function renderGarage(v) {
     // By colour: Gemini already named colours for some cars without one: one tap to use them all (B confirms).
     if (grouping === 'colour') {
       const ai = await aiColours(ref);
-      const todo = list.filter(r => !r.data.colour_family && ai.has(r.data.model_id));
+      const todo = list.filter(r => !r.data.colour_family && ai.get(r.data.model_id)?.family);
       if (todo.length) grid.append(h('div', { class: 'banner info colourall' },
         h('div', {}, `Gemini named the colour of ${plural(todo.length, 'car', 'cars')} with no colour yet.`),
         h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: async () => {
@@ -1192,7 +1192,7 @@ async function rereadSuggestions(ref) {
     const r = parseAnswer(log.ai_response_raw, order.length, names);
     for (const it of r.items) {
       const mid = order[it.n - 1];
-      if (mid && sugg[mid] && (sugg[mid].pv || 1) < READER_VERSION) { sugg[mid] = { name: it.name, code: it.code, brand: it.brand, colour: it.colour || '', notes: it.notes, logId, pv: READER_VERSION }; n++; }
+      if (mid && sugg[mid] && (sugg[mid].pv || 1) < READER_VERSION) { sugg[mid] = { name: it.name, code: it.code, brand: it.brand, colour: it.colour || '', carNote: it.carNote || '', notes: it.notes, logId, pv: READER_VERSION }; n++; }
     }
   }
   for (const [mid, sg] of Object.entries(sugg)) if ((sg.pv || 1) < READER_VERSION) sugg[mid] = { ...sg, pv: READER_VERSION }; // could not re-read: leave as is, once
@@ -1238,12 +1238,16 @@ async function aiColours(ref) {
     if (!log.ai_response_raw) continue;
     const order = String(log.input_photo_ids || '').split(',').filter((_, i) => i % 2 === 0).map(id => modelOfPhoto.get(id));
     for (const it of parseAnswer(log.ai_response_raw, order.length || 10, names).items) {
-      const mid = order[it.n - 1]; const fam = familyFrom(it.colour);
-      if (mid && fam) out.set(mid, { family: fam, name: it.colour });
+      const mid = order[it.n - 1]; if (!mid) continue;
+      const cur = out.get(mid) || {}; const fam = familyFrom(it.colour);
+      out.set(mid, { ...cur, ...(fam ? { family: fam, name: it.colour } : {}), ...(it.carNote ? { note: it.carNote } : {}) });
     }
   }
-  for (const [mid, sg] of Object.entries(sugg)) { const fam = familyFrom(sg.colour); if (fam) out.set(mid, { family: fam, name: sg.colour }); }
-  return out;
+  for (const [mid, sg] of Object.entries(sugg)) {
+    const cur = out.get(mid) || {}; const fam = familyFrom(sg.colour);
+    out.set(mid, { ...cur, ...(fam ? { family: fam, name: sg.colour } : {}), ...(sg.carNote ? { note: sg.carNote } : {}) });
+  }
+  return out; // model_id -> { family?, name?, note? } (what Gemini said; nothing saved)
 }
 async function setColour(modelId, family, name, reason) {
   const m = await store.get('models', modelId); if (!m) return;
@@ -1277,7 +1281,7 @@ async function photoFileFor(p, name) {
   if (!b) b = await blobs.get(`${p.photo_id}:thumb`);
   return b ? new File([b], name, { type: 'image/jpeg' }) : null;
 }
-async function prepareAiBatch(todo, ref) {
+async function prepareAiBatch(todo, ref, { extras = false } = {}) {
   const pick = todo.slice(0, MAX_BATCH);
   const photos = await store.list('photos');
   const files = [], boxes = [], ids = [], photoIds = [];
@@ -1290,12 +1294,26 @@ async function prepareAiBatch(todo, ref) {
     const rf = rear && await photoFileFor(rear, `box${k}-back.jpg`);
     if (!ff) continue; // a box without a usable photo can't be read
     files.push(ff, rf || ff); photoIds.push(front.photo_id, (rf ? rear : front).photo_id); ids.push(m.model_id);
-    boxes.push({ brand: ref.brands.find(b => b.brand_id === m.brand_id)?.name, scale: ref.scales.find(x => x.scale_id === m.scale_id)?.label });
+    boxes.push({ brand: ref.brands.find(b => b.brand_id === m.brand_id)?.name, scale: ref.scales.find(x => x.scale_id === m.scale_id)?.label, name: extras ? m.display_name : '' });
   }
-  return { batchId: newId('ai_log'), ids, files, photoIds, prompt: buildPrompt(boxes) };
+  return { batchId: newId('ai_log'), ids, files, photoIds, mode: extras ? 'extras' : 'names', prompt: buildPrompt(boxes, { extras }) };
 }
 async function copyText(t) { try { await navigator.clipboard.writeText(t); return true; } catch { return false; } }
 
+// Notes & colours for cars already named (B, 24 Nov): same share → paste flow, nothing saved until B keeps it.
+function extrasCard(models, ref, readings) {
+  const need = models.filter(m => String(m.display_name || '').trim() && (
+    (!m.car_note && m.car_note_source !== 'hidden' && !readings.get(m.model_id)?.note) || (!m.colour_family && !readings.get(m.model_id)?.family)));
+  if (!need.length) return null;
+  return h('div', { class: 'card extras' }, h('h3', {}, '🎉 Notes & colours'),
+    h('p', { class: 'muted' }, `${plural(need.length, 'named car has', 'named cars have')} no note or colour yet. Gemini adds a fun fact, history, pop-culture or casting note, and the car's colour.`),
+    h('button', { type: 'button', class: 'quiet wide', onclick: async (e) => {
+      e.target.disabled = true; e.target.textContent = 'Preparing photos…';
+      aiPrep = await prepareAiBatch(need, ref, { extras: true });
+      if (!aiPrep.ids.length) { aiPrep = null; toast('No photos found to send', 3000, 'warn'); }
+      route();
+    } }, `Get notes & colours for the next ${Math.min(MAX_BATCH, need.length)} cars`));
+}
 async function renderName(v) {
   const ref = await refData();
   try { const n = await rereadSuggestions(ref); if (n) toast(`${plural(n, 'AI suggestion', 'AI suggestions')} read again with the improved reader`, 3500); } catch (e) { console.warn('re-read', e); }
@@ -1303,10 +1321,11 @@ async function renderName(v) {
   const todo = models.filter(m => !String(m.display_name || '').trim()).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   v.append(h('div', { class: 'row' }, h('h2', {}, 'Name them'), h('div', { class: 'muted', style: 'text-align:right' }, todo.length ? `${plural(todo.length, 'box needs', 'boxes need')} a name` : '')));
   const scoreCard = await geminiScoreCard(ref);
-  if (!todo.length) { nameSkipped.clear(); v.append(h('div', { class: 'banner ok' }, 'Every box has a name ✓'), scoreCard || '', h('p', {}, h('a', { href: '#/' }, '← Garage'))); return; }
+  const { batch, sugg } = await aiState();
+  const readings = await aiColours(ref);
+  if (!todo.length && !batch && !aiPrep) { nameSkipped.clear(); v.append(h('div', { class: 'banner ok' }, 'Every box has a name ✓'), extrasCard(models, ref, readings) || '', scoreCard || '', h('p', {}, h('a', { href: '#/' }, '← Garage'))); return; }
 
   // --- AI panel: prepare → share → paste answer ---
-  const { batch, sugg } = await aiState();
   const aiCard = h('div', { class: 'card aicard' }, h('h3', {}, '✨ Names from Gemini or Claude'));
   const nSugg = todo.filter(x => sugg[x.model_id]).length;
   if (batch) {
@@ -1317,8 +1336,13 @@ async function renderName(v) {
         h('button', { type: 'button', onclick: async () => {
           const r = parseAnswer(ta.value, batch.ids.length, [...ref.brands.map(x => x.name), ...ref.lines.map(x => x.name), ...KNOWN_BRANDS]);
           if (!r.items.length) { toast('No answer lines found. It should look like: Box 1 | name | code | brand', 4500, 'warn'); return; }
+          if (batch.mode === 'extras') { // named cars: keep the reply; notes and colours are read from it on each car page
+            await store.update('ai_log', batch.logId, { ai_response_raw: ta.value.slice(0, 5000), suggested_values: JSON.stringify(r.items.map(it => ({ model_id: batch.ids[it.n - 1], colour: it.colour, note: it.carNote }))) });
+            await meta.set('aiBatch', null);
+            toast(`Notes and colours read for ${plural(r.items.length, 'car', 'cars')}: open a car to see its note; Garage → By colour → Use all`, 5000); route(); autoSyncSoon(); return;
+          }
           const next = { ...(await meta.get('aiSuggest', {})) };
-          for (const it of r.items) next[batch.ids[it.n - 1]] = { name: it.name, code: it.code, brand: it.brand, colour: it.colour || '', notes: it.notes, logId: batch.logId, pv: READER_VERSION };
+          for (const it of r.items) next[batch.ids[it.n - 1]] = { name: it.name, code: it.code, brand: it.brand, colour: it.colour || '', carNote: it.carNote || '', notes: it.notes, logId: batch.logId, pv: READER_VERSION };
           await meta.set('aiSuggest', next);
           await store.update('ai_log', batch.logId, { ai_response_raw: ta.value.slice(0, 5000), suggested_values: JSON.stringify(r.items.map(it => ({ model_id: batch.ids[it.n - 1], name: it.name, code: it.code, brand: it.brand }))), processed_at: store.nowIso() });
           await meta.set('aiBatch', null);
@@ -1340,7 +1364,7 @@ async function renderName(v) {
           return;
         }
         const log = await store.create('ai_log', { ai_log_id: aiPrep.batchId, capture_session_id: aiPrep.batchId, ai_tool: 'gemini_or_claude_app (copy-paste)', prompt_version: PROMPT_VERSION, input_photo_ids: aiPrep.photoIds.join(','), processed_at: store.nowIso() });
-        await meta.set('aiBatch', { logId: log.ai_log_id, ids: aiPrep.ids });
+        await meta.set('aiBatch', { logId: log.ai_log_id, ids: aiPrep.ids, mode: aiPrep.mode });
         aiPrep = null; toast(copied ? 'Shared ✓ If the instructions are missing, paste them (already copied).' : 'Shared', 4000); route();
       } }, canFiles ? 'Share to Gemini or Claude' : 'Copy instructions and get the photos'),
       h('button', { type: 'button', class: 'ghost small', style: 'margin-top:8px', onclick: async () => { toast(await copyText(aiPrep.prompt) ? 'Instructions copied' : 'Could not copy', 2000); } }, 'Copy the instructions only'),
@@ -1354,7 +1378,9 @@ async function renderName(v) {
         route();
       } }, `Get names for the next ${Math.min(MAX_BATCH, todo.filter(x => !sugg[x.model_id]).length) || 0} boxes`));
   }
+  if (batch?.mode === 'extras' || aiPrep?.mode === 'extras') aiCard.querySelector('h3').textContent = '🎉 Notes & colours from Gemini';
   v.append(aiCard);
+  if (!todo.length) { if (scoreCard) v.append(scoreCard); return; }
 
   let m = todo.find(x => !nameSkipped.has(x.model_id));
   if (!m) { nameSkipped.clear(); m = todo[0]; }
@@ -1402,6 +1428,7 @@ async function renderName(v) {
     }
     const fam = familyFrom(sg?.colour);
     if (fam && !m.colour_family) { patch.colour_family = fam; patch.colour_name = sg.colour; }
+    if (sg?.carNote && !m.car_note && m.car_note_source !== 'hidden') { patch.car_note = sg.carNote; patch.car_note_source = 'gemini'; }
     if (sg) {
       // Record what B confirmed against what the AI suggested (AI_LOG, security doc §2.4).
       patch.identification_status = 'confirmed';
@@ -1419,6 +1446,7 @@ async function renderName(v) {
     h('div', { class: 'need' }, h('a', { href: `#/item/${encodeURIComponent(m.model_id)}` }, 'Open full page')),
     h('button', { class: `save ${nameIn.value.trim() ? '' : 'quiet'}`, id: 'nameSave', onclick: save }, 'Save & next')));
   nameIn.addEventListener('input', () => $('#nameSave')?.classList.toggle('quiet', !nameIn.value.trim()));
+  if (!batch && !aiPrep) { const xc = extrasCard(models, ref, readings); if (xc) v.append(xc); }
   if (scoreCard) v.append(scoreCard);
   setTimeout(() => nameIn.focus(), 50);
 }
@@ -1504,6 +1532,29 @@ async function renderItem(v, modelId) {
     h('div', { class: 'pdp-kicker' }, [brandN, scaleN].filter(Boolean).join(' · ') || 'Brand and scale not set'),
     h('h2', {}, m.display_name || '(no name yet)'),
     m.product_code ? h('div', { class: 'pdp-code' }, m.product_code) : null));
+  // Car note (B, 24 Nov): fun fact / history / pop culture / casting, a sub-note under the name.
+  // Gemini's note is shown labelled "from Gemini, not checked" until B keeps, edits or hides it.
+  const aiAll = m.deleted_at ? {} : ((await aiColours(ref)).get(modelId) || {});
+  if (!m.deleted_at) {
+    const kept = m.car_note && m.car_note_source !== 'hidden' ? m.car_note : '';
+    const shown = kept || (m.car_note_source !== 'hidden' ? aiAll.note || '' : '');
+    const fromAi = !kept || m.car_note_source === 'gemini';
+    const saveNote = async (text, source, reason) => {
+      await store.update('models', modelId, { car_note: text, car_note_source: source });
+      await store.logChange('models', modelId, 'car_note', m.car_note || '', text, reason); autoSyncSoon(); route();
+    };
+    const editNote = () => { const t = prompt('Note about this car (fun fact, history, pop culture, casting):', shown); if (t !== null) saveNote(t.trim(), t.trim() ? 'you' : 'hidden', 'note edited in app'); };
+    if (shown) {
+      const np = noteParts(shown);
+      v.append(h('div', { class: `carnote ${np.kind}` },
+        h('div', { class: 'cn-tag' }, { fun: '🎉', history: '🏛', pop: '🎬', casting: '🧩' }[np.kind], ' ', np.label),
+        h('div', { class: 'cn-body' }, np.body),
+        h('div', { class: 'cn-foot' }, fromAi ? h('span', { class: 'muted small' }, 'from Gemini, not checked') : null,
+          !kept ? h('button', { type: 'button', class: 'ghost small', onclick: () => saveNote(shown, 'gemini', 'note from Gemini, kept') }, 'Keep') : null,
+          h('button', { type: 'button', class: 'ghost small', onclick: editNote }, 'Edit'),
+          h('button', { type: 'button', class: 'ghost small', onclick: () => saveNote('', 'hidden', 'note hidden') }, 'Hide'))));
+    } else v.append(h('button', { type: 'button', class: 'ghost small addnote', onclick: editNote }, '＋ Add a note'));
+  }
   // Edit and Remove at the top (B, 24 Nov: "no options to delete or modify this entry" - they were below the fold).
   const owned = inv.filter(i => i.ownership_status === 'Owned');
   const archiveModel = async () => { if (confirm('Remove this car from your garage?\n\nIt is archived, not deleted: you can bring it back any time from Garage → Archived.')) { await store.archive('models', modelId); toast('Removed. Bring it back from Garage → Archived.', 3500); location.hash = '#/'; autoSyncSoon(); } };
@@ -1601,7 +1652,7 @@ async function renderItem(v, modelId) {
     m.completeness_status === 'complete' ? 'Complete' : 'Quick entry'].filter(Boolean);
   // Colour (B, 24 Nov): swatch row; Gemini's colour offered when none is set yet.
   if (!m.deleted_at) {
-    const ai = (await aiColours(ref)).get(modelId);
+    const ai = aiAll.family ? aiAll : null;
     const cBlock = h('div', { class: 'colourblock' },
       h('div', { class: 'row', style: 'align-items:center;gap:8px' }, h('span', { class: 'f', style: 'margin:0' }, 'Colour'),
         m.colour_family ? h('span', { class: 'muted' }, [familyLabel(m.colour_family), m.colour_name && m.colour_name.toLowerCase() !== familyLabel(m.colour_family).toLowerCase() ? m.colour_name : ''].filter(Boolean).join(' · ')) : h('span', { class: 'muted' }, 'not set')),

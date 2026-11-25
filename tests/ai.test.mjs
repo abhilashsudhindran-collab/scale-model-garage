@@ -1,5 +1,5 @@
 // Unit tests for the AI copy-paste parser (run: node tests/ai.test.mjs). Code logic only, NOT a phone test.
-import { buildPrompt, parseAnswer, validCode, brandNote } from '../js/ai.js';
+import { noteParts, buildPrompt, parseAnswer, validCode, brandNote } from '../js/ai.js';
 
 let fails = 0, n = 0;
 const eq = (a, b, msg) => { n++; const ok = JSON.stringify(a) === JSON.stringify(b); if (!ok) { fails++; console.log('FAIL', msg, '\n got ', JSON.stringify(a), '\n want', JSON.stringify(b)); } };
@@ -170,6 +170,24 @@ Additional Packaging Notes
     [5, 'Ferrari 250 Testa Rossa (#6)', 'W1800902']], '"Item" is the box column; Product Code column used');
   eq(r.items[0].notes[0].includes('same code (HRT81)'), true, 'same code on two boxes = assortment code: not pre-filled, explained');
   eq(r.items[2].code, 'JKD87', '"(Asst. HRV11)" left out of the code');
+}
+
+// s1-0.20.0: Note column (fun fact / history / pop culture / casting)
+{
+  const r = parseAnswer(`| Box | Car name | Year | Product code | Brand | Colour | Note |
+|---|---|---|---|---|---|---|
+| Box 1 | Aston Martin DB10 (007 Spectre) | 2015 | - | Mini GT | Silver | Pop culture: Built only for the James Bond film Spectre; it was never sold to the public. |
+| Box 2 | McLaren F1 GTR 1995 Presentation | 1995 | MGT00988 | Mini GT | Orange | - |`, 5, ['Mini GT']);
+  eq(r.items[0].carNote.startsWith('Pop culture: Built only'), true, 'note read from the Note column');
+  eq(r.items[1].carNote, '', '"-" = no note');
+  eq(r.items[0].colour, 'Silver', 'colour still read');
+  eq(noteParts('Pop culture: Built for Spectre.').kind, 'pop', 'pop culture tag');
+  eq(noteParts('History: Won Le Mans in 1995.').label, 'History', 'history tag');
+  eq(noteParts('Casting: First Mini GT casting of this car.').kind, 'casting', 'casting tag');
+  eq(noteParts('Fun fact - It has a centre seat.').body, 'It has a centre seat.', 'fun fact with a dash');
+  eq(noteParts('Just a sentence.').label, 'Note', 'untagged note');
+  const p = buildPrompt([{ brand: 'Mini GT', name: 'McLaren F1 GTR' }], { extras: true });
+  eq(p.includes('| Note |') && p.includes('already named: McLaren F1 GTR') && p.includes('Colour and Note'), true, 'extras prompt asks for colour and note of named cars');
 }
 
 console.log(fails ? `${fails} of ${n} AI parser tests FAILED` : `All ${n} AI parser tests passed`);

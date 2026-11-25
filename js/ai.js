@@ -3,18 +3,20 @@
 // then pastes the answer back. The answer is UNTRUSTED TEXT: parsed as data only, validated, and used
 // only to pre-fill fields as suggestions that B confirms or corrects. Nothing is saved automatically.
 
-export const PROMPT_VERSION = 'names-v6';
+export const PROMPT_VERSION = 'names-v7';
 // 5 boxes = 10 photos per share. B's phone (24 Nov 21:39) refused to share 20 photos at once (2 worked);
 // Chrome on Android appears to cap a share at about 10 files (not confirmed in its docs), so batches stay at 10 photos.
 export const MAX_BATCH = 5;
 
 // boxes: [{ brand, scale }] in the order their photos are shared (front, then rear, for each box).
-export function buildPrompt(boxes) {
+export function buildPrompt(boxes, { extras = false } = {}) {
   // names-v4 (B's real replies, 24 Nov): Gemini answers with a table anyway, so ask for one with known headings.
-  const lines = boxes.map((b, i) => `Box ${i + 1}: photo ${i * 2 + 1} = box front, photo ${i * 2 + 2} = box back${b.brand ? ` (brand: ${b.brand}${b.scale ? `, ${b.scale}` : ''})` : ''}`);
+  // names-v7 (B, 24 Nov): a Note column: fun fact, history, pop culture or casting. extras = cars already named.
+  const lines = boxes.map((b, i) => `Box ${i + 1}: photo ${i * 2 + 1} = box front, photo ${i * 2 + 2} = box back${b.name ? ` (already named: ${b.name})` : ''}${b.brand ? ` (brand: ${b.brand}${b.scale ? `, ${b.scale}` : ''})` : ''}`);
   return [
     'Reply with ONE table only, with exactly these column headings:',
-    '| Box | Car name | Year | Product code | Brand | Colour |',
+    '| Box | Car name | Year | Product code | Brand | Colour | Note |',
+    ...(extras ? ['', 'These cars are already named; what I need most is Colour and Note. Fill the other columns too if you can read them.'] : []),
     '',
     `I'm cataloguing my die-cast model car boxes. There are ${boxes.length} box${boxes.length === 1 ? '' : 'es'}, ${boxes.length * 2} photos, in this order:`,
     ...lines,
@@ -23,10 +25,20 @@ export function buildPrompt(boxes) {
     'Product code = this car\'s own catalogue number exactly as printed (e.g. MGT00123-L, KHMG197, PR64-240, JKY27), usually on the box back or side. Not the barcode digits, and not an assortment or case code shared by a whole set (e.g. "Asst. HRT81" or the code at the top of a Hot Wheels card). If you cannot read it clearly, write -.',
     'Hot Wheels: the car\'s own code (5 characters, e.g. JKY27) is often on the back, and on an India import sticker as "Item No.". Two cars from one set never share a code.',
     'Colour = the main colour of the car itself (not the box).',
+    'Note = one short, true thing about the real car or this model, at most 25 words, starting with "Fun fact:", "History:", "Pop culture:" or "Casting:". Only what you are confident is true; otherwise -.',
     'Use - for anything you cannot read. Do not guess. No other text before or after the table.',
   ].join('\n');
 }
 
+// "Pop culture: Built for the film Spectre." → { kind: 'pop', label: 'Pop culture', body: 'Built for the film Spectre.' }
+export function noteParts(text) {
+  const t = String(text || '').trim();
+  const m = t.match(/^(fun fact|history|historical|pop culture|casting|model)\s*[:\-–—]\s*(.+)$/i);
+  if (!m) return { kind: 'fun', label: 'Note', body: t };
+  const k = m[1].toLowerCase();
+  const kind = k.startsWith('fun') ? 'fun' : k.startsWith('hist') ? 'history' : k.startsWith('pop') ? 'pop' : 'casting';
+  return { kind, label: { fun: 'Fun fact', history: 'History', pop: 'Pop culture', casting: 'Casting' }[kind], body: m[2].trim() };
+}
 const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 const blank = (s) => (!s || /^[-–—?]+$/.test(s) || /^(n\/?a|none|unknown|unreadable)$/i.test(s));
 
@@ -87,7 +99,8 @@ function colKind(hd) {
   if (/year/.test(k)) return 'year';
   if (/code|item\s*(no|number|#)|sku|catalog|ref|part\s*n/.test(k)) return 'code';
   if (/brand|maker|manufacturer|make\b/.test(k)) return 'brand';
-  if (/note|remark|comment/.test(k)) return 'notes';
+  if (/note|fact|trivia|story/.test(k)) return 'carnote';
+  if (/remark|comment/.test(k)) return 'notes';
   if (/name|model|car|vehicle|title/.test(k)) return 'name';
   return '';
 }
@@ -122,7 +135,8 @@ function parseTable(text, expected) {
     const colour = get('colour');
     if (colour && !blank(colour)) notes.push(`Colour: ${colour.slice(0, 60)}`);
     if (!name) notes.push('no car name in the answer: type it from the box');
-    out.push({ n, name: name.slice(0, 120), code, brand: blank(get('brand')) ? '' : get('brand'), colour: blank(colour) ? '' : colour.slice(0, 60), notes });
+    const carNote = get('carnote');
+    out.push({ n, name: name.slice(0, 120), code, brand: blank(get('brand')) ? '' : get('brand'), colour: blank(colour) ? '' : colour.slice(0, 60), carNote: blank(carNote) ? '' : clean(carNote, 220), notes });
   }
   // The same code for two boxes in one answer is a set/assortment code (e.g. Hot Wheels "HRT81" on two different
   // cars), not either car's own code: never pre-filled, so it can't make two different cars look like duplicates.
