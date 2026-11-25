@@ -26,7 +26,7 @@ export async function getConfig() { return meta.get('config', null); }
 
 // Returns config { rootId, folders:{name:id}, workbookId, created: bool }
 // Bump when TABS gains a tab, so existing workbooks get it on the next sync.
-const TABS_VERSION = 2;
+const TABS_VERSION = 3; // 3: ALIASES synced (brands screen, s1-0.24.0)
 // Add any tabs missing from an older workbook, with their header row (never delete).
 async function addMissingTabs(workbookId) {
   const tabNames = [...Object.keys(TABS), SETTINGS_TAB.name];

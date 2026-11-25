@@ -9,7 +9,7 @@ import { syncNow, isSyncing } from './sync.js';
 import { getClientId, setClientId, hasToken, signIn, tokenMinutesLeft, drive } from './google.js';
 import { getConfig, seedLocal } from './setup.js';
 import { newId } from './ids.js';
-import { resolveName, moreBrands, KNOWN_BRANDS } from './brands.js';
+import { resolveName, moreBrands, KNOWN_BRANDS, looksLike, normName } from './brands.js';
 import { COLOUR_FAMILIES, familyFrom, familyLabel, familySwatch } from './colours.js';
 import { newTimer, touch, seconds } from './timing.js';
 import { straighten, validQuad } from './crop.js';
@@ -17,7 +17,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.23.0';
+export const APP_VERSION = 's1-0.24.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -100,7 +100,9 @@ async function pickedBrandId(value, all, sel = null) {
   if (!value) return '';
   if (!value.startsWith('known:') && value !== '__new') return value;
   const name = value === '__new' ? (prompt('New brand name, as printed on the box:') || '') : value.slice(6);
-  const r = resolveName(name, all);
+  // An old or merged brand name (kept as an alias on the Brands screen) means the brand it now points to
+  const alias = (await store.list('aliases')).find(a => a.target_type === 'brand' && a.alias_cmp === normName(name) && all.some(x => x.brand_id === a.target_id));
+  const r = alias ? { use: all.find(x => x.brand_id === alias.target_id) } : resolveName(name, all);
   let id = '', label = '';
   if (r.none) { if (sel) sel.value = ''; return ''; }
   if (r.use) { id = r.use.brand_id; label = r.use.name; }
@@ -238,6 +240,7 @@ async function route() {
     else if (hash.startsWith('#/item/')) await renderItem(v, decodeURIComponent(hash.slice(7)));
     else if (hash.startsWith('#/crop/')) await renderCrop(v, decodeURIComponent(hash.slice(7)));
     else if (hash.startsWith('#/settings')) await renderSettings(v);
+    else if (hash.startsWith('#/brands')) await renderBrands(v);
     else await renderGarage(v);
   } catch (e) {
     v.append(h('div', { class: 'banner bad' }, `Something went wrong: ${e.message}`));
@@ -480,7 +483,7 @@ async function renderDash(v) {
       : h('p', { class: 'muted' }, 'Nothing to check ✓')));
 
   // By brand, by scale
-  v.append(h('div', { class: 'card' }, h('h3', {}, 'By brand'),
+  v.append(h('div', { class: 'card' }, h('div', { class: 'row', style: 'align-items:baseline' }, h('h3', {}, 'By brand'), h('a', { href: '#/brands', class: 'small' }, 'Manage brands ›')),
     barList(topN(tally(copies, i => brandName[byId.get(i.model_id).brand_id] || 'Brand not set'), 8), { onTap: (k) => { if (k !== '__other') goGarage('all', k); } })));
   v.append(h('div', { class: 'card' }, h('h3', {}, 'By scale'),
     barList(tally(copies, i => scaleLabel[byId.get(i.model_id).scale_id] || 'Scale not set'), { onTap: (k) => goGarage('all', k) })));
@@ -1848,6 +1851,89 @@ function checkContext(models, inventory, ids) {
   return { ownedNoBox, dupes };
 }
 
+// ---------- Brands screen (roadmap DR-0.2 next build #3) ----------
+// Rename, merge look-alikes, mark checked. Printed brand text on each car is never changed (D10.1 rule 1);
+// an old or merged name is kept as an alias so it is still recognised; every change is logged.
+let brandOpen = null;
+async function addBrandAlias(text, brandId) {
+  const t = String(text || '').trim(); if (!t) return;
+  const al = await store.list('aliases');
+  if (al.some(a => a.target_type === 'brand' && a.target_id === brandId && a.alias_cmp === normName(t))) return;
+  await store.create('aliases', { alias_text: t, alias_cmp: normName(t), target_type: 'brand', target_id: brandId, source: 'brands screen' });
+}
+async function mergeBrand(fromId, toId) {
+  const ref = await refData();
+  const from = ref.brands.find(b => b.brand_id === fromId), to = ref.brands.find(b => b.brand_id === toId);
+  const models = (await store.list('models')).filter(m => m.brand_id === fromId);
+  for (const m of models) {
+    const ns = assignNamespace(to, null);
+    const patch = { brand_id: toId, code_namespace_type: ns.type, code_namespace_id: ns.id, namespace_status: ns.status };
+    patch.duplicate_check_status = duplicateCheckStatus({ ...m, ...patch });
+    await store.update('models', m.model_id, patch);
+    await store.logChange('models', m.model_id, 'brand_id', fromId, toId, `brand merged: ${from?.name} → ${to?.name}`);
+  }
+  for (const b of await store.list('storage_boxes')) if (b.box_brand === fromId) await store.update('storage_boxes', b.storage_box_id, { box_brand: toId });
+  await addBrandAlias(from?.name, toId);
+  await store.archive('brands', fromId);
+  await store.logChange('brands', fromId, 'merged_into', '', toId, `merged into ${to?.name}: ${models.length} cars`);
+  autoSyncSoon();
+  return models.length;
+}
+async function renderBrands(v) {
+  const ref = await refData();
+  const models = await store.list('models');
+  const count = new Map(); models.forEach(m => m.brand_id && count.set(m.brand_id, (count.get(m.brand_id) || 0) + 1));
+  const brands = ref.brands.slice().sort((a, b) => (count.get(b.brand_id) || 0) - (count.get(a.brand_id) || 0) || a.name.localeCompare(b.name));
+  v.append(h('a', { href: '#/settings', class: 'back' }, '← Settings'), h('div', { class: 'row' }, h('h2', {}, 'Brands'),
+    h('div', { class: 'muted' }, `${plural(brands.filter(b => count.get(b.brand_id)).length, 'brand', 'brands')} in use`)));
+  // Look-alike names among brands in use: maybe the same brand typed two ways
+  const used = brands.filter(b => count.get(b.brand_id));
+  const pairs = [];
+  for (let i = 0; i < used.length; i++) for (let j = i + 1; j < used.length; j++) if (looksLike(used[i].name, used[j].name)) pairs.push([used[i], used[j]]);
+  if (pairs.length) v.append(h('div', { class: 'card' }, h('h3', {}, 'Same brand?'),
+    h('p', { class: 'muted' }, 'These names look alike. Merge only if they are really one brand.'),
+    ...pairs.map(([a, b]) => h('div', { class: 'row', style: 'align-items:center;margin-top:8px' },
+      h('div', { style: 'flex:1' }, h('b', {}, a.name), ` (${count.get(a.brand_id)}) · `, h('b', {}, b.name), ` (${count.get(b.brand_id)})`),
+      h('button', { type: 'button', class: 'quiet small', onclick: () => { brandOpen = b.brand_id; route(); setTimeout(() => $(`[data-brand="${b.brand_id}"]`)?.scrollIntoView({ behavior: 'smooth' }), 300); } }, 'Look')))));
+  const list = h('div', { class: 'card brandlist' });
+  for (const b of brands) {
+    const n = count.get(b.brand_id) || 0, open = brandOpen === b.brand_id;
+    const row = h('div', { class: `brandrow ${open ? 'open' : ''}`, 'data-brand': b.brand_id },
+      h('button', { type: 'button', class: 'brandhead', 'aria-expanded': open ? 'true' : 'false', onclick: () => { brandOpen = open ? null : b.brand_id; route(); } },
+        h('span', { class: 'bn' }, b.name), b.record_status === 'needs_review' ? h('span', { class: 'tag warn' }, 'needs review') : null,
+        h('span', { class: 'muted' }, n ? plural(n, 'car', 'cars') : 'no cars'), h('span', { class: 'chev', 'aria-hidden': 'true' }, open ? '⌃' : '›')));
+    if (open) {
+      const others = brands.filter(o => o.brand_id !== b.brand_id);
+      const target = h('select', { 'aria-label': `Merge ${b.name} into` }, h('option', { value: '' }, 'Merge into…'), others.map(o => h('option', { value: o.brand_id }, `${o.name}${count.get(o.brand_id) ? ` (${count.get(o.brand_id)})` : ''}`)));
+      row.append(h('div', { class: 'brandacts' },
+        n ? h('button', { type: 'button', class: 'quiet small', onclick: () => { garageFilter = 'all'; garageSearch = b.name; location.hash = '#/'; } }, `See ${plural(n, 'car', 'cars')}`) : null,
+        h('button', { type: 'button', class: 'quiet small', onclick: async () => {
+          const t = (prompt(`Rename "${b.name}" to:`, b.name) || '').replace(/\s+/g, ' ').trim();
+          if (!t || t === b.name) return;
+          const r = resolveName(t, others);
+          if (r.use || r.ask) { toast(`"${(r.use || r.ask).name}" already exists: use "Merge into" instead`, 4000, 'warn'); return; }
+          await store.update('brands', b.brand_id, { name: t, record_status: 'confirmed' });
+          await addBrandAlias(b.name, b.brand_id);
+          await store.logChange('brands', b.brand_id, 'name', b.name, t, 'renamed in Brands'); autoSyncSoon();
+          toast(`Renamed to ${t} ✓ (the old name still works)`, 3000); route();
+        } }, 'Rename'),
+        b.record_status === 'needs_review' ? h('button', { type: 'button', class: 'quiet small', onclick: async () => {
+          await store.update('brands', b.brand_id, { record_status: 'confirmed' });
+          for (const m of models.filter(x => x.brand_id === b.brand_id)) { const ns = assignNamespace({ ...b, record_status: 'confirmed' }, null); const patch = { code_namespace_type: ns.type, code_namespace_id: ns.id, namespace_status: ns.status }; patch.duplicate_check_status = duplicateCheckStatus({ ...m, ...patch }); await store.update('models', m.model_id, patch); }
+          await store.logChange('brands', b.brand_id, 'record_status', 'needs_review', 'confirmed', 'checked in Brands'); autoSyncSoon(); toast(`${b.name} checked ✓`); route();
+        } }, 'Mark as checked') : null,
+        h('div', { class: 'row', style: 'width:100%;margin-top:6px' }, target, h('button', { type: 'button', class: 'small', onclick: async () => {
+          const to = others.find(o => o.brand_id === target.value); if (!to) { toast('Pick the brand to merge into', 2500, 'warn'); return; }
+          if (!confirm(`Merge "${b.name}" into "${to.name}"?\n\n${plural(n, 'car moves', 'cars move')} to ${to.name}. "${b.name}" is kept as another name for ${to.name}, and the brand text printed on each car is not changed.`)) return;
+          const moved = await mergeBrand(b.brand_id, to.brand_id); brandOpen = to.brand_id; toast(`Merged ✓ ${plural(moved, 'car', 'cars')} now ${to.name}`, 3500); route();
+        } }, 'Merge')),
+        !n ? h('button', { type: 'button', class: 'ghost small', onclick: async () => { await store.archive('brands', b.brand_id); await store.logChange('brands', b.brand_id, 'deleted_at', '', 'archived', 'unused brand removed'); autoSyncSoon(); brandOpen = null; route(); } }, 'Remove (no cars)') : null));
+    }
+    list.append(row);
+  }
+  v.append(list);
+}
+
 // ---------- Merge two entries (B, 24 Nov) ----------
 // Two entries that are the same car become one car with all their copies and photos. Only ever by B's choice
 // (D10.1 rule 5: no automatic merging). The emptied entry is archived, never deleted; every move is logged.
@@ -2108,6 +2194,7 @@ async function renderSettings(v) {
       : h('p', { class: 'muted' }, 'Sign in above to sync.')); // signed out: one bold button on the page, not two
   v.append(sync);
 
+  v.append(h('a', { href: '#/brands', class: 'card linkcard' }, h('span', {}, h('b', {}, 'Brands'), h('span', { class: 'muted' }, ' · rename, merge look-alikes')), h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
   const where = h('div', { class: 'card' }, h('h3', {}, 'Your data'),
     config?.workbookId ? h('p', {}, h('a', { href: `https://docs.google.com/spreadsheets/d/${config.workbookId}`, target: '_blank', rel: 'noopener' }, 'Open SCALE_GARAGE_MASTER sheet ↗')) : h('p', { class: 'muted' }, 'Not set up yet — sign in above.'),
     config?.rootId ? h('p', {}, h('a', { href: `https://drive.google.com/drive/folders/${config.rootId}`, target: '_blank', rel: 'noopener' }, 'Open SCALE GARAGE folder ↗')) : null);
