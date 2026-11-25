@@ -15,9 +15,9 @@ import { newTimer, touch, seconds } from './timing.js';
 import { straighten, validQuad } from './crop.js';
 import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
-import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH } from './ai.js';
+import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.28.0';
+export const APP_VERSION = 's1-0.29.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -1271,11 +1271,12 @@ async function geminiScore(ref) {
       const savedCode = String(m.product_code || '').trim(), sCode = String(it.code || '').trim();
       const codeOk = savedCode ? normTxt(sCode) === normTxt(savedCode) : !sCode;
       const outcome = sName === mName && codeOk ? 'right' : shared >= 0.5 ? 'fix' : 'wrong';
-      per.set(mid, { outcome, hasCode: !!savedCode, codeRight: !!savedCode && normTxt(sCode) === normTxt(savedCode) });
+      per.set(mid, { outcome, hasCode: !!savedCode, codeRight: !!savedCode && normTxt(sCode) === normTxt(savedCode), combined: String(log.prompt_version || '').endsWith(COMBINED_SUFFIX) });
     }
   }
   const all = [...per.values()];
-  return { n: all.length, right: all.filter(x => x.outcome === 'right').length, fix: all.filter(x => x.outcome === 'fix').length,
+  const part = (xs) => ({ n: xs.length, right: xs.filter(x => x.outcome === 'right').length, codes: xs.filter(x => x.hasCode).length, codesRight: xs.filter(x => x.codeRight).length });
+  return { sep: part(all.filter(x => !x.combined)), comb: part(all.filter(x => x.combined)), n: all.length, right: all.filter(x => x.outcome === 'right').length, fix: all.filter(x => x.outcome === 'fix').length,
     wrong: all.filter(x => x.outcome === 'wrong').length, codes: all.filter(x => x.hasCode).length, codesRight: all.filter(x => x.codeRight).length };
 }
 // What Gemini said each car's colour is: latest AI_LOG reply read with today's reader, plus open suggestions.
@@ -1322,6 +1323,9 @@ async function geminiScoreCard(ref) {
       h('div', {}, h('b', {}, `✏️ ${sc.fix}`), ' small fixes'),
       h('div', {}, h('b', {}, `❌ ${sc.wrong}`), ' rewritten')),
     h('p', {}, h('b', {}, `Codes right: ${sc.codesRight} of ${sc.codes}`), h('span', { class: 'muted' }, ' (cars where you saved a code)')),
+    sc.comb.n ? h('div', { class: 'scoresplit' }, h('b', {}, 'Separate vs combined photos'),
+      h('div', {}, `Separate: ${sc.sep.right} of ${sc.sep.n} right · codes ${sc.sep.codesRight} of ${sc.sep.codes}`),
+      h('div', {}, `Combined: ${sc.comb.right} of ${sc.comb.n} right · codes ${sc.comb.codesRight} of ${sc.comb.codes}`)) : null,
     h('p', { class: 'muted small' }, `Counts the ${plural(sc.n, 'car', 'cars')} you named from a Gemini answer, comparing Gemini's reply (read with today's reader) with what you saved.`));
 }
 const aiState = async () => ({ batch: await meta.get('aiBatch', null), sugg: await meta.get('aiSuggest', {}) });
@@ -1331,8 +1335,31 @@ async function photoFileFor(p, name) {
   if (!b) b = await blobs.get(`${p.photo_id}:thumb`);
   return b ? new File([b], name, { type: 'image/jpeg' }) : null;
 }
+const aiCombine = () => localStorage.getItem('smg.aiCombine') === '1';
+// The switch; changing it while a batch is prepared prepares it again in the new mode.
+function combineChips() {
+  const setMode = (on) => { if (aiCombine() === on) return; localStorage.setItem('smg.aiCombine', on ? '1' : '0'); if (aiPrep && aiPrep.mode === 'names') { aiPrep = null; nameAutoNext = true; } route(); };
+  return h('div', { class: 'chips', style: 'margin:8px 0' },
+    h('button', { type: 'button', class: `chip ${!aiCombine() ? 'on' : ''}`, onclick: () => setMode(false) }, '2 photos per box · 5 boxes'),
+    h('button', { type: 'button', class: `chip ${aiCombine() ? 'on' : ''}`, onclick: () => setMode(true) }, 'Combine front + back · 10 boxes (trial)'));
+}
+const batchSize = () => (aiCombine() ? MAX_BATCH_COMBINED : MAX_BATCH);
+// Front on the left, back on the right, same height (up to the display copy's 1600 px), one JPEG. No location data
+// (made from the display copies, which have none).
+async function combinePair(frontFile, rearFile, name) {
+  const [a, b] = await Promise.all([createImageBitmap(frontFile), createImageBitmap(rearFile)]);
+  const H = Math.min(1600, Math.max(a.height, b.height));
+  const wa = Math.round(a.width * H / a.height), wb = Math.round(b.width * H / b.height), gap = 16;
+  const c = document.createElement('canvas'); c.width = wa + gap + wb; c.height = H;
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  g.drawImage(a, 0, 0, wa, H); g.drawImage(b, wa + gap, 0, wb, H);
+  a.close?.(); b.close?.();
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9));
+  return new File([blob], name, { type: 'image/jpeg' });
+}
 async function prepareAiBatch(todo, ref, { extras = false } = {}) {
-  const pick = todo.slice(0, MAX_BATCH);
+  const combined = aiCombine();
+  const pick = todo.slice(0, batchSize());
   const photos = await store.list('photos');
   const files = [], boxes = [], ids = [], photoIds = [];
   for (const m of pick) {
@@ -1343,10 +1370,11 @@ async function prepareAiBatch(todo, ref, { extras = false } = {}) {
     const ff = front && await photoFileFor(front, `box${k}-front.jpg`);
     const rf = rear && await photoFileFor(rear, `box${k}-back.jpg`);
     if (!ff) continue; // a box without a usable photo can't be read
-    files.push(ff, rf || ff); photoIds.push(front.photo_id, (rf ? rear : front).photo_id); ids.push(m.model_id);
+    if (combined) files.push(await combinePair(ff, rf || ff, `box${k}.jpg`)); else files.push(ff, rf || ff);
+    photoIds.push(front.photo_id, (rf ? rear : front).photo_id); ids.push(m.model_id); // pairs kept in AI_LOG either way
     boxes.push({ brand: ref.brands.find(b => b.brand_id === m.brand_id)?.name, scale: ref.scales.find(x => x.scale_id === m.scale_id)?.label, name: extras ? m.display_name : '' });
   }
-  return { batchId: newId('ai_log'), ids, files, photoIds, mode: extras ? 'extras' : 'names', prompt: buildPrompt(boxes, { extras }) };
+  return { batchId: newId('ai_log'), ids, files, photoIds, combined, mode: extras ? 'extras' : 'names', prompt: buildPrompt(boxes, { extras, combined }) };
 }
 async function copyText(t) { try { await navigator.clipboard.writeText(t); return true; } catch { return false; } }
 
@@ -1362,7 +1390,7 @@ function extrasCard(models, ref, readings) {
       aiPrep = await prepareAiBatch(need, ref, { extras: true });
       if (!aiPrep.ids.length) { aiPrep = null; toast('No photos found to send', 3000, 'warn'); }
       route();
-    } }, `Get notes & colours for the next ${Math.min(MAX_BATCH, need.length)} cars`));
+    } }, `Get notes & colours for the next ${Math.min(batchSize(), need.length)} cars`));
 }
 // Save a name (and code) for one car, with everything Gemini suggested that B accepts by saving:
 // colour, note, brand for a brand-less car (single clear match only). Used by the one-at-a-time and the list view.
@@ -1498,7 +1526,7 @@ async function renderName(v) {
       h('button', { type: 'button', class: 'ghost small', style: 'margin-top:8px', onclick: async () => { await meta.set('aiBatch', null); route(); } }, 'Cancel'));
   } else if (aiPrep) {
     const canFiles = !!(navigator.canShare && navigator.canShare({ files: aiPrep.files }));
-    aiCard.append(h('p', { class: 'muted' }, `${plural(aiPrep.ids.length, 'box', 'boxes')}, ${aiPrep.files.length} photos ready (copies without location data).`),
+    aiCard.append(aiPrep.mode === 'names' ? combineChips() : '', h('p', { class: 'muted' }, `${plural(aiPrep.ids.length, 'box', 'boxes')}, ${aiPrep.files.length} photos ready (copies without location data).`),
       h('button', { type: 'button', class: 'wide', onclick: async () => {
         const copied = await copyText(aiPrep.prompt);
         try {
@@ -1510,7 +1538,7 @@ async function renderName(v) {
           aiCard.append(h('div', { class: 'row', style: 'margin-top:8px;flex-wrap:wrap' }, aiPrep.files.map(f => h('a', { class: 'btn quiet small', href: URL.createObjectURL(f), download: f.name }, f.name))));
           return;
         }
-        const log = await store.create('ai_log', { ai_log_id: aiPrep.batchId, capture_session_id: aiPrep.batchId, ai_tool: 'gemini_or_claude_app (copy-paste)', prompt_version: PROMPT_VERSION, input_photo_ids: aiPrep.photoIds.join(','), processed_at: store.nowIso() });
+        const log = await store.create('ai_log', { ai_log_id: aiPrep.batchId, capture_session_id: aiPrep.batchId, ai_tool: 'gemini_or_claude_app (copy-paste)', prompt_version: PROMPT_VERSION + (aiPrep.combined ? COMBINED_SUFFIX : ''), input_photo_ids: aiPrep.photoIds.join(','), processed_at: store.nowIso() });
         await meta.set('aiBatch', { logId: log.ai_log_id, ids: aiPrep.ids, mode: aiPrep.mode, prompt: aiPrep.prompt });
         aiPrep = null; toast(copied ? 'Shared ✓ If the instructions are missing, paste them (already copied).' : 'Shared', 4000); route();
       } }, canFiles ? 'Share to Gemini or Claude' : 'Copy instructions and get the photos'),
@@ -1526,12 +1554,13 @@ async function renderName(v) {
     }
     nameAutoNext = false;
     aiCard.append(h('p', { class: 'muted' }, nSugg ? `${plural(nSugg, 'box has', 'boxes have')} an AI suggestion waiting below.` : 'Send box photos to your Gemini or Claude app and paste the answer back. You check every name before it is saved.'),
+      combineChips(),
       h('button', { type: 'button', class: nSugg ? 'quiet wide' : 'wide', onclick: async (e) => {
         e.target.disabled = true; e.target.textContent = 'Preparing photos…';
         aiPrep = await prepareAiBatch(todo.filter(x => !sugg[x.model_id]), ref);
         if (!aiPrep.ids.length) { aiPrep = null; toast('No photos found to send', 3000, 'warn'); }
         route();
-      } }, `Get names for the next ${Math.min(MAX_BATCH, todo.filter(x => !sugg[x.model_id]).length) || 0} boxes`));
+      } }, `Get names for the next ${Math.min(batchSize(), todo.filter(x => !sugg[x.model_id]).length) || 0} boxes`));
   }
   if (batch?.mode === 'extras' || aiPrep?.mode === 'extras') aiCard.querySelector('h3').textContent = '🎉 Notes & colours from Gemini';
   v.append(aiCard);
