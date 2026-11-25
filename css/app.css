@@ -658,3 +658,10 @@ input[type=checkbox] { width: 22px; height: 22px; min-height: 0; padding: 0; mar
 .tile .ph { position: relative; }
 .tile .ph::after { content: ""; position: absolute; inset: 0; border: 1px solid var(--line); border-radius: inherit; pointer-events: none; }
 .cd-img { border-bottom: 1px solid var(--line); }
+
+/* Car of the day as ONE card (B, 25 Nov: photo and text looked like two cards): one white surface + one outline,
+   the photo inset inside it with rounded corners, no grey band */
+.cd-fr { background: var(--surface); border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(0,0,0,.05); }
+.cd-img { background: transparent; border-bottom: 0; padding: 12px 12px 0; height: 200px; border-radius: calc(var(--radius) - 6px); }
+.cd-txt { padding: 10px 16px 16px; }
+.cd-bk { border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); }
