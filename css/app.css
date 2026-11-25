@@ -643,3 +643,13 @@ input[type=checkbox] { width: 22px; height: 22px; min-height: 0; padding: 0; mar
 .cd-in { min-height: 0; }
 .cd-x { background: color-mix(in srgb, var(--surface) 85%, transparent); }
 .cd-x { width: 34px !important; height: 34px !important; min-height: 0 !important; padding: 0 !important; flex: none; }
+
+/* Group section headers (s1-0.36.2): a real divider between brands / boxes / scales / colours */
+.grid h3.group { display: block; margin: 26px 0 2px; padding: 16px 2px 0; border-top: 1px solid var(--line); text-transform: none; letter-spacing: 0; color: var(--text); font-size: 1.2rem; font-weight: 800; }
+.grid h3.group:first-child { margin-top: 6px; padding-top: 4px; border-top: 0; }
+.grid h3.group a { display: flex; align-items: center; gap: 10px; }
+.grid h3.group { display: flex; align-items: center; gap: 10px; }
+.g-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-count { flex: none; font-size: .78rem; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 3px 10px; }
+.g-go { margin-left: auto; color: var(--muted); font-size: 1.4rem; line-height: 1; }
+.grid h3.group a { flex: 1; min-width: 0; }
