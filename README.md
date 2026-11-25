@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.20.0
+## Status: Stage 1 (quick-capture slice), version s1-0.20.1
+
+**s1-0.20.1 (25 Nov 2026): colour swatch next to the name (B).** The car page shows the colour as a swatch right after the car's name (dashed + when not set). Tap it to open the 14 colours right under the name; picking one saves it and closes the picker. Gemini's colour suggestion ("Gemini said: … · Use") shows under the name until used.
 
 **s1-0.20.0 (25 Nov 2026): car notes.** A short sub-note under each car's name: Fun fact, History, Pop culture or Casting (about the real car or the model). Gemini's table has a Note column (prompt `names-v7`: at most 25 words, only what it is confident is true, else -). The note shows on the car page labelled "from Gemini, not checked", with Keep / Edit / Hide; ＋ Add a note for your own. Saving a name on the Name tab keeps Gemini's note with it. Cars already named get a "Notes & colours" batch (same share → paste flow; never renames anything). New MODELS columns car_note, car_note_source (gemini / you / hidden); every change logged.
 
