@@ -392,3 +392,14 @@ header.top h1 img.logo { width: 26px; height: 26px; border-radius: 7px; flex: 0 
 .pdp-actions button.on { box-shadow: inset 0 0 0 2px var(--accent); }
 .movebox .chips .chip { font-size: .95rem; }
 button.syncbtn:disabled { opacity: .45; cursor: default; }
+
+/* How Gemini did (s1-0.18.0) */
+.gscore summary { font-weight: 700; }
+.scorebar { display: flex; gap: 2px; height: 14px; border-radius: 7px; overflow: hidden; margin: 12px 0 10px; background: var(--surface2); }
+.scorebar span { display: block; height: 100%; }
+.scorebar .ok { background: var(--accent); } .scorebar .fix { background: #c98a1b; } .scorebar .bad { background: #b4442f; }
+.scorelegend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; font-size: .95rem; }
+.scorelegend b { display: block; font-size: 1.25rem; }
+
+.copyhead { align-items: center; justify-content: space-between; margin: 18px 0 6px; }
+.copyhead h3 { margin: 0; }
