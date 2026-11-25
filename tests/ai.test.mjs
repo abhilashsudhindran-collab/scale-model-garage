@@ -215,5 +215,14 @@ Additional Packaging Notes
   eq(r2.items[0].carNote.endsWith('…') && r2.items[0].carNote.length <= 452 && !/wor…$/.test(r2.items[0].carNote), true, 'a very long note ends at a whole word with …');
 }
 
+{ // combined mode (s1-0.29.0): one picture per box, front left / back right
+  const pc = buildPrompt([{ brand: 'Mini GT' }, { brand: 'Tarmac Works' }, {}], { combined: true });
+  eq(/3 boxes, 3 photos/.test(pc), true, 'combined prompt counts one photo per box');
+  eq(pc.includes('Box 2: photo 2 = box front (left half) and box back (right half)'), true, 'combined prompt: photo k = box k, front left, back right');
+  eq(/front on the left and its back on the right/.test(pc), true, 'combined prompt explains the layout');
+  const ps = buildPrompt([{}, {}]);
+  eq(ps.includes('photo 3 = box front') && !/left half/.test(ps), true, 'separate prompt unchanged');
+}
+
 console.log(fails ? `${fails} of ${n} AI parser tests FAILED` : `All ${n} AI parser tests passed`);
 process.exit(fails ? 1 : 0);

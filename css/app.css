@@ -512,3 +512,4 @@ button.syncbtn:disabled { opacity: .45; cursor: default; }
 .nl-tick { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: .9rem; }
 .nl-left { display: flex; flex-direction: column; gap: 4px; align-items: center; flex: none; }
 .nl-flip { padding: 2px 8px; font-size: .78rem; }
+.scoresplit { margin: 8px 0; padding: 8px 10px; background: var(--surface2); border-radius: 10px; font-size: .92rem; }

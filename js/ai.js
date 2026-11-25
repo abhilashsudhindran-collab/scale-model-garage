@@ -7,13 +7,17 @@ export const PROMPT_VERSION = 'names-v8';
 // 5 boxes = 10 photos per share. B's phone (24 Nov 21:39) refused to share 20 photos at once (2 worked);
 // Chrome on Android appears to cap a share at about 10 files (not confirmed in its docs), so batches stay at 10 photos.
 export const MAX_BATCH = 5;
+// Combined mode (B, 25 Nov, trial): each box's front and back joined side by side into ONE picture, so 10 boxes = 10 pictures.
+// Kept only if Gemini reads codes as well as with separate photos (compare in How Gemini did).
+export const MAX_BATCH_COMBINED = 10;
+export const COMBINED_SUFFIX = '-combined';
 
 // boxes: [{ brand, scale }] in the order their photos are shared (front, then rear, for each box).
-export function buildPrompt(boxes, { extras = false } = {}) {
+export function buildPrompt(boxes, { extras = false, combined = false } = {}) {
   // names-v8 (B, 25 Nov): Gemini made up its own table when the instructions didn't arrive, and left out Colour and
   // Note. The headings come first and last, with a full example row; the Note asks for the kind of fact B wants.
   const head = '| Box | Car name | Year | Product code | Brand | Colour | Note |';
-  const lines = boxes.map((b, i) => `Box ${i + 1}: photo ${i * 2 + 1} = box front, photo ${i * 2 + 2} = box back${b.name ? ` (already named: ${b.name})` : ''}${b.brand ? ` (brand: ${b.brand}${b.scale ? `, ${b.scale}` : ''})` : ''}`);
+  const lines = boxes.map((b, i) => `Box ${i + 1}: ${combined ? `photo ${i + 1} = box front (left half) and box back (right half)` : `photo ${i * 2 + 1} = box front, photo ${i * 2 + 2} = box back`}${b.name ? ` (already named: ${b.name})` : ''}${b.brand ? ` (brand: ${b.brand}${b.scale ? `, ${b.scale}` : ''})` : ''}`);
   return [
     'Reply with ONE table only, with exactly these 7 column headings, in this order:',
     head,
@@ -21,7 +25,8 @@ export function buildPrompt(boxes, { extras = false } = {}) {
     '| Box 1 | McLaren F1 GTR 1995 Presentation | 1995 | MGT00949 | Mini GT | Orange | History: The F1 GTR won Le Mans overall at its first attempt in 1995, beating purpose-built prototypes. |',
     ...(extras ? ['', 'These cars are already named. What I need most is the Colour and the Note for each one.'] : []),
     '',
-    `I'm cataloguing my die-cast model cars. There are ${boxes.length} box${boxes.length === 1 ? '' : 'es'}, ${boxes.length * 2} photos, in this order:`,
+    `I'm cataloguing my die-cast model cars. There are ${boxes.length} box${boxes.length === 1 ? '' : 'es'}, ${combined ? boxes.length : boxes.length * 2} photos, in this order:`,
+    ...(combined ? ['Each photo shows ONE box: its front on the left and its back on the right. Zoom in on the back half to read the product code.'] : []),
     ...lines,
     '',
     'Car name = the real car (make, model, version, livery), never the brand.',

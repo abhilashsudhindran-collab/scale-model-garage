@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.28.0
+## Status: Stage 1 (quick-capture slice), version s1-0.29.0
+
+**s1-0.29.0 (25 Nov 2026): combined photos for Gemini (trial).** Name tab switch: "2 photos per box · 5 boxes" (default) or "Combine front + back · 10 boxes (trial)". Combined joins each box's front (left) and back (right) into one JPEG on the phone (from the location-free display copies, up to 1600 px high), so 10 boxes = 10 pictures, within the ~10-file share limit seen on B's phone. The prompt explains the layout; AI_LOG marks the round as `names-v8-combined` and still keeps each box's front/back pair. How Gemini did shows separate vs combined (names right, codes right) so the trial can be judged. Unknown until tried: whether Gemini reads small codes as well from the half-width back. Developer test: tests/e2e_combine.py (simulated share, fake data).
 
 **s1-0.28.0 (25 Nov 2026): faster Gemini rounds.** "📋 Paste & use" reads Gemini's reply from the clipboard and uses it in one tap. All suggestions of a round are then checked **on one page**: box photo (tap to enlarge, "See back"), brand · scale · box, editable name and code, Gemini's colour, notes; untick anything unsure (it stays for later), "Discard suggestion" sends a car back to the next batch, and one "Save N" saves the rest (same rules as before: colour/note/brand accepted by saving, codes already saved are kept, AI_LOG records each confirmation and edits). Straight after saving, the next batch's photos are prepared, ready to share. "One at a time" keeps the old view. Developer test: tests/e2e_namelist.py (fake data, not a phone test).
 
