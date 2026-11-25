@@ -1,7 +1,7 @@
 // Service worker: app opens offline. App files: network first (updates arrive), cache fallback.
 // Big library files: cache first. Google sign-in/API traffic is never touched (cross-origin passes through).
 // Cache names start with "smg-" (the R0 test kit on the same site uses "sgr0-").
-const CACHE = 'smg-s1-0.36.2';
+const CACHE = 'smg-s1-0.36.3';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './css/app.css', './icons/icon-192.png', './icons/icon-512.png', './icons/icon.svg', './icons/favicon-32.png', './icons/apple-touch-icon.png',
   './js/app.js', './js/store.js', './js/idb.js', './js/ids.js', './js/rules.js', './js/schema.js', './js/google.js',
   './js/setup.js', './js/sync.js', './js/images.js', './js/barcode.js', './js/md5.js', './js/timing.js', './js/backup.js', './js/ai.js', './js/audit.js', './js/crop.js', './js/export.js', './js/brands.js', './js/colours.js', './js/qr.js', './js/moments.js', './vendor/qrcode/qrcode.mjs'];
@@ -22,7 +22,9 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => { if (res.ok) { const c = res.clone(); caches.open(CACHE).then(x => x.put(req, c)); } return res; })));
     return;
   }
-  e.respondWith(fetch(req).then(res => {
+  // cache: 'no-cache' = always ask the server (a quick 'not modified' when unchanged), so a new release never mixes
+  // new code with a style file the browser kept for up to 10 min (B's phone, 25 Nov: s1-0.36.2 code, old layout).
+  e.respondWith(fetch(req, { cache: 'no-cache' }).then(res => {
     if (res.ok) { const c = res.clone(); caches.open(CACHE).then(x => x.put(req, c)); }
     return res;
   }).catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || (req.mode === 'navigate' ? caches.match('./index.html') : undefined))));
