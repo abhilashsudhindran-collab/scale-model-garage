@@ -513,3 +513,10 @@ button.syncbtn:disabled { opacity: .45; cursor: default; }
 .nl-left { display: flex; flex-direction: column; gap: 4px; align-items: center; flex: none; }
 .nl-flip { padding: 2px 8px; font-size: .78rem; }
 .scoresplit { margin: 8px 0; padding: 8px 10px; background: var(--surface2); border-radius: 10px; font-size: .92rem; }
+
+/* Packing progress (s1-0.30.0) */
+.packing { margin-top: 10px; padding: 10px 12px; background: var(--surface2); border-radius: 12px; }
+.packbar { height: 10px; border-radius: 6px; background: var(--surface); overflow: hidden; margin: 6px 0; }
+.packbar span { display: block; height: 100%; background: var(--accent); border-radius: 6px; }
+.packedmark { color: var(--accent); }
+.packedrow { padding: 8px 10px; background: var(--surface2); border-radius: 12px; }
