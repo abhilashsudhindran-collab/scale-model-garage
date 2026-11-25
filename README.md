@@ -5,7 +5,7 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.40.0
+## Status: Stage 1 (quick-capture slice), version s1-0.41.0
 
 **s1-0.40.0 (25 Nov 2026): tablet and laptop/desktop layouts.** Phones are unchanged. **Tablet (760–1099 px):** car page in two columns (photos left and sticky, name, note, actions and details right); Dashboard and Settings cards flow in two columns; the Gemini check page shows two cars side by side; the contents sheet list is two columns; box-card buttons pair up; Car of the day puts the whole photo beside the text. From 900 px the Showroom shows the photo left and the story right. **Laptop/desktop (1100 px and up):** a side rail replaces the bottom bar; Garage grid 5–6 across; Dashboard and Settings in three columns; three cars per row on the check page. Turning a tablet or resizing a window redraws the page in the right layout. Showroom photo shadow now follows the photo's edges.
 

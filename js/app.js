@@ -15,11 +15,12 @@ import { newTimer, touch, seconds, paceFromTimes } from './timing.js';
 import { straighten, validQuad } from './crop.js';
 import { toCsv, zip, collectionRows } from './export.js';
 import { runAudit } from './audit.js';
+import { growthSeries, decadeOf, tallyBy, share } from './insights.js';
 import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn } from './moments.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.40.0';
+export const APP_VERSION = 's1-0.41.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -520,8 +521,8 @@ async function restoreBox(entry) {
 // models that aren't archived). Single-series bars: one hue, numbers in text colour, no legend.
 function barList(rows, { onTap } = {}) {
   const max = Math.max(1, ...rows.map(r => r[1]));
-  return h('div', { class: 'bars' }, rows.map(([label, n, key]) => h(onTap ? 'button' : 'div', { class: 'barrow', type: onTap ? 'button' : undefined, onclick: onTap ? () => onTap(key ?? label) : undefined, title: `${label}: ${n}` },
-    h('span', { class: 'bl' }, label),
+  return h('div', { class: 'bars' }, rows.map(([label, n, key, swatch]) => h(onTap ? 'button' : 'div', { class: 'barrow', type: onTap ? 'button' : undefined, onclick: onTap ? () => onTap(key ?? label) : undefined, title: `${label}: ${n}` },
+    h('span', { class: 'bl' }, swatch ? h('span', { class: 'cdot', style: `background:${swatch}` }) : null, label),
     h('span', { class: 'bt' }, h('span', { style: `width:${Math.max(2, Math.round((n / max) * 100))}%` })),
     h('span', { class: 'bn' }, n.toLocaleString('en-IN')))));
 }
@@ -594,6 +595,9 @@ async function renderDash(v) {
   v.append(h('div', { class: 'card' }, h('h3', {}, 'By scale'),
     barList(tally(copies, i => scaleLabel[byId.get(i.model_id).scale_id] || 'Scale not set'), { onTap: (k) => goGarage('all', k) })));
 
+  // Collection insights (s1-0.41.0): only what's saved on this phone; each card says how many cars it covers
+  await insightCards(v, { active, copies, byId, photos, brandName, goGarage });
+
   // Storage boxes: one tile per numbered box, in number order
   const boxes0 = tally(copies, i => i.storage_location || '').filter(([k]) => k);
   for (const r of await store.list('storage_boxes')) if (!r.deleted_at && r.box_label && !boxes0.some(([k]) => k === r.box_label)) boxes0.push([r.box_label, 0]);
@@ -647,6 +651,68 @@ async function renderDash(v) {
   // Box state (sealed / opened / loose), when recorded
   const states = tally(copies.filter(i => i.packaging_state && i.packaging_state !== 'unknown'), i => ({ sealed: 'Sealed', opened: 'Opened', loose: 'Loose' }[i.packaging_state] || i.packaging_state));
   if (states.length) v.append(h('div', { class: 'card' }, h('h3', {}, 'Box state'), barList(states)));
+}
+
+// Collection insights (s1-0.41.0). Built from saved values only: AI suggestions not yet tapped are not counted.
+function columnChart(points) {
+  const max = Math.max(1, ...points.map(p => p.n));
+  const top = points.reduce((b, p) => (p.n > b.n ? p : b), points[0]);
+  const every = Math.ceil(points.length / 6); // about six date labels under the columns
+  return h('div', { class: 'cols', role: 'img', 'aria-label': points.map(p => `${p.label}: ${p.n}`).join(', ') },
+    points.map((p, i) => h('div', { class: 'col', title: `${p.label}: ${plural(p.n, 'car', 'cars')}` },
+      h('span', { class: 'cn' }, p === top && p.n ? String(p.n) : ''),
+      h('span', { class: 'cb' }, h('span', { style: `height:${p.n ? Math.max(4, Math.round((p.n / max) * 100)) : 0}%` })),
+      h('span', { class: 'cl' }, i % every === 0 || i === points.length - 1 ? p.label : ''))));
+}
+async function insightCards(v, { active, copies, byId, photos, brandName, goGarage }) {
+  v.append(h('h3', { class: 'secthead' }, '✨ Collection insights'));
+  const N = copies.length;
+  const modelOf = (i) => byId.get(i.model_id);
+  // At a glance: three facts
+  const brands = tallyBy(copies, i => brandName[modelOf(i).brand_id] || '');
+  const boxesT = tallyBy(copies, i => i.storage_location || '');
+  const perModel = tallyBy(copies, i => i.model_id);
+  const twins = perModel.filter(([, n]) => n > 1);
+  const fact = (big, label, sub, onclick) => h(onclick ? 'button' : 'div', { type: onclick ? 'button' : undefined, class: 'fact', onclick }, h('b', {}, big), h('span', {}, label), sub ? h('span', { class: 'muted small' }, sub) : null);
+  v.append(h('div', { class: 'facts' },
+    brands.length ? fact(`${share(brands[0][1], N)}%`, brands[0][0], `${plural(brands[0][1], 'car', 'cars')} · top brand`, () => goGarage('all', brands[0][0])) : fact('—', 'Top brand', 'no brands set yet'),
+    boxesT.length ? fact(String(boxesT[0][1]), boxesT[0][0], 'fullest storage box', () => goGarage('all', boxesT[0][0])) : fact('—', 'Fullest box', 'no boxes yet'),
+    fact(String(twins.length), 'Duplicates', twins.length ? `${plural(twins.length, 'car', 'cars')} owned 2+ times · ${twins.reduce((a, [, n]) => a + n - 1, 0)} extra` : 'none yet')));
+
+  // Cars added over time: the first photo of each car
+  const firstShot = new Map();
+  for (const p of photos) if (!p.deleted_at && p.captured_at && byId.has(p.model_id)) { const prev = firstShot.get(p.model_id); if (!prev || p.captured_at < prev) firstShot.set(p.model_id, p.captured_at); }
+  const g = growthSeries([...firstShot.values()]);
+  if (g.points.length) {
+    const best = g.points.reduce((b, p) => (p.n > b.n ? p : b), g.points[0]);
+    const missing = active.length - g.total;
+    v.append(h('div', { class: 'card' }, h('h3', {}, g.unit === 'day' ? 'Cars added per day' : 'Cars added per month'),
+      columnChart(g.points),
+      h('p', { class: 'muted small', style: 'margin:8px 0 0' }, `Busiest ${g.unit}: ${best.label}, ${plural(best.n, 'car', 'cars')}. From when each car was first photographed${missing > 0 ? ` · ${plural(missing, 'car has', 'cars have')} no photo time` : ''}.`)));
+  }
+
+  // By colour (saved colours only)
+  const colours = tallyBy(copies, i => modelOf(i).colour_family || '');
+  const withColour = colours.reduce((a, [, n]) => a + n, 0);
+  if (withColour) v.append(h('div', { class: 'card' }, h('h3', {}, 'By colour'),
+    barList(topN(colours.map(([k, n]) => [familyLabel(k) || k, n, k, familySwatch(k)]), 8), { onTap: () => goGarage('colour') }),
+    h('p', { class: 'muted small', style: 'margin:8px 0 0' }, `Colour saved for ${withColour} of ${plural(N, 'car', 'cars')}.`)));
+
+  // Car notes: what kind, and who checked them
+  const noted = active.filter(r => r.data.car_note && r.data.car_note_source !== 'hidden').map(r => r.data);
+  if (noted.length) {
+    const kinds = tallyBy(noted, m => noteParts(m.car_note).label);
+    const mine = noted.filter(m => m.car_note_source === 'you').length;
+    v.append(h('div', { class: 'card' }, h('h3', {}, 'Car notes'), barList(kinds),
+      h('p', { class: 'muted small', style: 'margin:8px 0 0' }, `${plural(noted.length, 'car has', 'cars have')} a note, of ${active.length} · ${mine} written or edited by you, ${noted.length - mine} from Gemini.`)));
+  }
+
+  // By model year (only when some years are saved)
+  const decades = tallyBy(copies, i => decadeOf(modelOf(i).release_year));
+  const withYear = decades.reduce((a, [, n]) => a + n, 0);
+  if (withYear) v.append(h('div', { class: 'card' }, h('h3', {}, 'By model year'),
+    barList(decades.sort((a, b) => a[0].localeCompare(b[0]))),
+    h('p', { class: 'muted small', style: 'margin:8px 0 0' }, `Year saved for ${withYear} of ${plural(N, 'car', 'cars')}.`)));
 }
 
 async function renderGarage(v) {
