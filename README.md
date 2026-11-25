@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.26.0
+## Status: Stage 1 (quick-capture slice), version s1-0.27.0
+
+**s1-0.27.0 (25 Nov 2026): box contents sheet & label (D30: pack the boxes).** On a box with cars, "🧾 Contents sheet & label" opens one page: a large dashed label (BOX N, name, number of cars counting copies, brands, scales, date) to cut out and tape on the box, then every car inside with its photo, colour dot, name, brand, scale, code and ×N copies. Unnamed cars are listed last and flagged. "Print or save as PDF" uses the phone's print menu (menus and buttons are hidden on paper, A4); "Copy as text" gives a numbered list for WhatsApp or notes. Developer test: tests/e2e_boxsheet.py (fake Google, not a phone test).
 
 **s1-0.26.0 (25 Nov 2026): import from the gallery (D30: backlog speed).** Shoot boxes with the phone's camera app (front, back, front, back…), then import them all into one storage box: from a box card ("📥 Import photos into Box N"), from Photo run, or from Add. Photos are paired in the order they were taken (not by file name); a preview shows each pair, with "Swap front and back" and a warning for a left-over photo. Each car is saved exactly like a Photo run car (same photo copies, barcode read from the back photo). For a mixed box, "Different brands: set them later" saves cars without a brand; when you save Gemini's names on the Name tab, the brand is filled in only when exactly one of your brands matches what Gemini read. Nothing is merged automatically. Developer test: tests/e2e_import.py (fake Google, not a phone test).
 

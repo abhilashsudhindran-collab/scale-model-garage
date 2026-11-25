@@ -474,3 +474,28 @@ button.syncbtn:disabled { opacity: .45; cursor: default; }
 .importpair figure { margin: 0; flex: 1; }
 .importpair img { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 8px; display: block; background: var(--surface2); }
 .importpair figcaption { font-size: .75rem; color: var(--muted); text-align: center; margin-top: 2px; }
+
+/* Box contents sheet & label (s1-0.27.0) */
+.boxlabel { border: 2px dashed var(--muted); border-radius: 14px; padding: 18px 16px; text-align: center; margin-bottom: 14px; background: var(--surface); }
+.bl-num { font-size: 2.6rem; font-weight: 800; letter-spacing: .04em; line-height: 1.05; }
+.bl-name { font-size: 1.25rem; font-weight: 600; margin-top: 4px; }
+.bl-meta { margin-top: 6px; }
+.bl-date { color: var(--muted); font-size: .85rem; margin-top: 4px; }
+.bs-list { list-style: none; padding: 0; margin: 0; counter-reset: bs; }
+.bs-list li { counter-increment: bs; display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--surface2); break-inside: avoid; }
+.bs-list li::before { content: counter(bs); min-width: 1.6em; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.bs-ph { width: 52px; height: 52px; flex: none; border-radius: 8px; overflow: hidden; background: var(--surface2); }
+.bs-ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bs-ph img.fit { object-fit: contain; }
+.bs-tx { min-width: 0; }
+.bs-nm { font-weight: 600; }
+.bs-sub { color: var(--muted); font-size: .88rem; }
+@media print {
+  header.top, nav.bottom, .noprint, .toast, #toast { display: none !important; }
+  body, main#view { background: #fff !important; color: #000 !important; padding: 0 !important; margin: 0 !important; }
+  .boxlabel { background: #fff; border-color: #000; }
+  .bs-sub, .bl-date, .bs-list li::before { color: #333; }
+  .bs-list li { border-color: #ccc; }
+  .cdot, .bs-ph img { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @page { size: A4; margin: 12mm; }
+}
