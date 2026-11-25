@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.19.0
+## Status: Stage 1 (quick-capture slice), version s1-0.20.0
+
+**s1-0.20.0 (25 Nov 2026): car notes.** A short sub-note under each car's name: Fun fact, History, Pop culture or Casting (about the real car or the model). Gemini's table has a Note column (prompt `names-v7`: at most 25 words, only what it is confident is true, else -). The note shows on the car page labelled "from Gemini, not checked", with Keep / Edit / Hide; ＋ Add a note for your own. Saving a name on the Name tab keeps Gemini's note with it. Cars already named get a "Notes & colours" batch (same share → paste flow; never renames anything). New MODELS columns car_note, car_note_source (gemini / you / hidden); every change logged.
 
 **s1-0.19.0 (25 Nov 2026): colours.** Every car can have a colour family (14 swatches: red … black, multi-colour) plus Gemini's exact colour name. The colour comes from Gemini's answer (it sees the car; box art colours fool pixel counting), is mapped to a family ("Rosso Diablo" → red, "British Racing Green" → green, first colour named wins) and is saved only when B taps it: "Gemini said: Silver · Use Silver" on the car page, the Name tab save, or "Use all" in Garage → By colour. Car page swatch row (tap to set, tap again to clear); Garage "By colour" groups in colour order; tiles show a colour dot; CSV export has a Colour column; every change logged. New MODELS columns colour_family, colour_name (added to existing sheets on the next sync).
 

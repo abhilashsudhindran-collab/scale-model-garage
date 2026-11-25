@@ -413,3 +413,13 @@ button.syncbtn:disabled { opacity: .45; cursor: default; }
 .aicolour .dot, .cdot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0,0,0,.2); vertical-align: middle; }
 .cdot { margin-right: 6px; width: 10px; height: 10px; }
 .grid .colourall { grid-column: 1 / -1; }
+
+/* Car notes (s1-0.20.0) */
+.carnote { background: var(--surface); border-radius: 16px; padding: 12px 14px; margin: 4px 0 14px; border-left: 4px solid var(--accent); }
+.carnote .cn-tag { font-size: .8rem; font-weight: 700; letter-spacing: .02em; color: var(--muted); }
+.carnote .cn-body { font-size: 1.02rem; line-height: 1.4; margin: 4px 0 6px; }
+.carnote .cn-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.carnote .cn-foot .muted { margin-right: auto; }
+.addnote { margin: 0 0 10px; }
+.carnote .cn-foot button { min-height: 32px; padding: 4px 10px; font-size: .85rem; }
+.carnote .cn-foot .muted { font-size: .8rem; }
