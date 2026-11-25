@@ -54,19 +54,19 @@ export function collectionRows(data) {
   const barcodes = new Map(); for (const i of data.identifiers) if (i.identifier_type === 'barcode' && i.value_raw) (barcodes.get(i.model_id) || barcodes.set(i.model_id, []).get(i.model_id)).push(i.value_raw);
   const nPhotos = new Map(); for (const p of data.photos) nPhotos.set(p.model_id, (nPhotos.get(p.model_id) || 0) + 1);
   const boxName = new Map(data.boxes.map(b => [String(b.box_label).toLowerCase(), b.box_name || '']));
-  const head = ['Name', 'Brand', 'Scale', 'Product code', 'Barcode', 'Variant / colour', 'Series', 'Storage box', 'Box name', 'Box state', 'Condition', 'Box condition', 'Status', 'Price paid', 'Currency', 'Date bought', 'Bought from', 'Photos', 'Entry', 'Notes', 'Model ID', 'Copy ID', 'Added'];
+  const head = ['Name', 'Brand', 'Scale', 'Product code', 'Barcode', 'Variant / colour', 'Colour', 'Series', 'Storage box', 'Box name', 'Box state', 'Condition', 'Box condition', 'Status', 'Price paid', 'Currency', 'Date bought', 'Bought from', 'Photos', 'Entry', 'Notes', 'Model ID', 'Copy ID', 'Added'];
   const rows = [head];
   const copies = data.inventory.filter(i => model.has(i.model_id));
   copies.sort((a, b) => String(model.get(a.model_id).display_name || '~').localeCompare(String(model.get(b.model_id).display_name || '~')));
   for (const c of copies) {
     const m = model.get(c.model_id);
-    rows.push([m.display_name, brand[m.brand_id] || m.printed_brand_text, scale[m.scale_id], m.product_code, (barcodes.get(m.model_id) || []).join(' '), m.variant, m.series,
+    rows.push([m.display_name, brand[m.brand_id] || m.printed_brand_text, scale[m.scale_id], m.product_code, (barcodes.get(m.model_id) || []).join(' '), m.variant, [m.colour_family ? m.colour_family[0].toUpperCase() + m.colour_family.slice(1) : '', m.colour_name && m.colour_name.toLowerCase() !== (m.colour_family || '') ? m.colour_name : ''].filter(Boolean).join(' · '), m.series,
       c.storage_location, boxName.get(String(c.storage_location || '').toLowerCase()) || '', c.packaging_state, c.condition, c.packaging_condition, c.ownership_status,
       c.purchase_price, c.purchase_price ? (c.currency || 'INR') : '', c.purchase_date, c.purchase_source, nPhotos.get(m.model_id) || 0,
       m.completeness_status === 'complete' ? 'complete' : 'quick', m.notes, m.model_id, c.inventory_id, String(m.created_at || '').slice(0, 10)]);
   }
   // Models with no copy row (shouldn't happen, but never drop data silently)
   const withCopy = new Set(copies.map(c => c.model_id));
-  for (const m of data.models) if (!withCopy.has(m.model_id)) rows.push([m.display_name, brand[m.brand_id] || '', scale[m.scale_id] || '', m.product_code, (barcodes.get(m.model_id) || []).join(' '), m.variant, m.series, '', '', '', '', '', '(no copy)', '', '', '', '', nPhotos.get(m.model_id) || 0, m.completeness_status || 'quick', m.notes, m.model_id, '', String(m.created_at || '').slice(0, 10)]);
+  for (const m of data.models) if (!withCopy.has(m.model_id)) rows.push([m.display_name, brand[m.brand_id] || '', scale[m.scale_id] || '', m.product_code, (barcodes.get(m.model_id) || []).join(' '), m.variant, [m.colour_family ? m.colour_family[0].toUpperCase() + m.colour_family.slice(1) : '', m.colour_name && m.colour_name.toLowerCase() !== (m.colour_family || '') ? m.colour_name : ''].filter(Boolean).join(' · '), m.series, '', '', '', '', '', '(no copy)', '', '', '', '', nPhotos.get(m.model_id) || 0, m.completeness_status || 'quick', m.notes, m.model_id, '', String(m.created_at || '').slice(0, 10)]);
   return rows;
 }
