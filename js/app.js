@@ -17,7 +17,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.25.1';
+export const APP_VERSION = 's1-0.26.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -241,6 +241,7 @@ async function route() {
     else if (hash.startsWith('#/crop/')) await renderCrop(v, decodeURIComponent(hash.slice(7)));
     else if (hash.startsWith('#/settings')) await renderSettings(v);
     else if (hash.startsWith('#/brands')) await renderBrands(v);
+    else if (hash.startsWith('#/import')) await renderImport(v);
     else await renderGarage(v);
   } catch (e) {
     v.append(h('div', { class: 'banner bad' }, `Something went wrong: ${e.message}`));
@@ -334,6 +335,16 @@ async function applyBoxBrand(label) {
   const bs = rec?.box_scale || '';
   if (bs === 'mixed') { localStorage.setItem('smg.scalePerCar', '1'); if (cap && !Object.keys(cap.photos || {}).length) cap.scaleId = ''; }
   else if (bs) { localStorage.setItem('smg.scalePerCar', '0'); if (cap) cap.scaleId = bs; localStorage.setItem('smg.lastScale', bs); }
+}
+// Import from the gallery straight into this box: the box's brand and scale are the starting choice.
+async function importBox(label) {
+  const id = label.replace(/^Box\s*/i, '');
+  localStorage.setItem('smg.lastBox', id);
+  if (!cap) cap = freshCapture({ count: 0 });
+  cap.box = id;
+  try { localStorage.removeItem('smg.import'); } catch {}
+  importFiles = null;
+  location.hash = '#/import';
 }
 async function fillBox(label) {
   const id = label.replace(/^Box\s*/i, '');
@@ -620,6 +631,7 @@ async function renderGarage(v) {
         h('div', { class: 'row' }, h('h2', {}, icon('box'), `${label}${rec?.box_size ? ' · ' + rec.box_size : ''}`), h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; route(); } }, 'Close')),
         h('div', { class: 'muted' }, inBox.length ? `${plural(inBox.length, 'car', 'cars')} inside${byBrand ? ' · ' + byBrand : ''}` : 'Empty so far.'),
         h('button', { type: 'button', class: 'wide', style: 'margin-top:10px', onclick: () => fillBox(label) }, icon('camera'), `Fill ${label}`),
+        h('button', { type: 'button', class: 'ghost wide', style: 'margin-top:6px', onclick: () => importBox(label) }, `📥 Import photos into ${label}`),
         // Progressive disclosure (DV-0.1): settings stay open until the box knows its brands and scale, then fold away.
         h('details', { class: 'more', open: (boxSettingsOpen.has(label) ? boxSettingsOpen.get(label) : !(rec?.box_brand && rec?.box_scale)) ? true : undefined, ontoggle: (e) => boxSettingsOpen.set(label, e.target.open) },
         h('summary', {}, 'Box settings', h('span', { class: 'muted', style: 'font-weight:400' }, [rec?.box_brand === 'mixed' ? 'Mixed brands' : brandName[rec?.box_brand], rec?.box_scale === 'mixed' ? 'Mixed scales' : ref.scales.find(x => x.scale_id === rec?.box_scale)?.label, rec?.box_size].filter(Boolean).join(' · '))),
@@ -775,7 +787,8 @@ async function renderAdd(v) {
   const ref = await refData();
   const [models, ids] = await Promise.all([store.list('models'), store.list('product_identifiers')]);
   v.append(h('div', { class: 'row' }, h('h2', {}, 'Quick capture'), h('div', { class: 'muted', style: 'text-align:right' }, cap.count ? `${cap.count} saved this session` : 'Box by box')));
-  v.append(h('a', { href: '#/run', class: 'btn quiet wide', style: 'margin:4px 0 6px' }, '⚡ Photo run: photos now, names later'));
+  v.append(h('a', { href: '#/run', class: 'btn quiet wide', style: 'margin:4px 0 6px' }, '⚡ Photo run: photos now, names later'),
+    h('a', { href: '#/import', class: 'btn ghost wide', style: 'margin:0 0 6px' }, '📥 Import many from the gallery'));
 
   // --- Photos ---
   v.append(h('h3', {}, 'Photos (phone camera)'));
@@ -1084,6 +1097,7 @@ async function renderRun(v) {
   const next = steps.find(r => !cap.photos[r]);
   const say = h('p', { class: 'muted', id: 'runSay' });
   v.append(h('div', { class: 'runhead' }, h('b', {}, `Car ${cap.count + 1} of this run`), ` · ${brand ? brand.name : 'brand after photos'} · ${scale ? scale.label : 'scale after photos'}${cap.box ? ` · Box ${cap.box}` : ''}`));
+  v.append(h('a', { href: '#/import', class: 'btn ghost small importlink' }, '📥 Shot them with the camera app? Import from gallery'));
   v.append(boughtCard());
   const strip = h('div', { class: 'shots' });
   for (const role of ['box_front', 'box_rear', ...(cap.sealed ? ['box_art'] : [])]) {
@@ -1469,6 +1483,11 @@ async function renderName(v) {
     const fam = familyFrom(sg?.colour);
     if (fam && !m.colour_family) { patch.colour_family = fam; patch.colour_name = sg.colour; }
     if (sg?.carNote && !m.car_note && m.car_note_source !== 'hidden') { patch.car_note = sg.carNote; patch.car_note_source = 'gemini'; }
+    // Imported with "brands later": take the brand Gemini read, only when exactly one of B's brands is in it
+    if (!m.brand_id && sg?.brand) {
+      const hits = ref.brands.filter(b => normName(b.name).length >= 2 && normName(sg.brand).includes(normName(b.name)));
+      if (hits.length === 1) { const nb = hits[0]; const ns2 = assignNamespace(nb, null); Object.assign(patch, { brand_id: nb.brand_id, printed_brand_text: m.printed_brand_text || nb.name, code_namespace_type: ns2.type, code_namespace_id: ns2.id, namespace_status: ns2.status }); patch.duplicate_check_status = duplicateCheckStatus({ ...m, ...patch }); }
+    }
     if (sg) {
       // Record what B confirmed against what the AI suggested (AI_LOG, security doc §2.4).
       patch.identification_status = 'confirmed';
@@ -1505,6 +1524,90 @@ async function savePhotoRecords(modelId, photos) {
   return items;
 }
 
+// ---------- Import from the gallery (D30, 25 Nov: backlog speed) ----------
+// B shoots many boxes with the phone's camera app (front, back, front, back…), then imports them all into one
+// storage box. Photos are paired in the order they were taken; each car is saved exactly like a Photo run car
+// (same photo copies, barcode from the rear photo, same records). Nothing is merged automatically.
+let importFiles = null, importSwap = false, importBusy = false;
+const importSet = () => { try { return JSON.parse(localStorage.getItem('smg.import') || '{}'); } catch { return {}; } };
+const importSave = (o) => { try { localStorage.setItem('smg.import', JSON.stringify({ ...importSet(), ...o })); } catch {} };
+async function renderImport(v) {
+  const ref = await refData();
+  if (!cap) cap = freshCapture({ count: 0 });
+  const st = importSet();
+  const box = cap.box || localStorage.getItem('smg.lastBox') || '';
+  const rec = box ? (await boxNames()).get(`box ${box}`.toLowerCase()) || (await boxNames()).get(String(box).toLowerCase()) : null;
+  const brandId = st.brandId !== undefined ? st.brandId : (rec && rec.box_brand && rec.box_brand !== 'mixed' ? rec.box_brand : cap.brandId || '');
+  const scaleId = st.scaleId !== undefined ? st.scaleId : (rec && rec.box_scale && rec.box_scale !== 'mixed' ? rec.box_scale : cap.scaleId || '');
+  const sealed = !!st.sealed;
+  const per = sealed ? 3 : 2;
+  v.append(h('a', { href: '#/run', class: 'back' }, '← Photo run'), h('h2', {}, '📥 Import from gallery'),
+    h('div', { class: 'banner info' }, h('div', { class: 'hd' }, 'How it works'),
+      h('div', {}, `1. With your phone's camera app, photograph each box: front, then back${sealed ? ', then the box art' : ''}. Keep that order.`),
+      h('div', {}, '2. Pick all those photos here. The app pairs them in the order they were taken.'),
+      h('div', {}, '3. Check the pairs, then import. Name them with Gemini afterwards.')));
+  if (importBusy) { v.append(h('p', { id: 'importMsg' }, 'Importing…')); return; }
+  // settings
+  const set = h('div', { class: 'card' },
+    h('div', {}, h('b', {}, box ? `Into Box ${String(box).replace(/^box\s*/i, '')}` : 'No storage box chosen'), ' · ', h('a', { href: '#/run' }, 'change')),
+    h('label', { class: 'f' }, 'Brand'),
+    h('select', { 'aria-label': 'Brand for imported cars', onchange: async (e) => { const v2 = e.target.value; const id = v2 === 'later' ? '' : await pickedBrandId(v2, ref.brands, e.target); importSave({ brandId: v2 === 'later' ? '' : id }); route(); } },
+      h('option', { value: 'later', selected: !brandId ? true : undefined }, 'Different brands: set them later'), ...brandOptions(ref.brands, brandId, 'Pick one brand…').slice(1)),
+    h('label', { class: 'f' }, 'Scale'),
+    h('div', { class: 'chips' }, ref.scales.slice(0, 8).map(sc => h('button', { type: 'button', class: `chip ${scaleId === sc.scale_id ? 'on' : ''}`, onclick: () => { importSave({ scaleId: sc.scale_id }); route(); } }, sc.label)),
+      h('button', { type: 'button', class: `chip ${!scaleId ? 'on' : ''}`, onclick: () => { importSave({ scaleId: '' }); route(); } }, 'Mixed: later')),
+    h('div', { class: 'chips', style: 'margin-top:10px' },
+      h('button', { type: 'button', class: `chip ${!sealed ? 'on' : ''}`, onclick: () => { importSave({ sealed: false }); route(); } }, '2 photos per car (front, back)'),
+      h('button', { type: 'button', class: `chip ${sealed ? 'on' : ''}`, onclick: () => { importSave({ sealed: true }); route(); } }, '3 photos (+ box art)')));
+  v.append(set);
+  v.append(h('button', { type: 'button', class: importFiles ? 'quiet wide' : 'wide', onclick: async () => {
+    const files = await pickPhoto({ camera: false, multiple: true });
+    if (!files.length) return;
+    importFiles?.forEach(f => URL.revokeObjectURL(f.url));
+    importFiles = files.sort((a, b) => (a.lastModified - b.lastModified) || a.name.localeCompare(b.name)).map(file => ({ file, url: URL.createObjectURL(file) }));
+    importSwap = false; route();
+  } }, importFiles ? 'Pick different photos' : 'Pick photos from the gallery'));
+  if (!importFiles) return;
+  const groups = []; for (let i = 0; i + per <= importFiles.length; i += per) groups.push(importFiles.slice(i, i + per));
+  const left = importFiles.length % per;
+  v.append(h('div', { class: 'row', style: 'align-items:center;margin:12px 0 6px' },
+    h('b', { style: 'flex:1' }, `${importFiles.length} photos → ${plural(groups.length, 'car', 'cars')}`),
+    h('button', { type: 'button', class: 'quiet small', onclick: () => { importSwap = !importSwap; route(); } }, importSwap ? '↺ Undo swap' : '⇄ Swap front and back')));
+  if (left) v.append(h('div', { class: 'banner warn' }, `${plural(left, 'photo is', 'photos are')} left over at the end and won't be imported. Check the order, or pick again.`));
+  const grid = h('div', { class: 'importgrid' });
+  groups.forEach((g, k) => {
+    const order = importSwap ? [g[1], g[0], ...g.slice(2)] : g;
+    grid.append(h('div', { class: 'importcar' }, h('div', { class: 'muted small' }, `Car ${k + 1}`),
+      h('div', { class: 'importpair' }, order.map((f, j) => h('figure', {}, h('img', { src: f.url, alt: '', loading: 'lazy' }), h('figcaption', {}, ['Front', 'Back', 'Art'][j]))))));
+  });
+  v.append(grid);
+  if (!groups.length) return;
+  v.append(h('button', { type: 'button', class: 'wide', style: 'margin-top:12px', onclick: async () => {
+    if (!confirm(`Import ${plural(groups.length, 'car', 'cars')}${box ? ` into Box ${String(box).replace(/^box\s*/i, '')}` : ''}?`)) return;
+    importBusy = true; route();
+    const say = (t) => { const el = $('#importMsg'); if (el) el.textContent = t; };
+    let done = 0;
+    try {
+      for (const [k, g] of groups.entries()) {
+        say(`Importing car ${k + 1} of ${groups.length}…`);
+        const order = importSwap ? [g[1], g[0], ...g.slice(2)] : g;
+        cap = freshCapture({ brandId, scaleId, count: cap.count });
+        cap.box = box; cap.sealed = sealed;
+        const roles = ['box_front', 'box_rear', ...(sealed ? ['box_art'] : [])];
+        for (const [j, f] of order.entries()) {
+          const prep = await preparePhoto(f.file);
+          cap.photos[roles[j]] = { photoId: newId('photos'), prep, url: '', capturedAt: new Date(f.file.lastModified || Date.now()).toISOString() };
+          if (roles[j] === 'box_rear') { try { const r = await scanPhoto(f.file); if (r) { const raw = String(r.value).trim(); cap.barcode = { raw, cmp: barcodeCmp(raw), format: r.format, source: 'rear_photo', checkOk: gtinCheckOk(raw) }; } } catch (e) { console.warn('import barcode', e); } }
+        }
+        if (await saveCapture({ quiet: true })) done++;
+      }
+    } finally { importBusy = false; }
+    importFiles?.forEach(f => URL.revokeObjectURL(f.url)); importFiles = null;
+    toast(`Imported ${plural(done, 'car', 'cars')} ✓ Next: name them with Gemini`, 4000);
+    location.hash = '#/name';
+  } }, `Import ${plural(groups.length, 'car', 'cars')}`));
+}
+
 // ---------- Just bought (B, 25 Nov: ~20 new cars a month; record price, date and shop when buying) ----------
 // Shop and date are set once and kept for the session (several cars from one shop); the price is per car.
 // It switches itself off on another day, so older cars are never recorded as bought today by mistake.
@@ -1534,7 +1637,7 @@ function boughtCard() {
     h('p', { class: 'muted small', style: 'margin:6px 0 0' }, 'Shop and date stay for the next cars today; the price is per car.'));
 }
 
-async function saveCapture() {
+async function saveCapture({ quiet = false } = {}) {
   const ref = await refData();
   const brand = ref.brands.find(b => b.brand_id === cap.brandId);
   const ns = assignNamespace(brand, null);
@@ -1548,17 +1651,16 @@ async function saveCapture() {
     ...(await savePhotoRecords(cap.modelId, photosToSave()))];
   if (cap.barcode) items.push({ entity: 'product_identifiers', fields: { model_id: cap.modelId, identifier_type: 'barcode', value_raw: cap.barcode.raw, value_cmp: cap.barcode.cmp, barcode_format: cap.barcode.format || '', check_digit_ok: cap.barcode.checkOk === null ? '' : (cap.barcode.checkOk ? 'yes' : 'no'), source: cap.barcode.source } });
   try { await store.createMany(items); }
-  catch (e) { toast(`Not saved: ${e.message}. Your box is kept here; try again.`, 5000, 'bad'); return; }
+  catch (e) { toast(`Not saved: ${e.message}. Your box is kept here; try again.`, 5000, 'bad'); return false; }
   pushRecentBrand(cap.brandId);
   const secs = seconds(touch(cap.timer));
   await logTiming(secs);
   await clearDraft();
   if (boughtGet().on) rememberShop(boughtGet().source);
   cap = freshCapture({ brandId: nextBrandId(), scaleId: nextScaleId(), count: cap.count + 1 });
-  toast(`Saved ✓ (${secs} s)${cap.box ? ` · Box ${cap.box}` : ''} — next car`);
-  window.scrollTo(0, 0);
-  route();
+  if (!quiet) { toast(`Saved ✓ (${secs} s)${cap.box ? ` · Box ${cap.box}` : ''} — next car`); window.scrollTo(0, 0); route(); }
   autoSyncSoon();
+  return true;
 }
 
 async function saveCopyOf(m) {

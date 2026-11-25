@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.25.1
+## Status: Stage 1 (quick-capture slice), version s1-0.26.0
+
+**s1-0.26.0 (25 Nov 2026): import from the gallery (D30: backlog speed).** Shoot boxes with the phone's camera app (front, back, front, back…), then import them all into one storage box: from a box card ("📥 Import photos into Box N"), from Photo run, or from Add. Photos are paired in the order they were taken (not by file name); a preview shows each pair, with "Swap front and back" and a warning for a left-over photo. Each car is saved exactly like a Photo run car (same photo copies, barcode read from the back photo). For a mixed box, "Different brands: set them later" saves cars without a brand; when you save Gemini's names on the Name tab, the brand is filled in only when exactly one of your brands matches what Gemini read. Nothing is merged automatically. Developer test: tests/e2e_import.py (fake Google, not a phone test).
 
 **s1-0.25.1 (25 Nov 2026): fixes from B's phone.** Car notes were cut mid-word ("…between 195"): table cells were capped at 160 characters; notes now keep up to ~450 and end at a whole word with "…". The colour swatch now sits at the end of the car's name even when the name wraps onto two lines.
 
