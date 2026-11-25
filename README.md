@@ -5,7 +5,11 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.36.0
+## Status: Stage 1 (quick-capture slice), version s1-0.36.2
+
+**s1-0.36.2 (25 Nov 2026): group headings look like section headings.** B: in By brand / By box / By scale / By colour, each group heading should divide the areas. Now: a thin rule above each group (not the first), more space, bolder name, the count as a green pill, and a › on box groups (they open the box).
+
+**s1-0.36.1 (25 Nov 2026): Car of the day shows the whole box.** B's phone: the WERK83 1:18 photo was cropped in a narrow side strip. The photo now runs full width on top of the card and is shown whole (any box shape), text below.
 
 **s1-0.36.0 (25 Nov 2026): Car of the day + Showroom (B's picks from the Garage delight kit).** **Car of the day** on the Garage home: one of your named cars with a photo, the same all day and a different one tomorrow; tap to flip it to its note (Gemini's notes marked "not checked"); "Open car"; × hides it until tomorrow. **Showroom** (box card → ▶ Showroom): swipe or tap through a storage box one car at a time, full screen, story ticks on top, photo first, then brand · scale · code, name with colour dot, copies and note; advances by itself every 5 s when moments are on; × or Esc closes back to the box; arrow keys on a computer. Tests: tests/e2e_showroom.py.
 

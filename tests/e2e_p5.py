@@ -266,13 +266,13 @@ def main():
         # Grouped views in the Garage
         page.goto(base + '#/'); page.wait_for_selector('.tile'); page.fill('input[type=search]', ''); page.wait_for_timeout(200)
         page.get_by_role('button', name='By brand', exact=True).click(); page.wait_for_timeout(300)
-        groups = [g.inner_text().upper() for g in page.query_selector_all('h3.group')]
+        groups = [' · '.join(g.inner_text().upper().replace('\n›', ' ›').split('\n')) for g in page.query_selector_all('h3.group')]
         check(groups == ['BBURAGO · 5 MODELS', 'HOT WHEELS · 3 MODELS', 'MINI GT · 5 MODELS'], f'By brand groups A–Z ({groups})')
         page.get_by_role('button', name='By scale', exact=True).click(); page.wait_for_timeout(300)
-        groups = [g.inner_text().upper() for g in page.query_selector_all('h3.group')]
+        groups = [' · '.join(g.inner_text().upper().replace('\n›', ' ›').split('\n')) for g in page.query_selector_all('h3.group')]
         check([g.split(' ·')[0] for g in groups] == ['1:64', '1:43', '1:18'], f'By scale groups in scale order ({groups})')
         page.get_by_role('button', name='By box', exact=True).click(); page.wait_for_timeout(300)
-        groups = [g.inner_text().upper() for g in page.query_selector_all('h3.group')]
+        groups = [' · '.join(g.inner_text().upper().replace('\n›', ' ›').split('\n')) for g in page.query_selector_all('h3.group')]
         check(groups[1].startswith('BOX 12 · L · LE MANS RACERS · 2 MODELS') and groups[-1].startswith('NO BOX YET'), f'By box headers carry box names ({groups})')
         page.screenshot(path=f'{SHOTS}/04-bybox.png')
         page.locator('h3.group a', has_text='BOX 30').click(); page.wait_for_selector('.boxcard')

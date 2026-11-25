@@ -19,7 +19,7 @@ import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn }
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.36.0';
+export const APP_VERSION = 's1-0.36.2';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -754,8 +754,11 @@ async function renderGarage(v) {
         const g = gk(r);
         if (g !== lastGroup) {
           lastGroup = g;
-          const text = `${glabel(g)} · ${plural(gcount.get(g), 'model', 'models')}`;
-          grid.append(grouping === 'box' && g ? h('h3', { class: 'group' }, h('a', { href: '#/', onclick: (e) => { e.preventDefault(); garageFilter = 'all'; garageSearch = g; route(); } }, `${text} ›`)) : h('h3', { class: 'group' }, text));
+          // Section header (B, 25 Nov: "should look like a heading, dividing two areas"): rule above, name, count pill
+          const name = h('span', { class: 'g-name' }, glabel(g)), count = h('span', { class: 'g-count' }, plural(gcount.get(g), 'model', 'models'));
+          grid.append(grouping === 'box' && g
+            ? h('h3', { class: 'group' }, h('a', { href: '#/', onclick: (e) => { e.preventDefault(); garageFilter = 'all'; garageSearch = g; route(); } }, name, count, h('span', { class: 'g-go', 'aria-hidden': 'true' }, '›')))
+            : h('h3', { class: 'group' }, name, count));
         }
       }
       const ph = (photosByModel.get(m.model_id) || []).find(p => p.photo_id === m.primary_photo_id) || (photosByModel.get(m.model_id) || [])[0];
