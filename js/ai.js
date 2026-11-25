@@ -3,30 +3,39 @@
 // then pastes the answer back. The answer is UNTRUSTED TEXT: parsed as data only, validated, and used
 // only to pre-fill fields as suggestions that B confirms or corrects. Nothing is saved automatically.
 
-export const PROMPT_VERSION = 'names-v7';
+export const PROMPT_VERSION = 'names-v8';
 // 5 boxes = 10 photos per share. B's phone (24 Nov 21:39) refused to share 20 photos at once (2 worked);
 // Chrome on Android appears to cap a share at about 10 files (not confirmed in its docs), so batches stay at 10 photos.
 export const MAX_BATCH = 5;
 
 // boxes: [{ brand, scale }] in the order their photos are shared (front, then rear, for each box).
 export function buildPrompt(boxes, { extras = false } = {}) {
-  // names-v4 (B's real replies, 24 Nov): Gemini answers with a table anyway, so ask for one with known headings.
-  // names-v7 (B, 24 Nov): a Note column: fun fact, history, pop culture or casting. extras = cars already named.
+  // names-v8 (B, 25 Nov): Gemini made up its own table when the instructions didn't arrive, and left out Colour and
+  // Note. The headings come first and last, with a full example row; the Note asks for the kind of fact B wants.
+  const head = '| Box | Car name | Year | Product code | Brand | Colour | Note |';
   const lines = boxes.map((b, i) => `Box ${i + 1}: photo ${i * 2 + 1} = box front, photo ${i * 2 + 2} = box back${b.name ? ` (already named: ${b.name})` : ''}${b.brand ? ` (brand: ${b.brand}${b.scale ? `, ${b.scale}` : ''})` : ''}`);
   return [
-    'Reply with ONE table only, with exactly these column headings:',
-    '| Box | Car name | Year | Product code | Brand | Colour | Note |',
-    ...(extras ? ['', 'These cars are already named; what I need most is Colour and Note. Fill the other columns too if you can read them.'] : []),
+    'Reply with ONE table only, with exactly these 7 column headings, in this order:',
+    head,
+    'Example row:',
+    '| Box 1 | McLaren F1 GTR 1995 Presentation | 1995 | MGT00949 | Mini GT | Orange | History: The F1 GTR won Le Mans overall at its first attempt in 1995, beating purpose-built prototypes. |',
+    ...(extras ? ['', 'These cars are already named. What I need most is the Colour and the Note for each one.'] : []),
     '',
-    `I'm cataloguing my die-cast model car boxes. There are ${boxes.length} box${boxes.length === 1 ? '' : 'es'}, ${boxes.length * 2} photos, in this order:`,
+    `I'm cataloguing my die-cast model cars. There are ${boxes.length} box${boxes.length === 1 ? '' : 'es'}, ${boxes.length * 2} photos, in this order:`,
     ...lines,
     '',
     'Car name = the real car (make, model, version, livery), never the brand.',
     'Product code = this car\'s own catalogue number exactly as printed (e.g. MGT00123-L, KHMG197, PR64-240, JKY27), usually on the box back or side. Not the barcode digits, and not an assortment or case code shared by a whole set (e.g. "Asst. HRT81" or the code at the top of a Hot Wheels card). If you cannot read it clearly, write -.',
     'Hot Wheels: the car\'s own code (5 characters, e.g. JKY27) is often on the back, and on an India import sticker as "Item No.". Two cars from one set never share a code.',
     'Colour = the main colour of the car itself (not the box).',
-    'Note = one short, true thing about the real car or this model, at most 25 words, starting with "Fun fact:", "History:", "Pop culture:" or "Casting:". Only what you are confident is true; otherwise -.',
+    'Note = the single most interesting true thing about this model or the real car, at most 35 words, starting with one of:',
+    '  "Casting:" (rare or famous casting, Treasure Hunt / Super Treasure Hunt, limited edition, collaboration, convention or club exclusive, first release of this casting),',
+    '  "History:" (race wins, records, production numbers, why the real car mattered),',
+    '  "Pop culture:" (films, games, famous owners), or "Fun fact:".',
+    '  Prefer a Casting note when the model itself is special. Only what you are confident is true; otherwise -.',
     'Use - for anything you cannot read. Do not guess. No other text before or after the table.',
+    '',
+    `Remember: one table, headings ${head}`,
   ].join('\n');
 }
 

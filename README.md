@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.21.0
+## Status: Stage 1 (quick-capture slice), version s1-0.21.1
+
+**s1-0.21.1 (25 Nov 2026): straightened photos shown whole (B).** A straightened or rotated photo is just the box, so the tall Garage tile cut the ends off wide boxes (e.g. the 1:18 WERK83). Such photos are now shown whole, centred on a light background with a soft shadow (product-shot style), in Garage tiles and the car page thumbnails. Raw photos still fill the tile, so table clutter stays hidden. Also: prompt `names-v8` (headings first and last, a full example row, a Note that asks for casting rarity / Treasure Hunts / limited editions / collaborations, race history, pop culture), because Gemini made up its own table without Colour or Note when the instructions didn't arrive; the waiting screen now says to paste the instructions in Gemini, with "Copy the instructions again".
 
 **s1-0.21.0 (25 Nov 2026): rotate photos (B).** Car page → tap a photo → "↺ Rotate left" / "Rotate right ↻". A quarter turn is made the same way as straightening (the four corners are turned and a new straight copy is made), so it combines with straightening, the original photo is never changed, the copy syncs like a straightened one, and "Back to original" (was "Undo straightening") undoes both. Photos edited this way are marked "edited".
 
