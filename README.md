@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.27.0
+## Status: Stage 1 (quick-capture slice), version s1-0.27.1
+
+**s1-0.27.1 (25 Nov 2026): "No barcode" in To check.** The barcode is read automatically from each back photo; cars where it wasn't read now appear under Dashboard → To check → No barcode, so they can be re-shot or typed in (car page → Edit details → More details → Barcode). A box with no barcode printed on it can be marked "This box has no barcode printed on it" and leaves the list (MODELS.barcode_absent, column added to the sheet automatically on the next sync). Gallery import now says how many barcodes it read ("barcode read on 4 of 5").
 
 **s1-0.27.0 (25 Nov 2026): box contents sheet & label (D30: pack the boxes).** On a box with cars, "🧾 Contents sheet & label" opens one page: a large dashed label (BOX N, name, number of cars counting copies, brands, scales, date) to cut out and tape on the box, then every car inside with its photo, colour dot, name, brand, scale, code and ×N copies. Unnamed cars are listed last and flagged. "Print or save as PDF" uses the phone's print menu (menus and buttons are hidden on paper, A4); "Copy as text" gives a numbered list for WhatsApp or notes. Developer test: tests/e2e_boxsheet.py (fake Google, not a phone test).
 
