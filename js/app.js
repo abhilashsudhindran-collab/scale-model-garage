@@ -17,7 +17,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.20.0';
+export const APP_VERSION = 's1-0.20.1';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -144,6 +144,7 @@ async function refreshStatus() {
 }
 
 let lastSyncMsg = '';
+let colourOpenFor = null; // car page: the model whose colour picker is open
 let moveBoxFor = null; // car page: the model whose "Move box" panel is open
 // Sync button state (B, 24 Nov): greyed out with "Syncing…" while a sync runs.
 // Button look rule (B, 24 Nov 23:10): greyed = can't work now (syncing, offline); quiet = works but not needed
@@ -1530,8 +1531,13 @@ async function renderItem(v, modelId) {
   const scaleN = ref.scales.find(x => x.scale_id === m.scale_id)?.label || '';
   v.append(h('div', { class: 'pdp-head' },
     h('div', { class: 'pdp-kicker' }, [brandN, scaleN].filter(Boolean).join(' · ') || 'Brand and scale not set'),
-    h('h2', {}, m.display_name || '(no name yet)'),
+    h('h2', {}, m.display_name || '(no name yet)',
+      // Colour swatch next to the name (B, 25 Nov); tap to change it
+      !m.deleted_at ? h('button', { type: 'button', class: `namesw ${m.colour_family ? '' : 'empty'}`, 'aria-label': m.colour_family ? `Colour: ${familyLabel(m.colour_family)}. Tap to change` : 'Set colour',
+        title: m.colour_family ? familyLabel(m.colour_family) : 'Set colour', style: m.colour_family ? `background:${familySwatch(m.colour_family)}` : '',
+        onclick: () => { colourOpenFor = colourOpenFor === modelId ? null : modelId; route(); } }, m.colour_family ? '' : '+') : null),
     m.product_code ? h('div', { class: 'pdp-code' }, m.product_code) : null));
+  const colourSlot = h('div'); v.append(colourSlot); // the colour picker opens here, right under the name
   // Car note (B, 24 Nov): fun fact / history / pop culture / casting, a sub-note under the name.
   // Gemini's note is shown labelled "from Gemini, not checked" until B keeps, edits or hides it.
   const aiAll = m.deleted_at ? {} : ((await aiColours(ref)).get(modelId) || {});
@@ -1657,13 +1663,14 @@ async function renderItem(v, modelId) {
       h('div', { class: 'row', style: 'align-items:center;gap:8px' }, h('span', { class: 'f', style: 'margin:0' }, 'Colour'),
         m.colour_family ? h('span', { class: 'muted' }, [familyLabel(m.colour_family), m.colour_name && m.colour_name.toLowerCase() !== familyLabel(m.colour_family).toLowerCase() ? m.colour_name : ''].filter(Boolean).join(' · ')) : h('span', { class: 'muted' }, 'not set')),
       !m.colour_family && ai ? h('div', { class: 'aicolour' }, h('span', { class: 'dot', style: `background:${familySwatch(ai.family)}` }), `Gemini said: ${ai.name}`,
-        h('button', { type: 'button', class: 'quiet small', onclick: async () => { await setColour(modelId, ai.family, ai.name, 'colour from Gemini, confirmed'); toast(`Colour: ${familyLabel(ai.family)} ✓`); route(); } }, `Use ${familyLabel(ai.family)}`)) : null,
-      swatchRow(m.colour_family, async (k) => { await setColour(modelId, k === m.colour_family ? '' : k, k === m.colour_family ? '' : (ai?.family === k ? ai.name : ''), 'colour set in app'); route(); }));
+        h('button', { type: 'button', class: 'quiet small', onclick: async () => { await setColour(modelId, ai.family, ai.name, 'colour from Gemini, confirmed'); colourOpenFor = null; toast(`Colour: ${familyLabel(ai.family)} ✓`); route(); } }, `Use ${familyLabel(ai.family)}`)) : null,
+      colourOpenFor === modelId ? swatchRow(m.colour_family, async (k) => { await setColour(modelId, k === m.colour_family ? '' : k, k === m.colour_family ? '' : (ai?.family === k ? ai.name : ''), 'colour set in app'); colourOpenFor = null; route(); }) : null);
     var colourBlock = cBlock;
   }
   v.append(h('div', { class: 'facts' }, facts.map(t => /^Box /.test(t) ? h('a', { class: 'fact', href: '#/', onclick: (e) => { e.preventDefault(); garageFilter = 'all'; garageSearch = t; location.hash = '#/'; } }, icon('box'), t) : h('span', { class: 'fact' }, t))));
 
-  if (typeof colourBlock !== 'undefined' && colourBlock) v.append(colourBlock);
+  // shown under the name only while the picker is open, or while Gemini's colour waits for a tap
+  if (typeof colourBlock !== 'undefined' && colourBlock && (colourOpenFor === modelId || (!m.colour_family && aiAll.family))) colourSlot.append(colourBlock);
   // Editable product fields
   // Typed edits are saved before any navigation or redraw (audit I1): see leaveHooks in route().
   const barcodes = idfs.filter(i => i.identifier_type === 'barcode');
