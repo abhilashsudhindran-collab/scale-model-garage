@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.36.2
+## Status: Stage 1 (quick-capture slice), version s1-0.36.3
+
+**s1-0.36.3 (25 Nov 2026): updates arrive whole.** B's phone showed s1-0.36.2 (new code) with the old Car of the day layout: the browser had kept the old style file (GitHub Pages lets browsers reuse files for ~10 minutes). The service worker now always asks the server for app files when online (`cache: 'no-cache'`, a quick 'not modified' when nothing changed), so code and styles of a release always match. Offline use is unchanged (cache fallback).
 
 **s1-0.36.2 (25 Nov 2026): group headings look like section headings.** B: in By brand / By box / By scale / By colour, each group heading should divide the areas. Now: a thin rule above each group (not the first), more space, bolder name, the count as a green pill, and a › on box groups (they open the box).
 
