@@ -42,6 +42,20 @@ def main():
         page.fill('input[type=search]', 'Box 1'); page.wait_for_selector('.boxcard')
         page.locator('text=🧾 Contents sheet & label').click(); page.wait_for_selector('.boxsheet')
         check(page.inner_text('.bl-num') == 'BOX 1', 'label shows BOX 1 in large type')
+        page.wait_for_selector('.bl-qr svg', timeout=10000)
+        url = page.evaluate('''(async () => {
+          const svg = document.querySelector('.bl-qr svg').outerHTML;
+          const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); await img.decode();
+          const c = document.createElement('canvas'); c.width = c.height = 400; const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 400, 400); g.drawImage(img, 0, 0, 400, 400);
+          await new Promise((res, rej) => { const s = document.createElement('script'); s.src = './vendor/barcode/ponyfill.js'; s.onload = res; s.onerror = rej; document.head.append(s); });
+          window.BarcodeDetectionAPI.prepareZXingModule({ overrides: { locateFile: (p, pre) => p.endsWith('.wasm') ? './vendor/barcode/zxing_reader.wasm' : pre + p } });
+          const det = new window.BarcodeDetectionAPI.BarcodeDetector({ formats: ['qr_code'] });
+          const r = await det.detect(c); return r[0] ? r[0].rawValue : null; })()''')
+        print('   QR reads:', url)
+        check(bool(url) and url.endswith('#/box/1') and url.startswith(base.rstrip('/')), f'QR on the label decodes to this box link ({url})')
+        page.goto(url); page.wait_for_selector('.boxcard')
+        check(page.is_visible('text=Fill Box 1'), 'opening the QR link shows Box 1 and its cars')
+        page.goto(base + '#/boxsheet/1'); page.wait_for_selector('.boxsheet')
         meta = page.inner_text('.bl-meta')
         check('3 cars' in meta and 'Mini GT' in meta and '1:64' in meta, f'label: count incl. copies, brand, scale ({meta!r})')
         check(page.locator('.bs-list li').count() == 2, 'two different cars listed')
