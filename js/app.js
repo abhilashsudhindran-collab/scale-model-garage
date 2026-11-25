@@ -17,7 +17,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.26.0';
+export const APP_VERSION = 's1-0.27.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -242,6 +242,7 @@ async function route() {
     else if (hash.startsWith('#/settings')) await renderSettings(v);
     else if (hash.startsWith('#/brands')) await renderBrands(v);
     else if (hash.startsWith('#/import')) await renderImport(v);
+    else if (hash.startsWith('#/boxsheet/')) await renderBoxSheet(v, decodeURIComponent(hash.slice(11)));
     else await renderGarage(v);
   } catch (e) {
     v.append(h('div', { class: 'banner bad' }, `Something went wrong: ${e.message}`));
@@ -632,6 +633,7 @@ async function renderGarage(v) {
         h('div', { class: 'muted' }, inBox.length ? `${plural(inBox.length, 'car', 'cars')} inside${byBrand ? ' · ' + byBrand : ''}` : 'Empty so far.'),
         h('button', { type: 'button', class: 'wide', style: 'margin-top:10px', onclick: () => fillBox(label) }, icon('camera'), `Fill ${label}`),
         h('button', { type: 'button', class: 'ghost wide', style: 'margin-top:6px', onclick: () => importBox(label) }, `📥 Import photos into ${label}`),
+        inBox.length ? h('a', { href: `#/boxsheet/${encodeURIComponent(oneBox[1].toUpperCase())}`, class: 'btn ghost wide', style: 'margin-top:6px' }, `🧾 Contents sheet & label`) : null,
         // Progressive disclosure (DV-0.1): settings stay open until the box knows its brands and scale, then fold away.
         h('details', { class: 'more', open: (boxSettingsOpen.has(label) ? boxSettingsOpen.get(label) : !(rec?.box_brand && rec?.box_scale)) ? true : undefined, ontoggle: (e) => boxSettingsOpen.set(label, e.target.open) },
         h('summary', {}, 'Box settings', h('span', { class: 'muted', style: 'font-weight:400' }, [rec?.box_brand === 'mixed' ? 'Mixed brands' : brandName[rec?.box_brand], rec?.box_scale === 'mixed' ? 'Mixed scales' : ref.scales.find(x => x.scale_id === rec?.box_scale)?.label, rec?.box_size].filter(Boolean).join(' · '))),
@@ -1522,6 +1524,55 @@ async function savePhotoRecords(modelId, photos) {
       source: 'camera', original_filename: p.prep.original_filename, captured_at: p.capturedAt, ai_processed: 'no' } });
   }
   return items;
+}
+
+// ---------- Box contents sheet & label (D30: pack the boxes) ----------
+// One page per storage box: a big label to tape on the box, then every car inside (photo, brand, name, code, scale,
+// colour, copies). Print or save as PDF from the phone's print menu, or copy as text for WhatsApp/notes.
+async function renderBoxSheet(v, id) {
+  const label = `Box ${String(id).replace(/^box\s*/i, '').toUpperCase()}`;
+  const ref = await refData();
+  const rec = (await boxNames()).get(label.toLowerCase());
+  const models = (await store.list('models')).filter(m => !m.deleted_at);
+  const modelById = new Map(models.map(m => [m.model_id, m]));
+  const inv = (await store.list('inventory')).filter(i => !i.deleted_at && i.ownership_status === 'Owned' && modelById.has(i.model_id) && String(i.storage_location || '').toLowerCase() === label.toLowerCase());
+  const photos = (await store.list('photos')).filter(p => !p.deleted_at);
+  const brandName = Object.fromEntries(ref.brands.map(b => [b.brand_id, b.name]));
+  const scaleLabel = Object.fromEntries(ref.scales.map(sc => [sc.scale_id, sc.label]));
+  const copies = new Map(); for (const i of inv) copies.set(i.model_id, (copies.get(i.model_id) || 0) + 1);
+  const rows = [...copies.keys()].map(id2 => modelById.get(id2)).map(m => ({ m, brand: brandName[m.brand_id] || m.printed_brand_text || '', n: copies.get(m.model_id) }))
+    .sort((a, b) => (!a.brand - !b.brand) || a.brand.localeCompare(b.brand) || (!a.m.display_name - !b.m.display_name) || String(a.m.display_name || '').localeCompare(String(b.m.display_name || '')));
+  const total = inv.length;
+  const brandsLine = rec?.box_brand === 'mixed' || !rec?.box_brand ? [...new Set(rows.map(r => r.brand).filter(Boolean))].slice(0, 4).join(' · ') + (new Set(rows.map(r => r.brand)).size > 4 ? ' · …' : '') : brandName[rec.box_brand];
+  const scalesLine = [...new Set(rows.map(r => scaleLabel[r.m.scale_id]).filter(Boolean))].join(' · ');
+  const today = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  const asText = () => [`${label}${rec?.box_name ? ' · ' + rec.box_name : ''} — ${plural(total, 'car', 'cars')} (${today})`,
+    ...rows.map((r, k) => `${k + 1}. ${[r.brand, r.m.display_name || 'Name not set', r.m.product_code, scaleLabel[r.m.scale_id], r.m.colour_name || (r.m.colour_family ? familyLabel(r.m.colour_family) : '')].filter(Boolean).join(' · ')}${r.n > 1 ? ` ×${r.n}` : ''}`)].join('\n');
+  v.append(h('div', { class: 'noprint' }, h('a', { href: '#/', class: 'back', onclick: () => { garageFilter = 'all'; garageSearch = label; } }, `← ${label}`)),
+    h('div', { class: 'row noprint', style: 'gap:8px;margin:8px 0 14px' },
+      h('button', { type: 'button', style: 'flex:1', onclick: () => window.print() }, '🖨 Print or save as PDF'),
+      h('button', { type: 'button', class: 'quiet', style: 'flex:1', onclick: async () => toast(await copyText(asText()) ? 'List copied ✓' : 'Could not copy', 2000, 'ok') }, 'Copy as text')));
+  const sheet = h('div', { class: 'boxsheet' });
+  sheet.append(h('div', { class: 'boxlabel' },
+    h('div', { class: 'bl-num' }, label.toUpperCase()),
+    rec?.box_name ? h('div', { class: 'bl-name' }, rec.box_name) : null,
+    h('div', { class: 'bl-meta' }, [plural(total, 'car', 'cars'), brandsLine, scalesLine].filter(Boolean).join(' · ')),
+    h('div', { class: 'bl-date' }, `Packed list · ${today}`)));
+  const missing = rows.filter(r => !r.m.display_name).length;
+  if (missing) sheet.append(h('div', { class: 'banner warn noprint' }, `${plural(missing, 'car has', 'cars have')} no name yet. Name them first for a complete list, or print as is.`));
+  const list = h('ol', { class: 'bs-list' });
+  for (const r of rows) {
+    const ph = photos.filter(p => p.model_id === r.m.model_id).sort((a, b) => (a.shot_role === 'box_front' ? -1 : 0) - (b.shot_role === 'box_front' ? -1 : 0))[0];
+    const img = h('img', { alt: '', class: ph?.crop_corners ? 'fit' : '' });
+    if (ph) photoUrl(ph).then(u => { if (u) img.src = u; }).catch(() => {});
+    list.append(h('li', {},
+      h('div', { class: 'bs-ph' }, ph ? img : null),
+      h('div', { class: 'bs-tx' },
+        h('div', { class: 'bs-nm' }, r.m.colour_family ? h('span', { class: 'cdot', style: `background:${familySwatch(r.m.colour_family)}` }) : null, r.m.display_name || h('span', { class: 'muted' }, 'Name not set'), r.n > 1 ? h('b', { class: 'bs-n' }, ` ×${r.n}`) : null),
+        h('div', { class: 'bs-sub' }, [r.brand || 'Brand not set', scaleLabel[r.m.scale_id], r.m.product_code].filter(Boolean).join(' · ')))));
+  }
+  sheet.append(rows.length ? list : h('p', { class: 'muted' }, 'This box is empty.'));
+  v.append(sheet);
 }
 
 // ---------- Import from the gallery (D30, 25 Nov: backlog speed) ----------
