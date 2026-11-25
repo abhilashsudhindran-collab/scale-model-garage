@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.39.0
+## Status: Stage 1 (quick-capture slice), version s1-0.40.0
+
+**s1-0.40.0 (25 Nov 2026): tablet and laptop/desktop layouts.** Phones are unchanged. **Tablet (760–1099 px):** car page in two columns (photos left and sticky, name, note, actions and details right); Dashboard and Settings cards flow in two columns; the Gemini check page shows two cars side by side; the contents sheet list is two columns; box-card buttons pair up; Car of the day puts the whole photo beside the text. From 900 px the Showroom shows the photo left and the story right. **Laptop/desktop (1100 px and up):** a side rail replaces the bottom bar; Garage grid 5–6 across; Dashboard and Settings in three columns; three cars per row on the check page. Turning a tablet or resizing a window redraws the page in the right layout. Showroom photo shadow now follows the photo's edges.
 
 **s1-0.39.0 (25 Nov 2026): one Gemini round does everything.** B: "make sure it happens in a single step… in a single run it should take care of all these aspects." The Name tab's one button ("Do the next N boxes with Gemini") now picks every car that's missing **anything**: boxes with no name first, then named cars missing a product code, colour or note. One share, one Paste & use, one check page, one Save: each car gets its name, code, colour and note together (named cars keep their name; Gemini's reading is shown; a saved code is never replaced; the note to be saved is previewed). A car Gemini has already been asked about isn't sent again (some boxes truly have no code). The separate "Notes & colours" round is gone. Test: tests/e2e_oneround.py.
 

@@ -19,7 +19,7 @@ import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn }
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.39.0';
+export const APP_VERSION = 's1-0.40.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -242,7 +242,10 @@ async function route() {
   // Render into a fresh container and swap it in only if no newer navigation started meanwhile
   // (prevents two overlapping renders from mixing their content).
   const token = ++routeSeq;
-  const v = h('div');
+  // view-<page> lets tablet and desktop layouts (s1-0.40.0) arrange each page; phones are unchanged
+  const page = hash.slice(2).split('/')[0] || 'garage';
+  const v = h('div', { class: `view view-${page}` });
+  document.body.dataset.page = page;
   try {
     if (hash.startsWith('#/add')) await renderAdd(v);
     else if (hash.startsWith('#/run')) await renderRun(v);
@@ -2144,6 +2147,10 @@ async function logTiming(secs) {
 // =====================================================================
 // Item details (add details later, D17)
 // =====================================================================
+// Wide layout = tablet and up. Crossing the line (rotating a tablet, resizing a window) redraws the page.
+const WIDE_Q = window.matchMedia ? matchMedia('(min-width: 760px)') : null;
+const wideLayout = () => !!WIDE_Q?.matches;
+WIDE_Q?.addEventListener?.('change', () => route());
 async function renderItem(v, modelId) {
   const rec = await store.getRecord('models', modelId);
   if (!rec) { v.append(h('p', {}, 'Not found.'), h('a', { href: '#/' }, '← Garage')); return; }
@@ -2437,6 +2444,17 @@ async function renderItem(v, modelId) {
   if (!m.deleted_at && mergeFor === modelId) v.append(await mergePanel(m, ref));
   v.append(m.deleted_at ? h('button', { class: 'wide', onclick: restore }, 'Restore to garage')
     : h('button', { class: 'ghost wide', onclick: archiveModel }, 'Remove from garage'));
+  // Tablet / desktop (s1-0.40.0): photos on the left (sticky), name, actions and details on the right.
+  if (wideLayout()) {
+    const kids = [...v.children];
+    const start = kids.findIndex(k => k.classList?.contains('pdp-hero'));
+    const end = kids.indexOf(roleSel.closest('.row'));
+    if (start >= 0 && end >= start) {
+      const left = h('div', { class: 'pdp-left' }), right = h('div', { class: 'pdp-right' });
+      kids.forEach((k, i) => (i >= start && i <= end ? left : right).append(k));
+      v.append(h('div', { class: 'pdp-cols' }, left, right));
+    }
+  }
 }
 
 // ---------- To check (roadmap DR-0.2 next build #2) ----------
