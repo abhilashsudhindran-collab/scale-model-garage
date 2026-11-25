@@ -41,7 +41,10 @@ def main():
         page.evaluate("""(async () => { const st = await import('./js/store.js'); for (const m of await st.list('models')) await st.update('models', m.model_id, { display_name: 'Car ' + m.model_id.slice(-3) }); })()""")
         st, nx = box()
         check(st[:3] == ['done', 'done', 'next'] and '2 need a barcode' in nx, f'named: next = Gaps, says what is missing ({nx!r})')
-        page.evaluate("""(async () => { const st = await import('./js/store.js'); for (const m of await st.list('models')) await st.update('models', m.model_id, { barcode_absent: 'yes' }); })()""")
+        # one car gets a real scanned barcode (product_identifiers), the other is marked as having none
+        page.evaluate("""(async () => { const st = await import('./js/store.js'); const ids = await import('./js/ids.js'); const ms = await st.list('models');
+          await st.create('product_identifiers', { identifier_id: ids.newId('product_identifiers'), model_id: ms[0].model_id, identifier_type: 'barcode', value_raw: '4006381333931', value_cmp: '4006381333931' });
+          await st.update('models', ms[1].model_id, { barcode_absent: 'yes' }); })()""")
         st, nx = box()
         check(st[:4] == ['done', 'done', 'done', 'next'] and 'Open the label ›' in nx, 'gaps fixed: next = Label')
         page.get_by_role('button', name='Open the label ›').click(); page.wait_for_selector('.boxsheet')

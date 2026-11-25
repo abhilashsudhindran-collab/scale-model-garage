@@ -19,7 +19,7 @@ import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn }
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.37.0';
+export const APP_VERSION = 's1-0.38.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -425,7 +425,7 @@ function shelfEl(boxes, names, onTap, { selected = '', scroll = false, onNew = n
 // logged in CHANGE_LOG with a tag, so "Restore" can put the box and its cars back (B, 24 Nov).
 // ---------- Box journey (B, 25 Nov): Photos → Names → Gaps fixed → Label → Packed, per storage box ----------
 async function journeyData() {
-  const [models, inventory, ids, photos] = await Promise.all([store.list('models'), store.list('inventory'), store.list('identifiers'), store.list('photos')]);
+  const [models, inventory, ids, photos] = await Promise.all([store.list('models'), store.list('inventory'), store.list('product_identifiers'), store.list('photos')]);
   const live = new Map(models.filter(m => !m.deleted_at).map(m => [m.model_id, m]));
   const withBc = new Set(ids.filter(i => i.identifier_type === 'barcode' && !i.deleted_at && String(i.value_raw || '').trim()).map(i => i.model_id));
   const withFront = new Set(photos.filter(p => !p.deleted_at && p.shot_role === 'box_front').map(p => p.model_id));
@@ -1522,6 +1522,40 @@ async function nameList(cars, sugg, ref, models, inv, ids) {
     h('h3', { style: 'flex:1;margin:0' }, `Check ${plural(cars.length, 'suggestion', 'suggestions')}`),
     h('button', { type: 'button', class: 'ghost small', onclick: () => { nameView = 'one'; route(); } }, 'One at a time')),
     h('p', { class: 'muted' }, 'Compare each name with its box photo (tap a photo to enlarge). Fix anything wrong, untick what you are unsure of, then save.'));
+  // Faster naming check (25 Nov): what the app already knows, shown beside Gemini's answer. Learned only from
+  // B's own cars: barcodes it scanned, codes already in the garage, and the usual shape of each brand's codes.
+  const liveModels = models.filter(x => !x.deleted_at);
+  const shapeOf = (c) => String(c || '').trim().toUpperCase().replace(/\s+/g, '').replace(/[A-Z]/g, 'A').replace(/[0-9]/g, '9');
+  const brandCodes = new Map(); // brand_id → [{code, shape, model_id}]
+  for (const x of liveModels) if (x.brand_id && String(x.product_code || '').trim()) { const arr = brandCodes.get(x.brand_id) || []; arr.push({ code: x.product_code.trim(), shape: shapeOf(x.product_code), model_id: x.model_id, name: x.display_name }); brandCodes.set(x.brand_id, arr); }
+  const bcOf = new Map(); const bcOwners = new Map();
+  for (const i of ids.filter(i => i.identifier_type === 'barcode' && !i.deleted_at && String(i.value_raw || '').trim())) {
+    if (!bcOf.has(i.model_id)) bcOf.set(i.model_id, String(i.value_raw).trim());
+    const k = barcodeCmp(i.value_raw); const arr = bcOwners.get(k) || []; arr.push(i.model_id); bcOwners.set(k, arr);
+  }
+  const nameOf = (id) => liveModels.find(x => x.model_id === id)?.display_name || 'a car with no name yet';
+  const checksFor = (m, code) => {
+    const out = [];
+    const bc = bcOf.get(m.model_id);
+    if (bc) {
+      const others = (bcOwners.get(barcodeCmp(bc)) || []).filter(x => x !== m.model_id && liveModels.some(y => y.model_id === x));
+      out.push(others.length ? ['warn', `Barcode ${bc} is also on ${nameOf(others[0])}: same car?`] : ['ok', `Barcode ${bc} (scanned)`]);
+    } else if (m.barcode_absent === 'yes') out.push(['info', 'No barcode on this box']);
+    else out.push(['info', 'No barcode read']);
+    const c = String(code || '').trim();
+    if (c && m.brand_id) {
+      const mine = (brandCodes.get(m.brand_id) || []).filter(x => x.model_id !== m.model_id);
+      const same = mine.find(x => codeCmp(x.code) === codeCmp(c));
+      if (same) out.push(['warn', `Code ${c} is already in your garage: ${same.name || 'a car with no name yet'}`]);
+      else if (mine.length >= 2) {
+        const sh = shapeOf(c); const like = mine.filter(x => x.shape === sh);
+        if (like.length) out.push(['ok', `Code looks like your other ${ref.brands.find(b => b.brand_id === m.brand_id)?.name || ''} codes`]);
+        else { const tally = new Map(); mine.forEach(x => tally.set(x.shape, (tally.get(x.shape) || 0) + 1)); const top = [...tally].sort((a, b) => b[1] - a[1])[0][0]; const eg = mine.find(x => x.shape === top).code;
+          out.push(['warn', `Unusual for your ${ref.brands.find(b => b.brand_id === m.brand_id)?.name || ''} codes (they look like ${eg}): check the back`]); }
+      }
+    }
+    return out;
+  };
   for (const m of cars) {
     const sg = sugg[m.model_id];
     const brand = ref.brands.find(b => b.brand_id === m.brand_id);
@@ -1532,6 +1566,9 @@ async function nameList(cars, sugg, ref, models, inv, ids) {
     if (front) photoUrl(front, 'display').then(u => { if (u) img.src = u; });
     let showing = 'front';
     img.addEventListener('click', () => img.classList.toggle('big'));
+    // the back (where the code is) beside the front, so it can be checked without a tap
+    const back = rear ? h('img', { alt: 'Box back', class: 'nl-ph nl-back' }) : null;
+    if (back) { photoUrl(rear, 'display').then(u => { if (u) back.src = u; }); back.addEventListener('click', () => back.classList.toggle('big')); }
     const flip = rear ? h('button', { type: 'button', class: 'ghost small nl-flip', onclick: () => { showing = showing === 'front' ? 'rear' : 'front'; flip.textContent = showing === 'front' ? 'See back' : 'See front'; photoUrl(showing === 'front' ? front : rear, 'display').then(u => { if (u) img.src = u; }); } }, 'See back') : null;
     const dr = nameDrafts.get(m.model_id) || {};
     const nameIn = h('input', { value: dr.name ?? (sg.name || ''), 'aria-label': 'Name', autocapitalize: 'words' });
@@ -1540,13 +1577,16 @@ async function nameList(cars, sugg, ref, models, inv, ids) {
     const keep = () => nameDrafts.set(m.model_id, { name: nameIn.value, code: codeIn.value, tick: tick.checked });
     nameIn.addEventListener('input', keep); codeIn.addEventListener('input', keep); tick.addEventListener('change', keep);
     const codeNote = m.product_code && sg.code && sg.code !== m.product_code ? `AI read "${sg.code}"; keeping the saved code.` : null;
+    const chk = h('div', { class: 'nl-checks' });
+    const drawChecks = () => chk.replaceChildren(...checksFor(m, codeIn.value).map(([k, t]) => h('div', { class: `nl-chip ${k}` }, k === 'ok' ? '✓ ' : k === 'warn' ? '⚠ ' : '', t)));
+    drawChecks(); codeIn.addEventListener('input', drawChecks);
     const notes = [...(sg.notes || []), brandNote(sg.brand, brand?.name), codeNote].filter(Boolean);
     const fam = familyFrom(sg.colour);
     const card = h('div', { class: 'nl-row' },
-      h('div', { class: 'nl-top' }, h('div', { class: 'nl-left' }, img, flip),
+      h('div', { class: 'nl-top' }, h('div', { class: 'nl-left' }, h('div', { class: 'nl-pair' }, img, back), h('span', { class: 'muted small' }, back ? 'Front · Back' : 'Front')),
         h('div', { class: 'nl-f' },
           h('div', { class: 'muted small' }, [brand?.name || (sg.brand ? `${sg.brand}?` : 'Brand not set'), ref.scales.find(x => x.scale_id === m.scale_id)?.label, inv.find(i => i.model_id === m.model_id && i.storage_location)?.storage_location].filter(Boolean).join(' · ')),
-          nameIn, codeIn,
+          nameIn, codeIn, chk,
           fam ? h('div', { class: 'muted small' }, h('span', { class: 'cdot', style: `background:${familySwatch(fam)}` }), ` ${sg.colour}`) : null,
           ...notes.map(t => h('div', { class: 'muted small nl-note' }, t)))),
       h('div', { class: 'row', style: 'align-items:center;margin-top:8px' }, h('label', { class: 'nl-tick', style: 'flex:1;margin:0' }, tick, ' Save this one'),
