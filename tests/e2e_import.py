@@ -52,7 +52,7 @@ def main():
         pairs_ok = all(r['front'] == md5[2 * k] and r['rear'] == md5[2 * k + 1] for k, r in enumerate(res))
         check(pairs_ok, 'paired by time taken (zz+aa, mm+bb, yy+cc), not by file name')
         check(all(r['box'] == 'Box 1' for r in res) and all(r['brand'] and r['scale'] for r in res), 'all in Box 1 with brand Mini GT and 1:64')
-        check(page.is_visible('text=3 boxes need a name') or page.is_visible('text=Get names for the next 3 boxes'), 'lands on the Name tab, ready for Gemini')
+        check(page.is_visible('text=3 boxes need a name') or page.is_visible('text=Do the next 3 boxes with Gemini'), 'lands on the Name tab, ready for Gemini')
         times = page.evaluate("(async () => (await (await import('./js/idb.js')).meta.get('captureTimesV2', [])).length)()")
         check(times == 0, f'imports do not add near-zero capture times ({times})')
         page.goto(base + '#/dash'); page.wait_for_selector('.pacecard')

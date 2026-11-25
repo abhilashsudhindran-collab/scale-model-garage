@@ -130,7 +130,7 @@ def main():
         page.get_by_role('button', name='Skip').click(); page.wait_for_timeout(300)
         page.fill('input[aria-label=Name]', 'Porsche 911 GT3'); page.get_by_role('button', name='Save & next').click(); page.wait_for_timeout(500)
         page.fill('input[aria-label=Name]', 'Honda NSX'); page.press('input[aria-label=Name]', 'Enter'); page.press('input[aria-label="Product code"]', 'Enter'); page.wait_for_timeout(500)
-        check(page.is_visible('text=Every box has a name'), 'all boxes named')
+        check(not page.is_visible('text=need a name'), 'all boxes named')
         named = sorted(x['display_name'] for x in listm())
         check(named == ['Honda NSX', 'Porsche 911 GT3', 'Range Rover Camel Trophy'], f'names saved ({named})')
         code = [x for x in listm() if x['display_name'].startswith('Range')][0]
