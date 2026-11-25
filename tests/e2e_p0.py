@@ -147,7 +147,7 @@ def main():
         page.goto(base + '#/settings'); page.wait_for_selector('text=Google account'); page.wait_for_timeout(300)
         txt = page.inner_text('main')
         check('Nothing waiting to sync.' in txt, 'Settings shows "Nothing waiting to sync."')
-        check('median' in txt and 'time spent on each box only' in txt, 'Settings shows the new capture-time median')
+        check('median' in txt and 'time spent on each box in the app' in txt, 'Settings shows the new capture-time median')
         check(not [e for e in errors if 'ERR_CONNECTION' not in e], f'no page errors ({errors[:3]})')
         browser.close()
     httpd.shutdown()
