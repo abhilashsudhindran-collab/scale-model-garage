@@ -773,3 +773,22 @@ a.btn.wide { display: flex; width: 100%; justify-content: center; box-sizing: bo
 .col .cb span { display: block; width: 100%; max-width: 28px; margin: 0 auto; background: var(--accent); border-radius: 4px 4px 0 0; }
 .col .cl { font-size: .7rem; color: var(--muted); white-space: nowrap; overflow: visible; }
 .col:hover .cb span { filter: brightness(1.15); }
+
+/* Wishlist (s1-0.42.0) */
+.wishlink { display: flex; align-items: center; gap: 12px; color: var(--text); text-decoration: none; }
+.wishlink .wl-ic { font-size: 1.4rem; }
+.wishlink .wl-tx { flex: 1; display: flex; flex-direction: column; }
+.wishlink .chev { color: var(--muted); font-size: 1.3rem; }
+.ghead { display: flex; align-items: center; gap: 10px; margin: 22px 2px 8px; padding-top: 12px; border-top: 1px solid var(--line); font-weight: 800; font-size: 1.1rem; }
+.ghead:first-of-type { border-top: 0; }
+.wishform { display: grid; gap: 10px; }
+.wishform h3 { margin: 0; }
+.wishform .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.wishform input, .wishform select, .wishform textarea { width: 100%; box-sizing: border-box; }
+.wish .wname { font-size: 1.05rem; }
+.wish .prio { flex: none; font-size: .78rem; font-weight: 700; border-radius: 999px; padding: 3px 10px; background: var(--surface2); color: var(--muted); }
+.wish .prio.p-high { background: var(--accent); color: #fff; }
+.wish .prio.p-medium { background: var(--accent-soft); color: var(--accent); }
+.wish .wmatch { margin: 10px 0 0; font-size: .9rem; }
+.wish .wacts { gap: 8px; justify-content: flex-start; flex-wrap: wrap; margin-top: 10px; }
+.wish.got, .wish.dropped { opacity: .75; }
