@@ -425,8 +425,8 @@ button.syncbtn:disabled { opacity: .45; cursor: default; }
 .carnote .cn-foot .muted { font-size: .8rem; }
 
 /* colour swatch next to the name (s1-0.20.1) */
-.pdp-head h2 { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.namesw { width: 30px; height: 30px; min-height: 30px; padding: 0; border-radius: 50%; border: 1px solid rgba(0,0,0,.2); box-shadow: inset 0 0 0 2px rgba(255,255,255,.4); flex: none; font-size: 1.1rem; line-height: 1; color: var(--muted); background: transparent; }
+.pdp-head h2 { display: block; }
+.namesw { display: inline-block; vertical-align: middle; margin-left: 10px; position: relative; top: -3px; width: 30px; height: 30px; min-height: 30px; padding: 0; border-radius: 50%; border: 1px solid rgba(0,0,0,.2); box-shadow: inset 0 0 0 2px rgba(255,255,255,.4); flex: none; font-size: 1.1rem; line-height: 1; color: var(--muted); background: transparent; }
 .namesw.empty { border: 2px dashed var(--line); }
 .colourblock { background: var(--surface); border-radius: 16px; padding: 10px 12px; }
 
