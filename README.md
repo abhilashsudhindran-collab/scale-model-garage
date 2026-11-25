@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.36.4
+## Status: Stage 1 (quick-capture slice), version s1-0.37.0
+
+**s1-0.37.0 (25 Nov 2026): box journey.** Each storage box shows a five-step track on its card: **Photos → Names → Gaps → Label → Packed**. Done steps tick green, the next one glows, and a green bar says what's left ("Name 2 cars with Gemini", "2 need a barcode") with a one-tap button (Import photos, Name them, Open To check, Open the label, Mark as packed). Gaps = every car has a brand, a scale and a barcode (or is marked as having none); product codes stay optional (D17.1). Printing or copying the contents sheet ticks Label (STORAGE_BOXES.box_label_at, synced). Dashboard → Storage boxes → **Box journey**: every box with a mini track and its next step, and how many boxes are fully done. Also: link buttons on the box card are full width like the others. Test: tests/e2e_journey.py.
 
 **s1-0.36.4 (25 Nov 2026): one outline for every photo tile.** B: a straightened photo (shown whole on its light pad) had no visible edge, so its card looked smaller than the others. All photo tiles now share the same thin stroke. Car of the day is now one card: one white surface and outline, the photo inset inside it (B: photo and text looked like two separate cards).
 
