@@ -205,5 +205,15 @@ Additional Packaging Notes
   eq(buildPrompt([{}]).includes('Example row:') && buildPrompt([{}]).includes('Treasure Hunt'), true, 'prompt has an example row and asks for casting facts');
 }
 
+// B's phone 25 Nov 12:34: a long Gemini note was cut mid-word ("…between 195")
+{
+  const long = 'History: Featuring signature pontoon fenders for brake cooling, the 250 Testa Rossa won multiple World Sportscar Championships and Le Mans victories between 1958 and 1961, and is one of the most valuable classic cars ever sold at auction.';
+  const r = parseAnswer(`| Box | Car name | Year | Product code | Brand | Colour | Note |\n|---|---|---|---|---|---|---|\n| Box 1 | Ferrari 250 Testa Rossa (#6) | 1958 | W1800902 | Werk83 | Red | ${long} |`, 5, ['Werk83']);
+  eq(r.items[0].carNote, long, 'a long note is kept whole (no cut mid-word)');
+  const huge = 'Fun fact: ' + 'word '.repeat(150);
+  const r2 = parseAnswer(`| Box | Car name | Note |\n|---|---|---|\n| Box 1 | X Car | ${huge} |`, 5, []);
+  eq(r2.items[0].carNote.endsWith('…') && r2.items[0].carNote.length <= 452 && !/wor…$/.test(r2.items[0].carNote), true, 'a very long note ends at a whole word with …');
+}
+
 console.log(fails ? `${fails} of ${n} AI parser tests FAILED` : `All ${n} AI parser tests passed`);
 process.exit(fails ? 1 : 0);

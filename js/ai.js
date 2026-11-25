@@ -48,6 +48,8 @@ export function noteParts(text) {
   const kind = k.startsWith('fun') ? 'fun' : k.startsWith('hist') ? 'history' : k.startsWith('pop') ? 'pop' : 'casting';
   return { kind, label: { fun: 'Fun fact', history: 'History', pop: 'Pop culture', casting: 'Casting' }[kind], body: m[2].trim() };
 }
+// Notes are kept whole up to ~450 characters (B, 25 Nov: "…between 195" was cut mid-word); longer ones end at a word with "…".
+const fitNote = (t) => (t.length <= 450 ? t : `${t.slice(0, 450).replace(/\s+\S*$/, '')}…`);
 const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 const blank = (s) => (!s || /^[-–—?]+$/.test(s) || /^(n\/?a|none|unknown|unreadable)$/i.test(s));
 
@@ -124,7 +126,7 @@ function parseTable(text, expected) {
     if (cells.every(c => /^:?-{2,}:?$/.test(c) || c === '')) continue; // |---|---|
     if (!kinds) { const k = cells.map(colKind); if (k.includes('name') && k.filter(Boolean).length >= 2) kinds = k; continue; }
     order++;
-    const get = (kind) => { const i = kinds.indexOf(kind); return i >= 0 ? clean(cells[i], 160) : ''; };
+    const get = (kind, max = 160) => { const i = kinds.indexOf(kind); return i >= 0 ? clean(cells[i], max) : ''; }; // notes get a longer limit
     const boxCell = get('box');
     const n = Number((boxCell.match(/\d{1,2}/) || [])[0]) || order;
     if (n < 1 || n > expected) continue;
@@ -144,8 +146,8 @@ function parseTable(text, expected) {
     const colour = get('colour');
     if (colour && !blank(colour)) notes.push(`Colour: ${colour.slice(0, 60)}`);
     if (!name) notes.push('no car name in the answer: type it from the box');
-    const carNote = get('carnote');
-    out.push({ n, name: name.slice(0, 120), code, brand: blank(get('brand')) ? '' : get('brand'), colour: blank(colour) ? '' : colour.slice(0, 60), carNote: blank(carNote) ? '' : clean(carNote, 220), notes });
+    const carNote = get('carnote', 2000);
+    out.push({ n, name: name.slice(0, 120), code, brand: blank(get('brand')) ? '' : get('brand'), colour: blank(colour) ? '' : colour.slice(0, 60), carNote: blank(carNote) ? '' : fitNote(clean(carNote, 2000)), notes });
   }
   // The same code for two boxes in one answer is a set/assortment code (e.g. Hot Wheels "HRT81" on two different
   // cars), not either car's own code: never pre-filled, so it can't make two different cars look like duplicates.

@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.25.0
+## Status: Stage 1 (quick-capture slice), version s1-0.25.1
+
+**s1-0.25.1 (25 Nov 2026): fixes from B's phone.** Car notes were cut mid-word ("…between 195"): table cells were capped at 160 characters; notes now keep up to ~450 and end at a whole word with "…". The colour swatch now sits at the end of the car's name even when the name wraps onto two lines.
 
 **s1-0.25.0 (25 Nov 2026): Just bought + Purchases.** Quick capture and Photo run have "🛍 Just bought? Add price and shop": price per car (empty = unknown, never ₹0), shop or seller (kept for the next cars, recent shops as quick picks) and date (today by default). The copy is saved as a purchase (acquisition type, price, date with day precision, source). It switches itself off on another day, so older cars are never recorded as bought today. Dashboard "Purchases": this month (total, cars, how many with a price) and all known prices with coverage ("price known for X of Y cars", D12.1).
 
