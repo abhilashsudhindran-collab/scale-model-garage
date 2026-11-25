@@ -17,7 +17,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.24.0';
+export const APP_VERSION = 's1-0.25.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -482,6 +482,20 @@ async function renderDash(v) {
       h('span', {}, label), h('b', {}, n.toLocaleString('en-IN')), h('span', { class: 'chev', 'aria-hidden': 'true' }, '›'))))
       : h('p', { class: 'muted' }, 'Nothing to check ✓')));
 
+  // Purchases (D12.1: unknown prices are never ₹0; the coverage is always shown)
+  const month = todayIso().slice(0, 7);
+  const money = (n) => `₹${Math.round(n).toLocaleString('en-IN')}`;
+  const priced = copies.filter(i => String(i.purchase_price || '').trim() !== '' && !isNaN(Number(i.purchase_price)));
+  const thisMonth = copies.filter(i => String(i.purchase_date || '').startsWith(month));
+  const tmPriced = thisMonth.filter(i => priced.includes(i));
+  v.append(h('div', { class: 'card purchases' }, h('h3', {}, 'Purchases'),
+    h('div', { class: 'pgrid' },
+      h('div', {}, h('div', { class: 'muted small' }, 'This month'), h('b', {}, thisMonth.length ? money(tmPriced.reduce((a, i) => a + Number(i.purchase_price), 0)) : '—'),
+        h('div', { class: 'muted small' }, thisMonth.length ? `${plural(thisMonth.length, 'car', 'cars')}${tmPriced.length < thisMonth.length ? ` · ${tmPriced.length} with a price` : ''}` : 'nothing yet')),
+      h('div', {}, h('div', { class: 'muted small' }, 'All prices known'), h('b', {}, priced.length ? money(priced.reduce((a, i) => a + Number(i.purchase_price), 0)) : '—'),
+        h('div', { class: 'muted small' }, `price known for ${priced.length} of ${plural(copies.length, 'car', 'cars')}`))),
+    h('p', { class: 'muted small', style: 'margin:8px 0 0' }, 'Add a purchase: tap "🛍 Just bought?" when you photograph a new car. Unknown prices are left out, never counted as ₹0.')));
+
   // By brand, by scale
   v.append(h('div', { class: 'card' }, h('div', { class: 'row', style: 'align-items:baseline' }, h('h3', {}, 'By brand'), h('a', { href: '#/brands', class: 'small' }, 'Manage brands ›')),
     barList(topN(tally(copies, i => brandName[byId.get(i.model_id).brand_id] || 'Brand not set'), 8), { onTap: (k) => { if (k !== '__other') goGarage('all', k); } })));
@@ -814,6 +828,7 @@ async function renderAdd(v) {
   if (/^\d+$/.test(cap.box)) boxRow.append(h('button', { type: 'button', class: 'quiet', style: 'flex:0 0 auto', onclick: () => { setBox(Number(cap.box) + 1); toast(`Now filling Box ${cap.box}`); route(); } }, `Next box → ${Number(cap.box) + 1}`));
   v.append(boxRow);
   { const used = await boxesInUse(); const pk = boxPicker(cap.box, used, await boxNames(), (id) => { setBox(id); route(); }); if (pk) v.append(pk); }
+  v.append(boughtCard());
 
   // --- Barcode ---
   v.append(h('label', { class: 'f' }, 'Barcode (if the box has one)'));
@@ -1069,6 +1084,7 @@ async function renderRun(v) {
   const next = steps.find(r => !cap.photos[r]);
   const say = h('p', { class: 'muted', id: 'runSay' });
   v.append(h('div', { class: 'runhead' }, h('b', {}, `Car ${cap.count + 1} of this run`), ` · ${brand ? brand.name : 'brand after photos'} · ${scale ? scale.label : 'scale after photos'}${cap.box ? ` · Box ${cap.box}` : ''}`));
+  v.append(boughtCard());
   const strip = h('div', { class: 'shots' });
   for (const role of ['box_front', 'box_rear', ...(cap.sealed ? ['box_art'] : [])]) {
     const p = cap.photos[role];
@@ -1489,6 +1505,35 @@ async function savePhotoRecords(modelId, photos) {
   return items;
 }
 
+// ---------- Just bought (B, 25 Nov: ~20 new cars a month; record price, date and shop when buying) ----------
+// Shop and date are set once and kept for the session (several cars from one shop); the price is per car.
+// It switches itself off on another day, so older cars are never recorded as bought today by mistake.
+const todayIso = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+function boughtGet() { try { const b = JSON.parse(localStorage.getItem('smg.bought') || '{}'); return b.on && b.day === todayIso() ? b : { ...b, on: false }; } catch { return { on: false }; } }
+function boughtSet(o) { try { localStorage.setItem('smg.bought', JSON.stringify(o)); } catch {} }
+function recentShops() { try { return JSON.parse(localStorage.getItem('smg.shops') || '[]'); } catch { return []; } }
+function rememberShop(name) { const t = String(name || '').trim(); if (!t) return; try { localStorage.setItem('smg.shops', JSON.stringify([t, ...recentShops().filter(x => x.toLowerCase() !== t.toLowerCase())].slice(0, 6))); } catch {} }
+function boughtFields() {
+  const b = boughtGet(); if (!b.on) return {};
+  const price = String(cap.price || '').replace(/[^\d.]/g, '');
+  return { acquisition_type: 'Purchase', purchase_price: price, purchase_date: b.date || todayIso(), purchase_date_precision: 'day', purchase_source: b.source || '' };
+}
+function boughtCard() {
+  const b = boughtGet();
+  if (!b.on) return h('button', { type: 'button', class: 'quiet small boughtbtn', onclick: () => { boughtSet({ on: true, day: todayIso(), date: todayIso(), source: b.source || '' }); route(); } }, '🛍 Just bought? Add price and shop');
+  const shopIn = h('input', { value: b.source || '', placeholder: 'Shop or seller', 'aria-label': 'Bought from', oninput: (e) => boughtSet({ ...boughtGet(), source: e.target.value }) });
+  return h('div', { class: 'card bought' },
+    h('div', { class: 'row', style: 'align-items:center' }, h('h3', { style: 'margin:0' }, '🛍 Just bought'),
+      h('button', { type: 'button', class: 'ghost small', onclick: () => { boughtSet({ ...boughtGet(), on: false }); route(); } }, 'Not a purchase')),
+    h('label', { class: 'f' }, 'Price for this car (₹)'),
+    h('input', { inputmode: 'decimal', value: cap.price || '', placeholder: 'Leave empty if you don\'t know', 'aria-label': 'Price paid', oninput: (e) => { cap.price = e.target.value; saveDraftSoon(); } }),
+    h('label', { class: 'f' }, 'Bought from'), shopIn,
+    recentShops().length ? h('div', { class: 'chips', style: 'margin-top:6px' }, recentShops().map(t => h('button', { type: 'button', class: `chip ${t === b.source ? 'on' : ''}`, onclick: () => { boughtSet({ ...boughtGet(), source: t }); route(); } }, t))) : null,
+    h('label', { class: 'f' }, 'Date'),
+    h('input', { type: 'date', value: b.date || todayIso(), max: todayIso(), 'aria-label': 'Date bought', oninput: (e) => boughtSet({ ...boughtGet(), date: e.target.value }) }),
+    h('p', { class: 'muted small', style: 'margin:6px 0 0' }, 'Shop and date stay for the next cars today; the price is per car.'));
+}
+
 async function saveCapture() {
   const ref = await refData();
   const brand = ref.brands.find(b => b.brand_id === cap.brandId);
@@ -1499,7 +1544,7 @@ async function saveCapture() {
     primary_photo_id: cap.photos.box_front?.photoId || '' };
   model.duplicate_check_status = duplicateCheckStatus(model);
   const items = [{ entity: 'models', fields: model },
-    { entity: 'inventory', fields: { inventory_id: cap.inventoryId, model_id: cap.modelId, ownership_status: 'Owned', packaging_state: cap.sealed ? 'sealed' : 'unknown', storage_location: boxLoc(cap.box), acquisition_type: 'Unknown', purchase_date_precision: 'unknown', currency: 'INR' } },
+    { entity: 'inventory', fields: { inventory_id: cap.inventoryId, model_id: cap.modelId, ownership_status: 'Owned', packaging_state: cap.sealed ? 'sealed' : 'unknown', storage_location: boxLoc(cap.box), acquisition_type: 'Unknown', purchase_date_precision: 'unknown', currency: 'INR', ...boughtFields() } },
     ...(await savePhotoRecords(cap.modelId, photosToSave()))];
   if (cap.barcode) items.push({ entity: 'product_identifiers', fields: { model_id: cap.modelId, identifier_type: 'barcode', value_raw: cap.barcode.raw, value_cmp: cap.barcode.cmp, barcode_format: cap.barcode.format || '', check_digit_ok: cap.barcode.checkOk === null ? '' : (cap.barcode.checkOk ? 'yes' : 'no'), source: cap.barcode.source } });
   try { await store.createMany(items); }
@@ -1508,6 +1553,7 @@ async function saveCapture() {
   const secs = seconds(touch(cap.timer));
   await logTiming(secs);
   await clearDraft();
+  if (boughtGet().on) rememberShop(boughtGet().source);
   cap = freshCapture({ brandId: nextBrandId(), scaleId: nextScaleId(), count: cap.count + 1 });
   toast(`Saved ✓ (${secs} s)${cap.box ? ` · Box ${cap.box}` : ''} — next car`);
   window.scrollTo(0, 0);
@@ -1517,13 +1563,14 @@ async function saveCapture() {
 
 async function saveCopyOf(m) {
   // This box's photos are attached to the new physical copy (never made the product's main photo).
-  const items = [{ entity: 'inventory', fields: { inventory_id: cap.inventoryId, model_id: m.model_id, ownership_status: 'Owned', packaging_state: cap.sealed ? 'sealed' : 'unknown', storage_location: boxLoc(cap.box), acquisition_type: 'Unknown', purchase_date_precision: 'unknown', currency: 'INR' } },
+  const items = [{ entity: 'inventory', fields: { inventory_id: cap.inventoryId, model_id: m.model_id, ownership_status: 'Owned', packaging_state: cap.sealed ? 'sealed' : 'unknown', storage_location: boxLoc(cap.box), acquisition_type: 'Unknown', purchase_date_precision: 'unknown', currency: 'INR', ...boughtFields() } },
     ...(await savePhotoRecords(m.model_id, photosToSave())).map(it => ({ ...it, fields: { ...it.fields, inventory_id: cap.inventoryId, is_primary: 'no' } }))];
   try { await store.createMany(items); }
   catch (e) { toast(`Not saved: ${e.message}. Your box is kept here; try again.`, 5000, 'bad'); return; }
   const secs = seconds(touch(cap.timer));
   await logTiming(secs);
   await clearDraft();
+  if (boughtGet().on) rememberShop(boughtGet().source);
   cap = freshCapture({ brandId: nextBrandId(), scaleId: nextScaleId(), count: cap.count + 1 });
   toast(`Added as another copy ✓ (${secs} s)`);
   window.scrollTo(0, 0);

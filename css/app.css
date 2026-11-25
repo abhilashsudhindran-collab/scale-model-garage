@@ -459,3 +459,9 @@ button.syncbtn:disabled { opacity: .45; cursor: default; }
 .tag.warn { font-size: .75rem; background: #fdf0d5; color: #7a5200; border-radius: 999px; padding: 2px 8px; }
 .brandacts { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 2px 14px; }
 .brandacts select { flex: 1; }
+
+/* Just bought + Purchases (s1-0.25.0) */
+.boughtbtn { margin: 10px 0 4px; }
+.card.bought { border: 2px solid var(--accent); }
+.purchases .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.purchases .pgrid b { display: block; font-size: 1.5rem; margin: 2px 0; }
