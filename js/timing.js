@@ -28,6 +28,7 @@ export function paceFromTimes(times, breakMs = SESSION_BREAK_MS) {
     else { cur.gaps.push(Math.round((x - cur.last) / 1000)); cur.last = x; cur.boxes++; }
   }
   const all = sessions.flatMap(s => s.gaps);
-  return { medianSec: med(all), measured: all.length,
-    sessions: sessions.filter(s => s.gaps.length).map(s => ({ start: new Date(s.start).toISOString(), boxes: s.boxes, medianSec: med(s.gaps), minutes: Math.round((s.last - s.start) / 60000) })) };
+  const avg = (xs) => (xs.length ? Math.round(xs.reduce((x, y) => x + y, 0) / xs.length) : null);
+  return { medianSec: med(all), avgSec: avg(all), measured: all.length,
+    sessions: sessions.filter(s => s.gaps.length).map(s => ({ start: new Date(s.start).toISOString(), boxes: s.boxes, medianSec: med(s.gaps), avgSec: avg(s.gaps), minutes: Math.round((s.last - s.start) / 60000) })) };
 }

@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.34.0
+## Status: Stage 1 (quick-capture slice), version s1-0.34.1
+
+**s1-0.34.1 (25 Nov 2026): fixes from B's phone checks.** Shooting pace now says "typical (median)" and also shows the average including short pauses (B's 24 Nov session: 28 s typical; "(28 s each)" read like an average of 16 boxes in 17 min). The Dashboard no longer repeats "1 box has no storage box yet" under the packing line (and says "car", not "box"). Tick boxes are normal size again (the general input style made the Check sync tick box huge).
 
 **s1-0.34.0 (25 Nov 2026): photos upload 3 at a time.** Sync used to upload photos one after another (~8.6 s per photo on B's phone in R0, mostly waiting on the network). Now up to 3 photos upload at the same time; each keeps its own safety (marked as attempted before upload, looked up before any retry, checksum checked), and a sign-in failure still stops the run. How much faster on B's phone and network is **not measured yet** (the fake network in the tests doesn't model mobile upload speed).
 

@@ -30,6 +30,7 @@ eq(t.activeMs, 0, 'negative gap ignored');
   eq(JSON.stringify([p.medianSec, p.measured, p.sessions.length, p.sessions[0].boxes]), JSON.stringify([40, 3, 1, 4]), 'one session: 4 boxes, gaps 40/40/60 → median 40 s');
   p = paceFromTimes([s(0), s(30), s(3600), s(3650), s(3700), s(3760)]);
   eq(JSON.stringify([p.sessions.length, p.sessions[1].medianSec, p.medianSec]), JSON.stringify([2, 50, 50]), 'a 1-hour pause starts a new session; gaps 30,50,50,60 → median 50');
+  eq(paceFromTimes([s(0), s(40), s(80), s(140)]).avgSec, 47, 'average incl. the longer gap (40,40,60 → 47 s)');
   p = paceFromTimes([s(0)]);
   eq(JSON.stringify([p.medianSec, p.measured]), JSON.stringify([null, 0]), 'one box: nothing to measure');
   p = paceFromTimes(['nonsense', s(10), s(0)]);
