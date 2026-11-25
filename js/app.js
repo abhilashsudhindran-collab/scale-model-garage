@@ -17,7 +17,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.27.0';
+export const APP_VERSION = 's1-0.27.1';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -1637,7 +1637,7 @@ async function renderImport(v) {
     if (!confirm(`Import ${plural(groups.length, 'car', 'cars')}${box ? ` into Box ${String(box).replace(/^box\s*/i, '')}` : ''}?`)) return;
     importBusy = true; route();
     const say = (t) => { const el = $('#importMsg'); if (el) el.textContent = t; };
-    let done = 0;
+    let done = 0, withBc = 0;
     try {
       for (const [k, g] of groups.entries()) {
         say(`Importing car ${k + 1} of ${groups.length}…`);
@@ -1650,11 +1650,12 @@ async function renderImport(v) {
           cap.photos[roles[j]] = { photoId: newId('photos'), prep, url: '', capturedAt: new Date(f.file.lastModified || Date.now()).toISOString() };
           if (roles[j] === 'box_rear') { try { const r = await scanPhoto(f.file); if (r) { const raw = String(r.value).trim(); cap.barcode = { raw, cmp: barcodeCmp(raw), format: r.format, source: 'rear_photo', checkOk: gtinCheckOk(raw) }; } } catch (e) { console.warn('import barcode', e); } }
         }
-        if (await saveCapture({ quiet: true })) done++;
+        const hadBc = !!cap.barcode;
+        if (await saveCapture({ quiet: true })) { done++; if (hadBc) withBc++; }
       }
     } finally { importBusy = false; }
     importFiles?.forEach(f => URL.revokeObjectURL(f.url)); importFiles = null;
-    toast(`Imported ${plural(done, 'car', 'cars')} ✓ Next: name them with Gemini`, 4000);
+    toast(`Imported ${plural(done, 'car', 'cars')} ✓ · barcode read on ${withBc} of ${done}${withBc < done ? ' (see To check → No barcode)' : ''}`, 5000);
     location.hash = '#/name';
   } }, `Import ${plural(groups.length, 'car', 'cars')}`));
 }
@@ -1910,7 +1911,7 @@ async function renderItem(v, modelId) {
   // Typed edits are saved before any navigation or redraw (audit I1): see leaveHooks in route().
   const barcodes = idfs.filter(i => i.identifier_type === 'barcode');
   const bc0 = barcodes[0];
-  const f = { display_name: m.display_name || '', brand_id: m.brand_id || '', scale_id: m.scale_id || '', product_code: m.product_code || '', variant: m.variant || '', series: m.series || '', notes: m.notes || '', barcode: bc0?.value_raw || '' };
+  const f = { display_name: m.display_name || '', brand_id: m.brand_id || '', scale_id: m.scale_id || '', product_code: m.product_code || '', variant: m.variant || '', series: m.series || '', notes: m.notes || '', barcode: bc0?.value_raw || '', barcode_absent: m.barcode_absent || '' };
   let productDirty = false;
   const set = (k) => (e) => { f[k] = e.target.value; productDirty = true; markDirty(); };
   const markDirty = () => $('#pdpSave')?.classList.remove('quiet');
@@ -1921,7 +1922,7 @@ async function renderItem(v, modelId) {
   field('Scale', h('select', { onchange: set('scale_id') }, h('option', { value: '' }, '—'), ref.scales.map(s => h('option', { value: s.scale_id, selected: s.scale_id === f.scale_id ? true : undefined }, s.label))));
   field('Product code (exactly as printed)', h('input', { value: f.product_code, autocapitalize: 'characters', oninput: set('product_code') }));
   // Progressive disclosure: the less-used fields fold away while empty; anything already filled stays visible.
-  const moreBox = h('details', { class: 'more inner', open: (f.variant || f.series || f.notes || f.barcode) ? true : undefined }, h('summary', {}, 'More details', h('span', { class: 'muted', style: 'font-weight:400' }, 'variant, series, notes, barcode')));
+  const moreBox = h('details', { class: 'more inner', open: (f.variant || f.series || f.notes || f.barcode || f.barcode_absent || garageFilter === 'nobarcode') ? true : undefined }, h('summary', {}, 'More details', h('span', { class: 'muted', style: 'font-weight:400' }, 'variant, series, notes, barcode')));
   form.append(moreBox);
   const field2 = (label, el) => moreBox.append(h('label', { class: 'f' }, label), el);
   field2('Variant / colour', h('input', { value: f.variant, oninput: set('variant') }));
@@ -1932,6 +1933,9 @@ async function renderItem(v, modelId) {
   const bcCheck = () => { const ok = gtinCheckOk(f.barcode); bcWarn.textContent = f.barcode.trim() && ok === false ? '⚠ These digits don\'t add up (check digit). Please re-check.' : ''; bcWarn.style.color = 'var(--warn)'; };
   field2('Barcode', h('input', { inputmode: 'numeric', value: f.barcode, placeholder: 'None yet', oninput: (e) => { set('barcode')(e); bcCheck(); } }));
   moreBox.append(bcWarn); bcCheck();
+  moreBox.append(h('label', { class: 'checkline', style: 'display:flex;gap:8px;align-items:center;margin-top:8px' },
+    h('input', { type: 'checkbox', 'aria-label': 'This box has no barcode', checked: f.barcode_absent === 'yes' ? true : undefined, onchange: (e) => { f.barcode_absent = e.target.checked ? 'yes' : ''; productDirty = true; markDirty(); } }),
+    'This box has no barcode printed on it'));
   if (barcodes.length > 1) moreBox.append(h('p', { class: 'muted' }, `Other barcodes: ${barcodes.slice(1).map(i => i.value_raw).join(', ')}`));
   async function saveBarcode() {
     const nb = f.barcode.trim(), ob = bc0?.value_raw || '';
@@ -2035,6 +2039,8 @@ const CHECKS = [
   ['nobrand', 'No brand', (m) => !m.brand_id],
   ['noscale', 'No scale', (m) => !m.scale_id],
   ['nocode', 'No product code', (m) => !String(m.product_code || '').trim()],
+  // a box with no barcode printed on it is marked on the car page and leaves this list
+  ['nobarcode', 'No barcode', (m, x) => !x.withBarcode.has(m.model_id) && m.barcode_absent !== 'yes'],
   ['nobox', 'Not in a storage box', (m, x) => x.ownedNoBox.has(m.model_id)],
   ['nocolour', 'No colour', (m) => !m.colour_family],
   ['dupes', 'Possible duplicates', (m, x) => x.dupes.has(m.model_id)],
@@ -2048,7 +2054,8 @@ function checkContext(models, inventory, ids) {
   for (const i of ids) if (i.identifier_type === 'barcode' && !i.deleted_at) add(`b:${i.value_cmp || i.value_raw}`, i.model_id);
   const live = new Set(models.map(m => m.model_id)); const dupes = new Set();
   for (const g of groups.values()) { const inG = [...g].filter(x => live.has(x)); if (inG.length > 1) inG.forEach(x => dupes.add(x)); }
-  return { ownedNoBox, dupes };
+  const withBarcode = new Set(ids.filter(i => i.identifier_type === 'barcode' && !i.deleted_at && String(i.value_raw || '').trim()).map(i => i.model_id));
+  return { ownedNoBox, dupes, withBarcode };
 }
 
 // ---------- Brands screen (roadmap DR-0.2 next build #3) ----------
