@@ -17,7 +17,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.21.0';
+export const APP_VERSION = 's1-0.21.1';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -657,6 +657,9 @@ async function renderGarage(v) {
       }
       const ph = (photosByModel.get(m.model_id) || []).find(p => p.photo_id === m.primary_photo_id) || (photosByModel.get(m.model_id) || [])[0];
       const img = h('div', { class: 'ph' }, icon('car'));
+      // Straightened / rotated photos are just the box: shown whole on a light background (product-shot style),
+      // so a wide box isn't cut off by the tall tile. Raw photos still fill the tile, hiding table clutter (B, 25 Nov).
+      if (ph?.crop_corners) img.classList.add('fit');
       photoUrl(ph).then(u => { if (u) img.replaceChildren(h('img', { src: u, alt: '' })); });
       const nCopies = (ownedByModel.get(m.model_id) || []).length;
       const pendingPhotos = (photosByModel.get(m.model_id) || []).some(p => !p.original_file_id);
@@ -1609,7 +1612,7 @@ async function renderItem(v, modelId) {
   else v.append(h('div', { class: 'pdp-hero empty' }, icon('car'), h('span', { class: 'muted' }, 'No photo yet')));
   const gal = h('div', { class: 'gallery thumbs' });
   for (const p of photos.sort((a, b) => Object.keys(SHOT_ROLES).indexOf(a.shot_role) - Object.keys(SHOT_ROLES).indexOf(b.shot_role))) {
-    const img = h('img', { alt: SHOT_ROLES[p.shot_role]?.label || 'Photo' });
+    const img = h('img', { alt: SHOT_ROLES[p.shot_role]?.label || 'Photo', class: p.crop_corners ? 'fit' : '' });
     photoUrl(p, 'display').then(u => { if (u) img.src = u; });
     const main = p.photo_id === m.primary_photo_id;
     gal.append(h('button', { type: 'button', class: `fig ${selectedPhoto.id === p.photo_id ? 'sel' : ''}`, 'aria-label': `Photo options: ${SHOT_ROLES[p.shot_role]?.label || p.shot_role}`,
