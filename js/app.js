@@ -19,7 +19,7 @@ import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn }
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.36.4';
+export const APP_VERSION = 's1-0.37.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -299,6 +299,7 @@ async function saveBox(label, patch) {
   if ('box_brand' in patch) clean.box_brand = /^[A-Za-z0-9_-]{1,40}$/.test(patch.box_brand || '') ? patch.box_brand : '';
   if ('box_scale' in patch) clean.box_scale = /^[A-Za-z0-9_-]{1,40}$/.test(patch.box_scale || '') ? patch.box_scale : '';
   if ('box_packed_at' in patch) clean.box_packed_at = /^\d{4}-\d{2}-\d{2}T/.test(patch.box_packed_at || '') ? patch.box_packed_at : '';
+  if ('box_label_at' in patch) clean.box_label_at = /^\d{4}-\d{2}-\d{2}T/.test(patch.box_label_at || '') ? patch.box_label_at : '';
   if (rec) {
     const changed = Object.keys(clean).filter(k => String(rec[k] || '') !== clean[k]);
     if (!changed.length) return;
@@ -422,6 +423,46 @@ function shelfEl(boxes, names, onTap, { selected = '', scroll = false, onNew = n
 
 // Removing a box never deletes cars: they move to "No box yet". The box is soft-deleted and every car it held is
 // logged in CHANGE_LOG with a tag, so "Restore" can put the box and its cars back (B, 24 Nov).
+// ---------- Box journey (B, 25 Nov): Photos → Names → Gaps fixed → Label → Packed, per storage box ----------
+async function journeyData() {
+  const [models, inventory, ids, photos] = await Promise.all([store.list('models'), store.list('inventory'), store.list('identifiers'), store.list('photos')]);
+  const live = new Map(models.filter(m => !m.deleted_at).map(m => [m.model_id, m]));
+  const withBc = new Set(ids.filter(i => i.identifier_type === 'barcode' && !i.deleted_at && String(i.value_raw || '').trim()).map(i => i.model_id));
+  const withFront = new Set(photos.filter(p => !p.deleted_at && p.shot_role === 'box_front').map(p => p.model_id));
+  return { live, inventory, withBc, withFront };
+}
+function boxJourneyFrom(d, label, rec) {
+  const ids = [...new Set(d.inventory.filter(i => !i.deleted_at && i.ownership_status === 'Owned' && d.live.has(i.model_id) && String(i.storage_location || '').toLowerCase() === label.toLowerCase()).map(i => i.model_id))];
+  const cars = ids.map(x => d.live.get(x)); const n = cars.length;
+  const noPhoto = cars.filter(m => !d.withFront.has(m.model_id)).length;
+  const noName = cars.filter(m => !String(m.display_name || '').trim()).length;
+  const noBrand = cars.filter(m => !m.brand_id).length, noScale = cars.filter(m => !m.scale_id).length;
+  const noBc = cars.filter(m => !d.withBc.has(m.model_id) && m.barcode_absent !== 'yes').length;
+  const gaps = [noBrand && plural(noBrand, 'needs a brand', 'need a brand'), noScale && plural(noScale, 'needs a scale', 'need a scale'), noBc && plural(noBc, 'needs a barcode', 'need a barcode')].filter(Boolean);
+  const steps = [
+    { key: 'photos', label: 'Photos', done: n > 0 && !noPhoto, todo: n ? (noPhoto ? `${plural(noPhoto, 'car has', 'cars have')} no front photo` : '') : 'No cars yet: import or fill this box' },
+    { key: 'names', label: 'Names', done: n > 0 && !noName, todo: noName ? `Name ${plural(noName, 'car', 'cars')} with Gemini` : '' },
+    { key: 'gaps', label: 'Gaps', done: n > 0 && !gaps.length, todo: gaps.length ? gaps.join(' · ') : '' },
+    { key: 'label', label: 'Label', done: n > 0 && !!rec?.box_label_at, todo: 'Print or copy the contents sheet & label' },
+    { key: 'packed', label: 'Packed', done: n > 0 && !!rec?.box_packed_at, todo: 'Tape the label on and mark it packed' },
+  ];
+  const next = steps.find(s => !s.done);
+  return { n, steps, next, done: steps.filter(s => s.done).length };
+}
+function journeyTrack(j, { mini = false } = {}) {
+  return h('ol', { class: `journey${mini ? ' mini' : ''}`, 'aria-label': `Box journey: ${j.done} of 5 steps done` },
+    ...j.steps.map(s => h('li', { class: s.done ? 'done' : s === j.next ? 'next' : '' }, h('i', { 'aria-hidden': 'true' }, s.done ? '✓' : ''), mini ? null : h('span', {}, s.label))));
+}
+function journeyNext(j, label) {
+  if (!j.next) return h('div', { class: 'jnext alldone' }, '🏁 This box is done: photographed, named, labelled and packed.');
+  const id = encodeURIComponent(label.replace(/^Box\s*/i, ''));
+  const go = { photos: () => importBox(label), names: () => { location.hash = '#/name'; }, gaps: () => { location.hash = '#/dash'; },
+    label: () => { location.hash = `#/boxsheet/${id}`; }, packed: async () => { await setPacked(label, true); route(); } }[j.next.key];
+  const verb = { photos: 'Import photos', names: 'Name them', gaps: 'Open To check', label: 'Open the label', packed: 'Mark as packed' }[j.next.key];
+  return h('div', { class: 'jnext' }, h('div', {}, h('b', {}, `Next: ${j.next.label}`), j.next.todo ? h('div', { class: 'muted small' }, j.next.todo) : null),
+    h('button', { type: 'button', class: 'small', onclick: go }, `${verb} ›`));
+}
+
 async function carsInBox(label) {
   const [models, inventory] = await Promise.all([store.listRecords('models'), store.list('inventory')]);
   const live = new Set(models.filter(r => !r.data.deleted_at).map(r => r.id));
@@ -570,6 +611,17 @@ async function renderDash(v) {
         h('div', { class: 'packbar', role: 'img', 'aria-label': `${carsPacked} of ${copies.length} cars packed` }, h('span', { style: `width:${pct}%` })),
         h('div', { class: 'muted small' }, `${plural(carsPacked, 'car', 'cars')} packed · ${loose} still to pack${noBox ? ` (${noBox} of them not in a storage box yet)` : ''}`));
     })(),
+    await (async () => { // Box journey per box (B, 25 Nov)
+      const used = boxes.filter(([, n]) => n > 0);
+      if (!used.length) return null;
+      const jd = await journeyData();
+      const rows = used.map(([k]) => ({ k, rec: names.get(k.toLowerCase()), j: boxJourneyFrom(jd, k, names.get(k.toLowerCase())) }));
+      const full = rows.filter(r => !r.j.next).length;
+      return h('details', { class: 'more jlist', open: true }, h('summary', {}, `Box journey · ${full} of ${plural(rows.length, 'box', 'boxes')} done`),
+        ...rows.map(r => h('a', { href: '#/', class: 'jrow', onclick: (e) => { e.preventDefault(); goGarage('all', r.k); } },
+          h('span', { class: 'jlab' }, h('b', {}, r.k), r.rec?.box_name ? h('span', { class: 'muted small' }, ` ${r.rec.box_name}`) : null),
+          journeyTrack(r.j, { mini: true }), h('span', { class: 'muted small jnum' }, r.j.next ? r.j.next.label : 'Done'))));
+    })(),
     noBox && !boxes.some(([, n]) => n > 0) ? h('p', { class: 'muted' }, `${plural(noBox, 'car is', 'cars are')} not in a storage box yet.`) : null));
 
   // Shooting pace (Stage 1 check 5): from photo times; the last session first
@@ -679,6 +731,7 @@ async function renderGarage(v) {
     // Looking inside one storage box: a header card to name it, with what's in it at a glance.
     boxHead.replaceChildren();
     const oneBox = q.match(/^box\s*([a-z0-9-]+)$/i);
+    const jdata = oneBox ? await journeyData() : null;
     if (oneBox && garageFilter !== 'archived') {
       const label = `Box ${oneBox[1].toUpperCase()}`;
       const rec = names.get(label.toLowerCase());
@@ -690,6 +743,7 @@ async function renderGarage(v) {
       boxHead.append(h('div', { class: 'card boxcard' },
         h('div', { class: 'row' }, h('h2', {}, icon('box'), `${label}${rec?.box_size ? ' · ' + rec.box_size : ''}`), h('button', { type: 'button', class: 'quiet small', onclick: () => { garageSearch = ''; route(); } }, 'Close')),
         h('div', { class: 'muted' }, inBox.length ? `${plural(inBox.length, 'car', 'cars')} inside${byBrand ? ' · ' + byBrand : ''}` : 'Empty so far.'),
+        ...(inBox.length ? (() => { const j = boxJourneyFrom(jdata, label, rec); return [journeyTrack(j), journeyNext(j, label)]; })() : []),
         h('button', { type: 'button', class: 'wide', style: 'margin-top:10px', onclick: () => fillBox(label) }, icon('camera'), `Fill ${label}`),
         h('button', { type: 'button', class: 'ghost wide', style: 'margin-top:6px', onclick: () => importBox(label) }, `📥 Import photos into ${label}`),
         inBox.length ? h('a', { href: `#/boxsheet/${encodeURIComponent(oneBox[1].toUpperCase())}`, class: 'btn ghost wide', style: 'margin-top:6px' }, `🧾 Contents sheet & label`) : null,
@@ -1820,12 +1874,14 @@ async function renderBoxSheet(v, id) {
   const brandsLine = rec?.box_brand === 'mixed' || !rec?.box_brand ? [...new Set(rows.map(r => r.brand).filter(Boolean))].slice(0, 4).join(' · ') + (new Set(rows.map(r => r.brand)).size > 4 ? ' · …' : '') : brandName[rec.box_brand];
   const scalesLine = [...new Set(rows.map(r => scaleLabel[r.m.scale_id]).filter(Boolean))].join(' · ');
   const today = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  // Box journey: printing or copying the sheet counts as the Label step (once; the date of the first time)
+  const markLabelled = async () => { if (!rec?.box_label_at) { await saveBox(label, { box_label_at: store.nowIso() }); autoSyncSoon(); } };
   const asText = () => [`${label}${rec?.box_name ? ' · ' + rec.box_name : ''} — ${plural(total, 'car', 'cars')} (${today})`,
     ...rows.map((r, k) => `${k + 1}. ${[r.brand, r.m.display_name || 'Name not set', r.m.product_code, scaleLabel[r.m.scale_id], r.m.colour_name || (r.m.colour_family ? familyLabel(r.m.colour_family) : '')].filter(Boolean).join(' · ')}${r.n > 1 ? ` ×${r.n}` : ''}`)].join('\n');
   v.append(h('div', { class: 'noprint' }, h('a', { href: '#/', class: 'back', onclick: () => { garageFilter = 'all'; garageSearch = label; } }, `← ${label}`)),
     h('div', { class: 'row noprint', style: 'gap:8px;margin:8px 0 14px' },
-      h('button', { type: 'button', style: 'flex:1', onclick: () => window.print() }, '🖨 Print or save as PDF'),
-      h('button', { type: 'button', class: 'quiet', style: 'flex:1', onclick: async () => toast(await copyText(asText()) ? 'List copied ✓' : 'Could not copy', 2000, 'ok') }, 'Copy as text')));
+      h('button', { type: 'button', style: 'flex:1', onclick: async () => { await markLabelled(); window.print(); } }, '🖨 Print or save as PDF'),
+      h('button', { type: 'button', class: 'quiet', style: 'flex:1', onclick: async () => { const ok = await copyText(asText()); if (ok) await markLabelled(); toast(ok ? 'List copied ✓' : 'Could not copy', 2000, 'ok'); } }, 'Copy as text')));
   const sheet = h('div', { class: 'boxsheet' });
   // QR to this box's car list (scan with the phone camera once the box is packed). Loaded only here, so the app
   // itself never depends on the library to open.
