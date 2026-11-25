@@ -90,7 +90,7 @@ def main():
         check(page.locator('.cropstage.bad').count() == 0, 'corners in order: outline normal')
         page.screenshot(path='/tmp/smg-crop/crop-screen.png')
         page.get_by_role('button', name='Save straightened copy').click(); page.wait_for_selector('.pdp-hero img', timeout=10000); page.wait_for_timeout(800)
-        check(page.is_visible('text=Box front · straightened'), 'photo marked "straightened"')
+        check(page.is_visible('text=Box front · edited'), 'photo marked "edited"')
         info = page.evaluate(f"""(async () => {{ const i = await import('./js/idb.js'); const b = await i.blobs.get('{pid}:cropped'); const t = await i.blobs.get('{pid}:cropthumb');
           const bmp = await createImageBitmap(b); const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height; const x = c.getContext('2d'); x.drawImage(bmp, 0, 0);
           const d = x.getImageData(0, 0, c.width, c.height).data; let red = 0, n = 0;
@@ -114,8 +114,8 @@ def main():
 
         # Undo returns to the original
         page.goto(base + f'#/item/{mid}'); page.wait_for_selector('.gallery .fig')
-        if not page.is_visible('text=Undo straightening'): page.locator('.gallery .fig', has_text='Box front').click(); page.wait_for_selector('text=Undo straightening')
-        page.get_by_role('button', name='Undo straightening').click(); page.wait_for_timeout(600)
+        if not page.is_visible('text=Back to original'): page.locator('.gallery .fig', has_text='Box front').click(); page.wait_for_selector('text=Undo straightening')
+        page.get_by_role('button', name='Back to original').click(); page.wait_for_timeout(600)
         ph = page.evaluate(f"(async () => (await (await import('./js/store.js')).list('photos')).find(p => p.photo_id === '{pid}'))()")
         check(not ph['crop_corners'] and not page.is_visible('text=straightened'), 'undo: back to the original photo')
         # Rear photo: its full copy was freed after sync, so the crop screen fetches it from Drive

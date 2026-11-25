@@ -17,7 +17,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.20.1';
+export const APP_VERSION = 's1-0.21.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -1614,7 +1614,7 @@ async function renderItem(v, modelId) {
     const main = p.photo_id === m.primary_photo_id;
     gal.append(h('button', { type: 'button', class: `fig ${selectedPhoto.id === p.photo_id ? 'sel' : ''}`, 'aria-label': `Photo options: ${SHOT_ROLES[p.shot_role]?.label || p.shot_role}`,
       onclick: () => { selectedPhoto.id = selectedPhoto.id === p.photo_id ? null : p.photo_id; route(); } }, img,
-      h('span', { class: 'cap' }, `${main ? '★ ' : ''}${SHOT_ROLES[p.shot_role]?.label || p.shot_role}${p.crop_corners ? ' · straightened' : ''}${p.original_file_id ? '' : ' · waiting'}`)));
+      h('span', { class: 'cap' }, `${main ? '★ ' : ''}${SHOT_ROLES[p.shot_role]?.label || p.shot_role}${p.crop_corners ? ' · edited' : ''}${p.original_file_id ? '' : ' · waiting'}`)));
   }
   v.append(gal);
   const sp = photos.find(p => p.photo_id === selectedPhoto.id);
@@ -1634,6 +1634,12 @@ async function renderItem(v, modelId) {
           await store.logChange('photos', sp.photo_id, 'deleted_at', '', 'removed', 'photo removed in app');
           selectedPhoto.id = null; toast('Photo removed'); route(); autoSyncSoon();
         } }, 'Remove photo')),
+      h('div', { class: 'row rotrow', style: 'margin-top:10px' },
+        ...[[-1, '↺ Rotate left'], [1, 'Rotate right ↻']].map(([dir, label]) => h('button', { type: 'button', class: 'quiet', onclick: async (e) => {
+          e.target.disabled = true; e.target.textContent = 'Rotating…';
+          try { if (await rotatePhoto(sp, dir)) toast('Rotated ✓ The original is kept.', 2000); } catch (err) { toast(`Couldn't rotate: ${err.message}`, 4000, 'bad'); }
+          route();
+        } }, label))),
       h('div', { class: 'row', style: 'margin-top:10px' },
         h('a', { class: 'btn quiet', href: `#/crop/${encodeURIComponent(sp.photo_id)}` }, sp.crop_corners ? 'Adjust straightening' : 'Crop / straighten'),
         sp.crop_corners ? h('button', { type: 'button', class: 'ghost', onclick: async () => {
@@ -1641,7 +1647,7 @@ async function renderItem(v, modelId) {
           await store.logChange('photos', sp.photo_id, 'crop_corners', sp.crop_corners, '', 'straightening undone in app');
           for (const k of ['cropped', 'cropthumb']) { await blobs.remove(`${sp.photo_id}:${k}`); urlCache.delete(`${sp.photo_id}:${k}`); }
           toast('Back to the original photo'); route(); autoSyncSoon();
-        } }, 'Undo straightening') : null)));
+        } }, 'Back to original') : null)));
   }
   const roleSel = h('select', { style: 'flex:2' }, Object.entries(SHOT_ROLES).map(([k, r]) => h('option', { value: k }, r.label)));
   v.append(h('div', { class: 'row', style: 'margin-top:8px' }, roleSel, h('button', { class: 'quiet', style: 'flex:1', onclick: async () => {
@@ -1820,6 +1826,32 @@ async function exportEverything() {
 // Crop / straighten (D14, D19): drag four corners onto the box; the app makes a straight copy.
 // The original is never changed; the copy is stored as `cropped` (uploaded) + `cropthumb` (phone only).
 // =====================================================================
+// The display copy (1600 px); after a sync the phone may only have the thumbnail, so fetch it from Drive.
+async function photoSource(p) {
+  let src = await blobs.get(`${p.photo_id}:display`);
+  if (!src && p.display_file_id && navigator.onLine) {
+    try { if (!hasToken()) await signIn(); src = await drive.download(p.display_file_id); await blobs.put(`${p.photo_id}:display`, src); } catch (e) { console.warn('display download', e); }
+  }
+  return src || await blobs.get(`${p.photo_id}:original`);
+}
+// Rotate a quarter turn (B, 25 Nov). Same idea as straightening: the corners are turned and a new straight copy is
+// made, so it combines with any straightening, the original is never changed, and "Back to original" undoes it.
+async function rotatePhoto(p, dir) {
+  const src = await photoSource(p);
+  if (!src) { toast('The full photo is not on this phone. Connect to the internet and sign in, then try again.', 4500, 'warn'); return false; }
+  let q = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  try { const saved = JSON.parse(p.crop_corners || 'null'); if (Array.isArray(saved) && saved.length === 4) q = saved; } catch { /* full photo */ }
+  q = dir > 0 ? [q[3], q[0], q[1], q[2]] : [q[1], q[2], q[3], q[0]]; // clockwise: the old bottom-left becomes the top-left
+  const bmp = await createImageBitmap(src); const W = bmp.width, H = bmp.height; bmp.close?.();
+  const out = await straighten(src, q.map(([x, y]) => [x * W, y * H]));
+  await blobs.put(`${p.photo_id}:cropped`, out.cropped); await blobs.put(`${p.photo_id}:cropthumb`, out.cropthumb);
+  for (const k of ['cropped', 'cropthumb']) urlCache.delete(`${p.photo_id}:${k}`);
+  const corners = JSON.stringify(q.map(([x, y]) => [Math.round(x * 10000) / 10000, Math.round(y * 10000) / 10000]));
+  await store.update('photos', p.photo_id, { crop_corners: corners, cropped_file_id: '' });
+  await store.logChange('photos', p.photo_id, 'crop_corners', p.crop_corners || '', corners, dir > 0 ? 'rotated right in app' : 'rotated left in app');
+  autoSyncSoon();
+  return true;
+}
 async function renderCrop(v, photoId) {
   const p = (await store.list('photos')).find(x => x.photo_id === photoId);
   if (!p) { v.append(h('p', {}, 'Photo not found.'), h('a', { href: '#/' }, '← Garage')); return; }
@@ -1827,11 +1859,7 @@ async function renderCrop(v, photoId) {
   v.append(h('a', { href: back, class: 'back' }, '← Back'), h('h2', {}, 'Straighten photo'),
     h('p', { class: 'muted' }, 'Drag the four corners onto the corners of the box. A magnifier helps you place them exactly.'));
   // Source: the display copy (1600 px). After a sync the phone may only have the thumbnail, so fetch it from Drive.
-  let src = await blobs.get(`${p.photo_id}:display`);
-  if (!src && p.display_file_id && navigator.onLine) {
-    try { if (!hasToken()) await signIn(); src = await drive.download(p.display_file_id); await blobs.put(`${p.photo_id}:display`, src); } catch (e) { console.warn('display download', e); }
-  }
-  if (!src) src = await blobs.get(`${p.photo_id}:original`);
+  const src = await photoSource(p);
   if (!src) { v.append(h('div', { class: 'banner warn' }, 'The full photo is not on this phone. Connect to the internet and sign in, then try again.')); return; }
   const url = URL.createObjectURL(src);
   const img = h('img', { src: url, alt: 'Photo to straighten', draggable: 'false' });
