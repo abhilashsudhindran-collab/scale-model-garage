@@ -1334,7 +1334,13 @@ async function renderName(v) {
   const nSugg = todo.filter(x => sugg[x.model_id]).length;
   if (batch) {
     const ta = h('textarea', { placeholder: 'Paste the whole answer here', 'aria-label': 'AI answer' });
-    aiCard.append(h('p', { class: 'muted' }, `Waiting for the answer for ${plural(batch.ids.length, 'box', 'boxes')}. In Gemini or Claude, copy the whole reply, then paste it here.`), ta,
+    // Gemini's app keeps the photos but drops the text shared with them (B, 24–25 Nov): without the instructions
+    // it makes up its own table, with no Colour or Note. So the reminder is big and the instructions one tap away.
+    aiCard.append(h('div', { class: 'banner warn pastehint' },
+        h('div', { class: 'hd' }, 'In Gemini: paste the instructions with the photos'),
+        h('div', {}, 'Gemini\'s app often drops them. Long-press the message box in Gemini → Paste → send.'),
+        batch.prompt ? h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: async () => { toast(await copyText(batch.prompt) ? 'Instructions copied ✓ Paste them in Gemini' : 'Could not copy', 2500); } }, 'Copy the instructions again') : null),
+      h('p', { class: 'muted' }, `Then copy Gemini's whole reply for ${plural(batch.ids.length, 'box', 'boxes')} and paste it here.`), ta,
       h('div', { class: 'row', style: 'margin-top:8px' },
         h('button', { type: 'button', class: 'quiet', onclick: async () => { try { ta.value = await navigator.clipboard.readText(); } catch { toast('Long-press the box above and choose Paste', 3500, 'warn'); } } }, 'Paste from clipboard'),
         h('button', { type: 'button', onclick: async () => {
@@ -1368,7 +1374,7 @@ async function renderName(v) {
           return;
         }
         const log = await store.create('ai_log', { ai_log_id: aiPrep.batchId, capture_session_id: aiPrep.batchId, ai_tool: 'gemini_or_claude_app (copy-paste)', prompt_version: PROMPT_VERSION, input_photo_ids: aiPrep.photoIds.join(','), processed_at: store.nowIso() });
-        await meta.set('aiBatch', { logId: log.ai_log_id, ids: aiPrep.ids, mode: aiPrep.mode });
+        await meta.set('aiBatch', { logId: log.ai_log_id, ids: aiPrep.ids, mode: aiPrep.mode, prompt: aiPrep.prompt });
         aiPrep = null; toast(copied ? 'Shared ✓ If the instructions are missing, paste them (already copied).' : 'Shared', 4000); route();
       } }, canFiles ? 'Share to Gemini or Claude' : 'Copy instructions and get the photos'),
       h('button', { type: 'button', class: 'ghost small', style: 'margin-top:8px', onclick: async () => { toast(await copyText(aiPrep.prompt) ? 'Instructions copied' : 'Could not copy', 2000); } }, 'Copy the instructions only'),

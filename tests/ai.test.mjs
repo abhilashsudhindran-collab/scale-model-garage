@@ -187,7 +187,22 @@ Additional Packaging Notes
   eq(noteParts('Fun fact - It has a centre seat.').body, 'It has a centre seat.', 'fun fact with a dash');
   eq(noteParts('Just a sentence.').label, 'Note', 'untagged note');
   const p = buildPrompt([{ brand: 'Mini GT', name: 'McLaren F1 GTR' }], { extras: true });
-  eq(p.includes('| Note |') && p.includes('already named: McLaren F1 GTR') && p.includes('Colour and Note'), true, 'extras prompt asks for colour and note of named cars');
+  eq(p.includes('| Note |') && p.includes('already named: McLaren F1 GTR') && p.includes('the Colour and the Note'), true, 'extras prompt asks for colour and note of named cars');
+}
+
+// B's 3rd REAL Gemini reply (25 Nov 11:24): Gemini's own headings, no Box column, no Colour/Note (instructions not pasted)
+{
+  const r = parseAnswer(`| Brand | Model Name | Year / Event | Scale | Product / Item Code | Additional Details |
+|---|---|---|---|---|---|
+| Bburago | Toyota GR010 Hybrid #7 (Toyota Gazoo Racing) | 2024 | 1:43 | 18-38322 | Race series; Mfg: 04/2026; MRP: ₹1,750.00 |
+| Kaido House x Mini GT | Nissan Skyline GT-R (R34) Kaido Star Racing V1 #25 | — | 1:64 | KHMG197 | UPC: 840456303788 |
+| Mini GT | Chevrolet Corvette Z06 GT3.R #4 (Corvette Racing by Pratt Miller Motorsports) | 2025 IMSA Daytona 24 Hrs | 1:64 | MGT01007 | UPC: 840456308310 |
+| Mini GT | McLaren F1 GTR | 1995 Presentation | 1:64 | MGT00949 | UPC: 840456307863 |
+| Mini GT | Toyota Supra VeilSide Combat V-I (Red) | — | 1:64 | MGT00999 | UPC: 840456311691 |`, 5, ['Mini GT', 'Bburago', 'Kaido House']);
+  eq(r.items.map(i => [i.n, i.code]), [[1, '18-38322'], [2, 'KHMG197'], [3, 'MGT01007'], [4, 'MGT00949'], [5, 'MGT00999']], 'no Box column: rows in order; codes from "Product / Item Code"');
+  eq(r.items[1].name, 'Nissan Skyline GT-R (R34) Kaido Star Racing V1 #25', '"Model Name" read as the name');
+  eq(r.items.every(i => !i.carNote && !i.colour), true, '"Additional Details" (MRP, UPC) is never taken as a note');
+  eq(buildPrompt([{}]).includes('Example row:') && buildPrompt([{}]).includes('Treasure Hunt'), true, 'prompt has an example row and asks for casting facts');
 }
 
 console.log(fails ? `${fails} of ${n} AI parser tests FAILED` : `All ${n} AI parser tests passed`);
