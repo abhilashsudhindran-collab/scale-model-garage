@@ -57,7 +57,7 @@ def main():
         check(times == 0, f'imports do not add near-zero capture times ({times})')
         page.goto(base + '#/dash'); page.wait_for_selector('.pacecard')
         pace = page.inner_text('.pacecard'); print('   ', pace.splitlines()[1])
-        check('40 s per box' in pace and '3 boxes timed' in pace and '3 boxes in 1 min' in pace, 'Dashboard pace from photo times: fronts 40 s apart → 40 s per box')
+        check('40 s per box' in pace and '40 s on average' in pace and '3 boxes timed' in pace and '3 boxes in 1 min' in pace, 'Dashboard pace from photo times: fronts 40 s apart → 40 s per box')
         # Mixed box: brands later (Gemini fills them on the Name tab)
         page.goto(base + '#/import'); page.wait_for_selector('text=📥 Import from gallery')
         page.select_option('select[aria-label="Brand for imported cars"]', value='later'); page.wait_for_timeout(400)
