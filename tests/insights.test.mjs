@@ -1,0 +1,26 @@
+// Unit tests for js/insights.js (s1-0.41.0).
+import { growthSeries, decadeOf, tallyBy, share } from '../js/insights.js';
+let n = 0, fails = 0;
+const eq = (a, b, msg) => { n++; if (JSON.stringify(a) !== JSON.stringify(b)) { fails++; console.log('FAIL', msg, JSON.stringify(a), '!=', JSON.stringify(b)); } };
+const t = (s) => new Date(s).toISOString();
+let g = growthSeries([t('2026-11-22T10:00'), t('2026-11-22T11:00'), t('2026-11-24T09:00')]);
+eq(g.unit, 'day', 'a few days → per day');
+eq(g.points.map(p => p.n), [2, 0, 1], 'empty days are kept so gaps show');
+eq(g.points[0].label, '22 Nov', 'day label');
+eq(g.total, 3, 'total counts every car');
+g = growthSeries([t('2026-01-05T10:00'), t('2026-03-01T10:00'), t('2026-03-09T10:00')]);
+eq(g.unit, 'month', 'more than a month apart → per month');
+eq(g.points.map(p => [p.label, p.n]), [['Jan 26', 1], ['Mar 26', 2]], 'months with cars only');
+eq(growthSeries([]).points.length, 0, 'no times → nothing');
+eq(growthSeries(['not a date']).points.length, 0, 'bad times are left out');
+eq(decadeOf('1995'), '1990s', '1995 → 1990s');
+eq(decadeOf(2024), '2020s', 'number year');
+eq(decadeOf('c. 1967 model'), '1960s', 'year inside text');
+eq(decadeOf(''), '', 'blank → unknown');
+eq(decadeOf('95'), '', 'two-digit years are not guessed');
+eq(tallyBy(['a', 'b', 'a', '', 'c'], x => x), [['a', 2], ['b', 1], ['c', 1]], 'tally skips blanks, biggest first');
+eq(share(1, 300), 1, 'one car is never 0%');
+eq(share(0, 10), 0, 'none is 0%');
+eq(share(5, 0), 0, 'no cars: 0');
+console.log(fails ? `${fails} of ${n} insights tests FAILED` : `All ${n} insights tests passed`);
+process.exit(fails ? 1 : 0);
