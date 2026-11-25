@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.18.0
+## Status: Stage 1 (quick-capture slice), version s1-0.19.0
+
+**s1-0.19.0 (25 Nov 2026): colours.** Every car can have a colour family (14 swatches: red … black, multi-colour) plus Gemini's exact colour name. The colour comes from Gemini's answer (it sees the car; box art colours fool pixel counting), is mapped to a family ("Rosso Diablo" → red, "British Racing Green" → green, first colour named wins) and is saved only when B taps it: "Gemini said: Silver · Use Silver" on the car page, the Name tab save, or "Use all" in Garage → By colour. Car page swatch row (tap to set, tap again to clear); Garage "By colour" groups in colour order; tiles show a colour dot; CSV export has a Colour column; every change logged. New MODELS columns colour_family, colour_name (added to existing sheets on the next sync).
 
 **s1-0.18.0 (25 Nov 2026): How Gemini did + ＋1 copies.** (1) Name tab: "How Gemini did" card: every Gemini reply in AI_LOG is read again with today's reader and compared with what B saved (right as suggested / small fixes / rewritten; codes right), so old reader bugs don't count against Gemini. (2) Prompt `names-v6`: Hot Wheels hint (the car's own 5-character code, also on the India import sticker as "Item No."; two cars of one set never share a code). (3) ＋1 copies: car page "N copies · ＋ Add a copy" (a real copy record in the same box, state copied, price/date unknown, logged); Photo run "Got another of car N? ＋1" after a car saves (no new photos, repeatable); "Remove this copy" (archived) when there are several; Sold/Gifted stays the way to record disposals.
 

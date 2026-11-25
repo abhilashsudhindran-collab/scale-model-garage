@@ -10,13 +10,14 @@ import { getClientId, setClientId, hasToken, signIn, tokenMinutesLeft, drive } f
 import { getConfig, seedLocal } from './setup.js';
 import { newId } from './ids.js';
 import { resolveName, moreBrands, KNOWN_BRANDS } from './brands.js';
+import { COLOUR_FAMILIES, familyFrom, familyLabel, familySwatch } from './colours.js';
 import { newTimer, touch, seconds } from './timing.js';
 import { straighten, validQuad } from './crop.js';
 import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, PROMPT_VERSION, MAX_BATCH } from './ai.js';
 
-export const APP_VERSION = 's1-0.18.0';
+export const APP_VERSION = 's1-0.19.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -538,7 +539,7 @@ async function renderGarage(v) {
   // One scrolling row of filters (audit G5); a filter only appears when it has something in it.
   const n = { noname: active.filter(r => !String(r.data.display_name || '').trim()).length, review: active.filter(r => r.data.namespace_status === 'needs_review').length, pending: active.filter(isPending).length, clash: active.filter(r => r.conflict).length, archived: archived.length };
   if (n[garageFilter] === 0) garageFilter = 'all'; // e.g. after restoring the last archived model, don't leave an empty list
-  const filters = [['all', 'All'], ['box', 'By box'], ['brand', 'By brand'], ['scale', 'By scale'], ['quick', 'Quick'], ['noname', `Needs a name (${n.noname})`, n.noname], ['review', `Needs review (${n.review})`, n.review], ['pending', `Waiting to sync (${n.pending})`, n.pending], ['clash', `Clashes (${n.clash})`, n.clash], ['archived', `Archived (${n.archived})`, n.archived]]
+  const filters = [['all', 'All'], ['box', 'By box'], ['brand', 'By brand'], ['scale', 'By scale'], ['colour', 'By colour'], ['quick', 'Quick'], ['noname', `Needs a name (${n.noname})`, n.noname], ['review', `Needs review (${n.review})`, n.review], ['pending', `Waiting to sync (${n.pending})`, n.pending], ['clash', `Clashes (${n.clash})`, n.clash], ['archived', `Archived (${n.archived})`, n.archived]]
     .filter(([k, , c]) => c === undefined || c > 0 || garageFilter === k);
   const chips = h('div', { class: 'chips scroll', style: 'margin:10px 0' }, filters.map(([k, label]) => h('button', { class: `chip ${garageFilter === k ? 'on' : ''}`, onclick: () => { garageFilter = k; route(); } }, label)));
   v.append(chips);
@@ -623,12 +624,24 @@ async function renderGarage(v) {
     const boxesMemo = new Map();
     const boxesOf = (mid) => { let b = boxesMemo.get(mid); if (!b) { b = [...new Set((ownedByModel.get(mid) || []).map(i => i.storage_location).filter(Boolean))]; boxesMemo.set(mid, b); } return b; };
     const scaleOrder = Object.fromEntries(ref.scales.map(sc => [sc.scale_id, Number(sc.sort_order) || 0]));
-    const grouping = { box: true, brand: true, scale: true }[garageFilter] ? garageFilter : null;
-    const gkey = (r) => grouping === 'box' ? (boxesOf(r.data.model_id)[0] || '') : grouping === 'brand' ? (brandName[r.data.brand_id] || '') : grouping === 'scale' ? (r.data.scale_id || '') : '';
-    const gnum = (k) => grouping === 'box' ? ((k.match(/\d+/) || [])[0] ? Number(k.match(/\d+/)[0]) : Infinity) : grouping === 'scale' ? (scaleOrder[k] ?? Infinity) : 0;
-    const glabel = (k) => grouping === 'box' ? (k ? [k, names.get(k.toLowerCase())?.box_size, names.get(k.toLowerCase())?.box_name].filter(Boolean).join(' · ') : 'No box yet') : grouping === 'brand' ? (k || 'Brand not set') : (scaleLabel[k] || 'Scale not set');
+    const grouping = { box: true, brand: true, scale: true, colour: true }[garageFilter] ? garageFilter : null;
+    const gkey = (r) => grouping === 'box' ? (boxesOf(r.data.model_id)[0] || '') : grouping === 'brand' ? (brandName[r.data.brand_id] || '') : grouping === 'scale' ? (r.data.scale_id || '') : grouping === 'colour' ? (r.data.colour_family || '') : '';
+    const gnum = (k) => grouping === 'box' ? ((k.match(/\d+/) || [])[0] ? Number(k.match(/\d+/)[0]) : Infinity) : grouping === 'scale' ? (scaleOrder[k] ?? Infinity) : grouping === 'colour' ? (k ? COLOUR_FAMILIES.findIndex(f => f[0] === k) : Infinity) : 0;
+    const glabel = (k) => grouping === 'box' ? (k ? [k, names.get(k.toLowerCase())?.box_size, names.get(k.toLowerCase())?.box_name].filter(Boolean).join(' · ') : 'No box yet') : grouping === 'brand' ? (k || 'Brand not set') : grouping === 'colour' ? (familyLabel(k) || 'No colour yet') : (scaleLabel[k] || 'Scale not set');
     const keyMemo = new Map(); const gk = (r) => { let k = keyMemo.get(r.id); if (k === undefined) { k = gkey(r); keyMemo.set(r.id, k); } return k; };
     if (grouping) list.sort((a, b) => { const ka = gk(a), kb = gk(b); if (!ka !== !kb) return ka ? -1 : 1; return gnum(ka) - gnum(kb) || ka.localeCompare(kb) || String(b.data.created_at).localeCompare(String(a.data.created_at)); });
+    // By colour: Gemini already named colours for some cars without one: one tap to use them all (B confirms).
+    if (grouping === 'colour') {
+      const ai = await aiColours(ref);
+      const todo = list.filter(r => !r.data.colour_family && ai.has(r.data.model_id));
+      if (todo.length) grid.append(h('div', { class: 'banner info colourall' },
+        h('div', {}, `Gemini named the colour of ${plural(todo.length, 'car', 'cars')} with no colour yet.`),
+        h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: async () => {
+          if (!confirm(`Use Gemini's colour for ${plural(todo.length, 'car', 'cars')}? You can change any of them on its page.`)) return;
+          for (const r of todo) { const c = ai.get(r.data.model_id); await setColour(r.data.model_id, c.family, c.name, 'colour from Gemini, confirmed (Use all)'); }
+          toast(`Colours set for ${plural(todo.length, 'car', 'cars')} ✓`); route();
+        } }, 'Use all')));
+    }
     const gcount = new Map(); if (grouping) list.forEach(r => gcount.set(gk(r), (gcount.get(gk(r)) || 0) + 1));
     let lastGroup = null;
     for (const r of list.slice(0, shown)) {
@@ -648,7 +661,7 @@ async function renderGarage(v) {
       const pendingPhotos = (photosByModel.get(m.model_id) || []).some(p => !p.original_file_id);
       grid.append(h('a', { class: 'tile', href: `#/item/${encodeURIComponent(m.model_id)}` }, img,
         h('div', { class: 'tx' },
-          h('div', { class: 'nm' }, m.display_name || '(no name yet)'),
+          h('div', { class: 'nm' }, m.colour_family ? h('span', { class: 'cdot', title: familyLabel(m.colour_family), style: `background:${familySwatch(m.colour_family)}` }) : null, m.display_name || '(no name yet)'),
           h('div', { class: 'sub' }, [brandName[m.brand_id] || m.printed_brand_text || 'Brand?', scaleLabel[m.scale_id], m.product_code].filter(Boolean).join(' · ')),
           h('div', { class: 'badges' },
             ...boxesOf(m.model_id).slice(0, 2).map(bx => h('span', { class: 'b box' }, bx)),
@@ -1215,6 +1228,34 @@ async function geminiScore(ref) {
   return { n: all.length, right: all.filter(x => x.outcome === 'right').length, fix: all.filter(x => x.outcome === 'fix').length,
     wrong: all.filter(x => x.outcome === 'wrong').length, codes: all.filter(x => x.hasCode).length, codesRight: all.filter(x => x.codeRight).length };
 }
+// What Gemini said each car's colour is: latest AI_LOG reply read with today's reader, plus open suggestions.
+async function aiColours(ref) {
+  const [logs, photos, sugg] = await Promise.all([store.list('ai_log'), store.list('photos'), meta.get('aiSuggest', {})]);
+  const modelOfPhoto = new Map(photos.map(p => [p.photo_id, p.model_id]));
+  const names = [...ref.brands.map(x => x.name), ...ref.lines.map(x => x.name), ...KNOWN_BRANDS];
+  const out = new Map();
+  for (const log of logs.sort((a, b) => String(a.processed_at || '').localeCompare(String(b.processed_at || '')))) {
+    if (!log.ai_response_raw) continue;
+    const order = String(log.input_photo_ids || '').split(',').filter((_, i) => i % 2 === 0).map(id => modelOfPhoto.get(id));
+    for (const it of parseAnswer(log.ai_response_raw, order.length || 10, names).items) {
+      const mid = order[it.n - 1]; const fam = familyFrom(it.colour);
+      if (mid && fam) out.set(mid, { family: fam, name: it.colour });
+    }
+  }
+  for (const [mid, sg] of Object.entries(sugg)) { const fam = familyFrom(sg.colour); if (fam) out.set(mid, { family: fam, name: sg.colour }); }
+  return out;
+}
+async function setColour(modelId, family, name, reason) {
+  const m = await store.get('models', modelId); if (!m) return;
+  await store.update('models', modelId, { colour_family: family, colour_name: name || '' });
+  await store.logChange('models', modelId, 'colour_family', m.colour_family || '', family, reason);
+  autoSyncSoon();
+}
+function swatchRow(current, onPick) {
+  return h('div', { class: 'swatches', role: 'radiogroup', 'aria-label': 'Colour' }, COLOUR_FAMILIES.map(([k, label, bg]) =>
+    h('button', { type: 'button', class: `sw ${current === k ? 'on' : ''}`, role: 'radio', 'aria-checked': current === k ? 'true' : 'false', 'aria-label': label, title: label,
+      style: `background:${bg}`, onclick: () => onPick(k) })));
+}
 async function geminiScoreCard(ref) {
   let sc; try { sc = await geminiScore(ref); } catch (e) { console.warn('score', e); return null; }
   if (!sc.n) return null;
@@ -1359,6 +1400,8 @@ async function renderName(v) {
       const r = checkDuplicate({ ...m, ...patch }, models, ids, []);
       if (r.status === 'duplicate') toast(`Same code as "${r.exact[0].display_name || r.exact[0].product_code}". Check both in the Garage.`, 5000, 'warn');
     }
+    const fam = familyFrom(sg?.colour);
+    if (fam && !m.colour_family) { patch.colour_family = fam; patch.colour_name = sg.colour; }
     if (sg) {
       // Record what B confirmed against what the AI suggested (AI_LOG, security doc §2.4).
       patch.identification_status = 'confirmed';
@@ -1556,8 +1599,20 @@ async function renderItem(v, modelId) {
   const facts = [plural(owned.length, 'copy', 'copies'), ...new Set(owned.map(i => ({ sealed: 'Sealed', opened: 'Opened', loose: 'Loose' }[i.packaging_state])).filter(Boolean)),
     ...new Set(owned.map(i => i.storage_location).filter(Boolean)), idfs.find(i => i.identifier_type === 'barcode')?.value_raw ? `Barcode ${idfs.find(i => i.identifier_type === 'barcode').value_raw}` : null,
     m.completeness_status === 'complete' ? 'Complete' : 'Quick entry'].filter(Boolean);
+  // Colour (B, 24 Nov): swatch row; Gemini's colour offered when none is set yet.
+  if (!m.deleted_at) {
+    const ai = (await aiColours(ref)).get(modelId);
+    const cBlock = h('div', { class: 'colourblock' },
+      h('div', { class: 'row', style: 'align-items:center;gap:8px' }, h('span', { class: 'f', style: 'margin:0' }, 'Colour'),
+        m.colour_family ? h('span', { class: 'muted' }, [familyLabel(m.colour_family), m.colour_name && m.colour_name.toLowerCase() !== familyLabel(m.colour_family).toLowerCase() ? m.colour_name : ''].filter(Boolean).join(' · ')) : h('span', { class: 'muted' }, 'not set')),
+      !m.colour_family && ai ? h('div', { class: 'aicolour' }, h('span', { class: 'dot', style: `background:${familySwatch(ai.family)}` }), `Gemini said: ${ai.name}`,
+        h('button', { type: 'button', class: 'quiet small', onclick: async () => { await setColour(modelId, ai.family, ai.name, 'colour from Gemini, confirmed'); toast(`Colour: ${familyLabel(ai.family)} ✓`); route(); } }, `Use ${familyLabel(ai.family)}`)) : null,
+      swatchRow(m.colour_family, async (k) => { await setColour(modelId, k === m.colour_family ? '' : k, k === m.colour_family ? '' : (ai?.family === k ? ai.name : ''), 'colour set in app'); route(); }));
+    var colourBlock = cBlock;
+  }
   v.append(h('div', { class: 'facts' }, facts.map(t => /^Box /.test(t) ? h('a', { class: 'fact', href: '#/', onclick: (e) => { e.preventDefault(); garageFilter = 'all'; garageSearch = t; location.hash = '#/'; } }, icon('box'), t) : h('span', { class: 'fact' }, t))));
 
+  if (typeof colourBlock !== 'undefined' && colourBlock) v.append(colourBlock);
   // Editable product fields
   // Typed edits are saved before any navigation or redraw (audit I1): see leaveHooks in route().
   const barcodes = idfs.filter(i => i.identifier_type === 'barcode');
