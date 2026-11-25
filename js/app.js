@@ -11,14 +11,14 @@ import { getConfig, seedLocal } from './setup.js';
 import { newId } from './ids.js';
 import { resolveName, moreBrands, KNOWN_BRANDS, looksLike, normName } from './brands.js';
 import { COLOUR_FAMILIES, familyFrom, familyLabel, familySwatch } from './colours.js';
-import { newTimer, touch, seconds } from './timing.js';
+import { newTimer, touch, seconds, paceFromTimes } from './timing.js';
 import { straighten, validQuad } from './crop.js';
 import { toCsv, zip, collectionRows } from './export.js';
 import { runAudit } from './audit.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.31.0';
+export const APP_VERSION = 's1-0.32.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -558,6 +558,16 @@ async function renderDash(v) {
         h('div', { class: 'muted small' }, `${plural(carsPacked, 'car', 'cars')} packed · ${loose} still to pack${noBox ? ` (${noBox} not in a storage box yet)` : ''}`));
     })(),
     noBox ? h('p', { class: 'muted' }, `${plural(noBox, 'box has', 'boxes have')} no storage box yet.`) : null));
+
+  // Shooting pace (Stage 1 check 5): from photo times; the last session first
+  const pc = await shootingPace();
+  if (pc.medianSec != null) {
+    const last = pc.sessions[pc.sessions.length - 1];
+    v.append(h('div', { class: 'card pacecard' }, h('h3', {}, '⏱ Shooting pace'),
+      h('p', {}, h('b', {}, `${pc.medianSec} s per box`), h('span', { class: 'muted' }, ` median, ${plural(pc.measured + pc.sessions.length, 'box', 'boxes')} timed`)),
+      h('p', { class: 'muted small' }, `Last session: ${plural(last.boxes, 'box', 'boxes')} in ${last.minutes} min (${last.medianSec} s each) · ${new Date(last.start).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`),
+      h('p', { class: 'muted small' }, 'Measured from when each box\'s front photo was taken. Pauses over 10 minutes start a new session.')));
+  }
 
   // Removed boxes: history with Restore
   const gone = await removedBoxes();
@@ -1856,7 +1866,7 @@ async function saveCapture({ quiet = false } = {}) {
   catch (e) { toast(`Not saved: ${e.message}. Your box is kept here; try again.`, 5000, 'bad'); return false; }
   pushRecentBrand(cap.brandId);
   const secs = seconds(touch(cap.timer));
-  await logTiming(secs);
+  if (!quiet) await logTiming(secs); // gallery imports aren't timed per box here: their pace comes from photo times
   await clearDraft();
   if (boughtGet().on) rememberShop(boughtGet().source);
   cap = freshCapture({ brandId: nextBrandId(), scaleId: nextScaleId(), count: cap.count + 1 });
@@ -1883,6 +1893,17 @@ async function saveCopyOf(m) {
 
 // Capture times are kept under a new key: times recorded by s1-0.1.x counted idle time (audit C4).
 const TIMES_KEY = 'captureTimesV2';
+// Shooting pace from the time each box's front photo was taken (Photo run: in the app; camera app: the photo file's time).
+async function shootingPace() {
+  const [models, photos] = await Promise.all([store.list('models'), store.list('photos')]);
+  const live = new Set(models.filter(m => !m.deleted_at).map(m => m.model_id));
+  const firstFront = new Map();
+  for (const p of photos) if (!p.deleted_at && p.shot_role === 'box_front' && live.has(p.model_id) && p.captured_at) {
+    const prev = firstFront.get(p.model_id); if (!prev || p.captured_at < prev) firstFront.set(p.model_id, p.captured_at);
+  }
+  return paceFromTimes([...firstFront.values()]);
+}
+const paceText = (pc) => (pc.medianSec == null ? null : `median ${pc.medianSec} s per box (${plural(pc.measured + pc.sessions.length, 'box', 'boxes')} in ${plural(pc.sessions.length, 'session', 'sessions')}, from photo times)`);
 async function logTiming(secs) {
   const t = await meta.get(TIMES_KEY, []);
   t.push(secs); await meta.set(TIMES_KEY, t.slice(-500));
@@ -2675,7 +2696,8 @@ async function renderSettings(v) {
     h('dl', { class: 'kv' },
       h('dt', {}, 'Storage used'), h('dd', {}, est ? `${(est.usage / 1048576).toFixed(1)} MB of ${(est.quota / 1073741824).toFixed(1)} GB` : '—'),
       h('dt', {}, 'Protected storage'), h('dd', {}, persisted ? 'Yes ✓' : 'No'),
-      h('dt', {}, 'Capture time'), h('dd', {}, median ? `median ${median} s per box (${plural(times.length, 'box', 'boxes')}; time spent on each box only)` : 'Not measured yet (counts from this version on)'),
+      h('dt', {}, 'Capture time'), h('dd', {}, median ? `median ${median} s per box (${plural(times.length, 'box', 'boxes')}; time spent on each box in the app)` : 'Not measured yet (counts from this version on)'),
+      h('dt', {}, 'Shooting pace'), h('dd', {}, paceText(await shootingPace()) || 'Not enough photos yet'),
       h('dt', {}, 'App version'), h('dd', {}, APP_VERSION),
       h('dt', {}, 'Schema version'), h('dd', {}, String(SCHEMA_VERSION))),
     persisted ? null : h('button', { class: 'quiet', style: 'margin-top:8px', onclick: async () => { const ok = await requestPersistentStorage(); toast(ok ? 'Storage protected ✓' : 'Chrome said no (try after installing the app)', 3500, ok ? 'ok' : 'warn'); route(); } }, 'Protect storage on this phone')));

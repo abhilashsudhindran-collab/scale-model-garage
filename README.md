@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.31.0
+## Status: Stage 1 (quick-capture slice), version s1-0.32.0
+
+**s1-0.32.0 (25 Nov 2026): shooting pace (Stage 1 check 5).** Dashboard → ⏱ Shooting pace and Settings → This phone: median seconds per box, measured from when each box's front photo was taken (Photo run: time in the app; camera app + import: the photo file's time). Pauses over 10 minutes start a new session; the last session shows boxes, minutes and its own median. **Fix:** gallery imports (s1-0.26.0) were adding a near-zero "capture time" per imported car, which would have pulled the Settings capture-time median down; imports are no longer timed there. Unit tests in tests/timing.test.mjs; e2e_import checks the pace.
 
 **s1-0.31.0 (25 Nov 2026): Check sync (Stage 1 acceptance check 2).** Settings → Check sync compares this phone with the Sheet and Drive, **read-only**: every synced record appears in its tab exactly once (duplicates and missing rows named by type: cars, copies, photo records, barcodes…), and, optionally, each original photo file still exists on Drive, is not in the bin, and has the checksum recorded at upload. Changes still waiting to sync are listed, not judged; rows in the sheet that this phone doesn't have are shown as information (another device). The last result is kept. js/audit.js (pure parts unit-tested: tests/audit.test.mjs); end-to-end: tests/e2e_audit.py (fake Google with deliberate damage).
 
