@@ -653,3 +653,8 @@ input[type=checkbox] { width: 22px; height: 22px; min-height: 0; padding: 0; mar
 .g-count { flex: none; font-size: .78rem; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 3px 10px; }
 .g-go { margin-left: auto; color: var(--muted); font-size: 1.4rem; line-height: 1; }
 .grid h3.group a { flex: 1; min-width: 0; }
+
+/* Every photo tile has the same thin outline (B, 25 Nov: a straightened photo on its light pad looked like a smaller card) */
+.tile .ph { position: relative; }
+.tile .ph::after { content: ""; position: absolute; inset: 0; border: 1px solid var(--line); border-radius: inherit; pointer-events: none; }
+.cd-img { border-bottom: 1px solid var(--line); }
