@@ -434,3 +434,9 @@ button.syncbtn:disabled { opacity: .45; cursor: default; }
 .tile .ph.fit { background: #fbfaf7; }
 .tile .ph.fit img { object-fit: contain; padding: 8px; box-sizing: border-box; filter: drop-shadow(0 2px 6px rgba(0,0,0,.12)); }
 .gallery .fig img.fit { object-fit: contain; background: #fbfaf7; padding: 4px; box-sizing: border-box; }
+
+/* merge (s1-0.22.0) */
+.mergelist { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.mergerow { text-align: left; background: var(--surface2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; min-height: 0; font-weight: 400; }
+.mergerow .nm { font-weight: 700; }
+.samecar a { font-weight: 700; }
