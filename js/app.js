@@ -18,7 +18,7 @@ import { runAudit } from './audit.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.32.0';
+export const APP_VERSION = 's1-0.33.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -244,6 +244,7 @@ async function route() {
     else if (hash.startsWith('#/brands')) await renderBrands(v);
     else if (hash.startsWith('#/import')) await renderImport(v);
     else if (hash.startsWith('#/boxsheet/')) await renderBoxSheet(v, decodeURIComponent(hash.slice(11)));
+    else if (hash.startsWith('#/box/')) { garageFilter = 'all'; garageSearch = `Box ${decodeURIComponent(hash.slice(6)).replace(/^box\s*/i, '').toUpperCase()}`; location.replace('#/'); return; }
     else await renderGarage(v);
   } catch (e) {
     v.append(h('div', { class: 'banner bad' }, `Something went wrong: ${e.message}`));
@@ -1712,11 +1713,17 @@ async function renderBoxSheet(v, id) {
       h('button', { type: 'button', style: 'flex:1', onclick: () => window.print() }, '🖨 Print or save as PDF'),
       h('button', { type: 'button', class: 'quiet', style: 'flex:1', onclick: async () => toast(await copyText(asText()) ? 'List copied ✓' : 'Could not copy', 2000, 'ok') }, 'Copy as text')));
   const sheet = h('div', { class: 'boxsheet' });
-  sheet.append(h('div', { class: 'boxlabel' },
+  // QR to this box's car list (scan with the phone camera once the box is packed). Loaded only here, so the app
+  // itself never depends on the library to open.
+  const qrBox = h('div', { class: 'bl-qr' });
+  const boxUrl = `${location.origin}${location.pathname}#/box/${encodeURIComponent(label.replace(/^Box\s*/i, ''))}`;
+  import('./qr.js').then(({ qrSvg }) => { qrBox.innerHTML = qrSvg(boxUrl, { label: `QR code: open ${label} in Scale Model Garage` }); qrBox.dataset.url = boxUrl; })
+    .catch((e) => { console.warn('qr', e); qrBox.remove(); });
+  sheet.append(h('div', { class: 'boxlabel' }, qrBox,
     h('div', { class: 'bl-num' }, label.toUpperCase()),
     rec?.box_name ? h('div', { class: 'bl-name' }, rec.box_name) : null,
     h('div', { class: 'bl-meta' }, [plural(total, 'car', 'cars'), brandsLine, scalesLine].filter(Boolean).join(' · ')),
-    h('div', { class: 'bl-date' }, `Packed list · ${today}`)));
+    h('div', { class: 'bl-date' }, `Packed list · ${today}`), h('div', { class: 'bl-scan' }, 'Scan the code to see what\'s inside')));
   const missing = rows.filter(r => !r.m.display_name).length;
   if (missing) sheet.append(h('div', { class: 'banner warn noprint' }, `${plural(missing, 'car has', 'cars have')} no name yet. Name them first for a complete list, or print as is.`));
   const list = h('ol', { class: 'bs-list' });

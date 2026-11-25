@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.32.0
+## Status: Stage 1 (quick-capture slice), version s1-0.33.0
+
+**s1-0.33.0 (25 Nov 2026): QR code on each box label.** The contents sheet's label now carries a QR code: scan it with the phone camera to open that box's car list in the app (link `…/#/box/N`; holds only the box number, no personal data). Made on the phone with the vendored MIT library qrcode-generator 2.0.4 (`vendor/qrcode/`, approved by B; dependency register L7), loaded only on the label page and cached for offline. e2e_boxsheet decodes the printed QR with the app's own ZXing reader and opens the link.
 
 **s1-0.32.0 (25 Nov 2026): shooting pace (Stage 1 check 5).** Dashboard → ⏱ Shooting pace and Settings → This phone: median seconds per box, measured from when each box's front photo was taken (Photo run: time in the app; camera app + import: the photo file's time). Pauses over 10 minutes start a new session; the last session shows boxes, minutes and its own median. **Fix:** gallery imports (s1-0.26.0) were adding a near-zero "capture time" per imported car, which would have pulled the Settings capture-time median down; imports are no longer timed there. Unit tests in tests/timing.test.mjs; e2e_import checks the pace.
 
