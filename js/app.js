@@ -17,7 +17,7 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.29.0';
+export const APP_VERSION = 's1-0.30.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -285,14 +285,30 @@ async function saveBox(label, patch) {
   if ('box_size' in patch) clean.box_size = BOX_SIZES.includes(patch.box_size) ? patch.box_size : '';
   if ('box_brand' in patch) clean.box_brand = /^[A-Za-z0-9_-]{1,40}$/.test(patch.box_brand || '') ? patch.box_brand : '';
   if ('box_scale' in patch) clean.box_scale = /^[A-Za-z0-9_-]{1,40}$/.test(patch.box_scale || '') ? patch.box_scale : '';
+  if ('box_packed_at' in patch) clean.box_packed_at = /^\d{4}-\d{2}-\d{2}T/.test(patch.box_packed_at || '') ? patch.box_packed_at : '';
   if (rec) {
     const changed = Object.keys(clean).filter(k => String(rec[k] || '') !== clean[k]);
     if (!changed.length) return;
     await store.update('storage_boxes', rec.storage_box_id, clean);
     for (const k of changed) await store.logChange('storage_boxes', rec.storage_box_id, k, rec[k], clean[k], 'edited in app');
-  } else if (Object.values(clean).some(Boolean)) await store.create('storage_boxes', { box_label: label, ...clean });
+  } else if (Object.values(clean).some(Boolean)) {
+    const nr = await store.create('storage_boxes', { box_label: label, ...clean });
+    for (const [k, val] of Object.entries(clean)) if (val) await store.logChange('storage_boxes', nr.storage_box_id, k, '', val, 'edited in app');
+  }
 }
 const BOX_SIZES = ['S', 'M', 'L', 'XL'];
+// Packing (D30): a box is "packed" once its label is done and it is closed. Only a date; cars are never locked.
+const packedDate = (r) => (r?.box_packed_at ? new Date(r.box_packed_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '');
+async function setPacked(label, on) {
+  await saveBox(label, { box_packed_at: on ? store.nowIso() : '' });
+  toast(on ? `${label} marked as packed ✓` : `${label} is open again`); autoSyncSoon();
+}
+function packButton(label, rec) {
+  return rec?.box_packed_at
+    ? h('div', { class: 'row packedrow', style: 'align-items:center;margin-top:8px' }, h('span', { style: 'flex:1' }, '✅ ', h('b', {}, 'Packed'), ` · ${packedDate(rec)}`),
+        h('button', { type: 'button', class: 'ghost small', onclick: async () => { await setPacked(label, false); route(); } }, 'Open again'))
+    : h('button', { type: 'button', class: 'quiet wide', style: 'margin-top:6px', onclick: async () => { await setPacked(label, true); route(); } }, '📦 Mark as packed');
+}
 // A storage box drawn like the real see-through box (B's sketch, 24 Nov): count big inside; size, number and name below.
 const BOX_SVG = '<svg viewBox="0 0 100 66" aria-hidden="true">'
   + '<path class="rim" d="M2 11 L5 5 H95 L98 11 Z" />'            // wide lip, like the SAMLA lid edge
@@ -338,7 +354,12 @@ async function applyBoxBrand(label) {
   else if (bs) { localStorage.setItem('smg.scalePerCar', '0'); if (cap) cap.scaleId = bs; localStorage.setItem('smg.lastScale', bs); }
 }
 // Import from the gallery straight into this box: the box's brand and scale are the starting choice.
+async function warnIfPacked(label) {
+  const rec = (await boxNames()).get(label.toLowerCase());
+  if (rec?.box_packed_at) toast(`${label} is marked packed (${packedDate(rec)}). New cars still go in; tap "Open again" if you're repacking it.`, 5000, 'warn');
+}
 async function importBox(label) {
+  await warnIfPacked(label);
   const id = label.replace(/^Box\s*/i, '');
   localStorage.setItem('smg.lastBox', id);
   if (!cap) cap = freshCapture({ count: 0 });
@@ -348,6 +369,7 @@ async function importBox(label) {
   location.hash = '#/import';
 }
 async function fillBox(label) {
+  await warnIfPacked(label);
   const id = label.replace(/^Box\s*/i, '');
   localStorage.setItem('smg.lastBox', id);
   if (!cap) cap = await loadDraft();
@@ -379,7 +401,7 @@ function shelfEl(boxes, names, onTap, { selected = '', scroll = false, onNew = n
     const sel = selected && selected.toLowerCase() === k.toLowerCase();
     return h('button', { type: 'button', class: `boxtile${sel ? ' sel' : ''}`, 'aria-pressed': sel ? 'true' : 'false', onclick: () => onTap(k, sel), 'aria-label': `${k}${r.box_name ? ', ' + r.box_name : ''}${r.box_size ? ', size ' + r.box_size : ''}: ${plural(n, 'car', 'cars')}` },
       boxShape(n),
-      h('span', { class: 'bxl' }, r.box_size ? h('em', {}, r.box_size) : null, k),
+      h('span', { class: 'bxl' }, r.box_size ? h('em', {}, r.box_size) : null, k, r.box_packed_at ? h('b', { class: 'packedmark', title: `Packed ${packedDate(r)}` }, ' ✓') : null),
       (() => { const t = r.box_name || [r.box_brand === 'mixed' ? 'Mixed' : brandNameCache[r.box_brand], r.box_scale === 'mixed' ? '' : scaleLabelCache[r.box_scale]].filter(Boolean).join(' · '); return t ? h('i', {}, t) : null; })());
   }), onNew ? h('button', { type: 'button', class: 'boxtile newbox', onclick: onNew, 'aria-label': 'Add a new storage box' }, boxShape('＋'), h('span', { class: 'bxl' }, 'New box')) : null);
 }
@@ -522,6 +544,18 @@ async function renderDash(v) {
   const noBox = copies.filter(i => !i.storage_location).length;
   v.append(h('div', { class: 'card' }, h('h3', {}, 'Storage boxes · tap to open'),
     shelfEl(boxes, names, (k) => goGarage('all', k), { onNew: async () => goGarage('all', await newBox()) }) ,
+    (() => { // packing progress (D30)
+      const used = boxes.filter(([, n]) => n > 0);
+      if (!used.length) return null;
+      const packed = used.filter(([k]) => names.get(k.toLowerCase())?.box_packed_at);
+      const carsPacked = packed.reduce((a, [, n]) => a + n, 0);
+      const loose = copies.length - carsPacked;
+      const pct = copies.length ? Math.round(100 * carsPacked / copies.length) : 0;
+      return h('div', { class: 'packing' },
+        h('div', { class: 'row', style: 'align-items:baseline' }, h('b', { style: 'flex:1' }, `📦 Packed: ${packed.length} of ${plural(used.length, 'box', 'boxes')}`), h('span', { class: 'muted' }, `${pct}% of cars`)),
+        h('div', { class: 'packbar', role: 'img', 'aria-label': `${carsPacked} of ${copies.length} cars packed` }, h('span', { style: `width:${pct}%` })),
+        h('div', { class: 'muted small' }, `${plural(carsPacked, 'car', 'cars')} packed · ${loose} still to pack${noBox ? ` (${noBox} not in a storage box yet)` : ''}`));
+    })(),
     noBox ? h('p', { class: 'muted' }, `${plural(noBox, 'box has', 'boxes have')} no storage box yet.`) : null));
 
   // Removed boxes: history with Restore
@@ -634,6 +668,7 @@ async function renderGarage(v) {
         h('button', { type: 'button', class: 'wide', style: 'margin-top:10px', onclick: () => fillBox(label) }, icon('camera'), `Fill ${label}`),
         h('button', { type: 'button', class: 'ghost wide', style: 'margin-top:6px', onclick: () => importBox(label) }, `📥 Import photos into ${label}`),
         inBox.length ? h('a', { href: `#/boxsheet/${encodeURIComponent(oneBox[1].toUpperCase())}`, class: 'btn ghost wide', style: 'margin-top:6px' }, `🧾 Contents sheet & label`) : null,
+        inBox.length ? packButton(label, rec) : null,
         // Progressive disclosure (DV-0.1): settings stay open until the box knows its brands and scale, then fold away.
         h('details', { class: 'more', open: (boxSettingsOpen.has(label) ? boxSettingsOpen.get(label) : !(rec?.box_brand && rec?.box_scale)) ? true : undefined, ontoggle: (e) => boxSettingsOpen.set(label, e.target.open) },
         h('summary', {}, 'Box settings', h('span', { class: 'muted', style: 'font-weight:400' }, [rec?.box_brand === 'mixed' ? 'Mixed brands' : brandName[rec?.box_brand], rec?.box_scale === 'mixed' ? 'Mixed scales' : ref.scales.find(x => x.scale_id === rec?.box_scale)?.label, rec?.box_size].filter(Boolean).join(' · '))),
@@ -1686,6 +1721,7 @@ async function renderBoxSheet(v, id) {
   }
   sheet.append(rows.length ? list : h('p', { class: 'muted' }, 'This box is empty.'));
   v.append(sheet);
+  if (rows.length) v.append(h('div', { class: 'noprint', style: 'margin-top:14px' }, packButton(label, rec)));
 }
 
 // ---------- Import from the gallery (D30, 25 Nov: backlog speed) ----------

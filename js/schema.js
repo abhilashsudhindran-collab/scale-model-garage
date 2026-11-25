@@ -24,7 +24,7 @@ export const TABS = {
   PRICE_EVIDENCE: { entity: 'price_evidence', id: 'evidence_id', cols: ['model_id', 'evidence_type', 'source_name', 'url', 'observed_date', 'price', 'currency', 'region', 'condition_text', 'condition_mapped', 'listing_type', 'match_confirmed', 'fx_rate', 'fx_source', 'fx_date', 'notes'] },
   VALUE_HISTORY: { entity: 'value_history', id: 'valuation_id', cols: ['run_id', 'inventory_id', 'model_id', 'status', 'estimated_value', 'currency', 'evidence_ids', 'evidence_count', 'confidence', 'method_note', 'valued_at'] },
   VALUATION_RUNS: { entity: 'valuation_runs', id: 'run_id', cols: ['scope', 'status', 'started_at', 'finished_at', 'items_total', 'items_done', 'owned_copies', 'valued_copies', 'coverage_pct', 'total_estimated_value', 'currency'] },
-  STORAGE_BOXES: { entity: 'storage_boxes', id: 'storage_box_id', cols: ['box_label', 'box_name', 'notes', 'box_size', 'box_brand', 'box_scale'] },
+  STORAGE_BOXES: { entity: 'storage_boxes', id: 'storage_box_id', cols: ['box_label', 'box_name', 'notes', 'box_size', 'box_brand', 'box_scale', 'box_packed_at'] },
   AI_LOG: { entity: 'ai_log', id: 'ai_log_id', cols: ['capture_session_id', 'model_id', 'ai_tool', 'prompt_version', 'input_photo_ids', 'ai_response_raw', 'suggested_values', 'confidence_data', 'confirmed_values', 'processed_at'] },
   CHANGE_LOG: { entity: 'change_log', id: 'change_id', cols: ['entity', 'record_id', 'field', 'old_value', 'new_value', 'reason', 'evidence_ref', 'changed_at'] },
 };

@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.29.0
+## Status: Stage 1 (quick-capture slice), version s1-0.30.0
+
+**s1-0.30.0 (25 Nov 2026): packing progress (D30).** "📦 Mark as packed" on a box card and at the bottom of its contents sheet saves the date (STORAGE_BOXES.box_packed_at, synced; change logged); "Open again" clears it. Packed boxes show ✓ on their tile; the Dashboard shows boxes packed, % of cars packed, and how many are still to pack (including cars with no storage box). Adding cars to a packed box is allowed, with a reminder. Developer test: tests/e2e_packing.py (fake data, not a phone test).
 
 **s1-0.29.0 (25 Nov 2026): combined photos for Gemini (trial).** Name tab switch: "2 photos per box · 5 boxes" (default) or "Combine front + back · 10 boxes (trial)". Combined joins each box's front (left) and back (right) into one JPEG on the phone (from the location-free display copies, up to 1600 px high), so 10 boxes = 10 pictures, within the ~10-file share limit seen on B's phone. The prompt explains the layout; AI_LOG marks the round as `names-v8-combined` and still keeps each box's front/back pair. How Gemini did shows separate vs combined (names right, codes right) so the trial can be judged. Unknown until tried: whether Gemini reads small codes as well from the half-width back. Developer test: tests/e2e_combine.py (simulated share, fake data).
 
