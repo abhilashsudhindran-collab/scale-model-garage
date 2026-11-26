@@ -21,7 +21,7 @@ import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn }
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.42.0';
+export const APP_VERSION = 's1-0.42.1';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -569,8 +569,8 @@ async function renderDash(v) {
     tile('⚑', 'need review', review, 'warn', () => goGarage('review')),
     tile('⇅', 'waiting to sync', pending, 'info', () => goGarage('pending'))));
 
-  // Wishlist (s1-0.42.0)
-  {
+  // Wishlist (s1-0.42.0). Hidden until after the shop check (B, 26 Nov): set WISHLIST_ON to true to bring the card back.
+  if (WISHLIST_ON) {
     const wl = (await store.list('wishlist')).filter(w => (w.status || 'wanted') === 'wanted');
     v.append(h('a', { href: '#/wish', class: 'card wishlink' }, h('span', { class: 'wl-ic', 'aria-hidden': 'true' }, '⭐'),
       h('span', { class: 'wl-tx' }, h('b', {}, 'Wishlist'), h('span', { class: 'muted small' }, wl.length ? `${plural(wl.length, 'car', 'cars')} you want${wl.some(w => w.priority === 'high') ? ` · ${wl.filter(w => w.priority === 'high').length} high priority` : ''}` : 'Cars you want to find')),
@@ -729,6 +729,7 @@ async function insightCards(v, { active, copies, byId, photos, brandName, goGara
 // Wishlist (s1-0.42.0): cars B wants, with priority, target price and a link.
 // "You may already have this" is a hint from code or name; nothing is changed or merged.
 // =====================================================================
+const WISHLIST_ON = false; // B, 26 Nov: Wishlist parked until after the shop check (Stage 2)
 let wishEdit = null; // wishlist_id being edited, 'new' for the add form, null when closed
 async function renderWish(v) {
   const [all, models, inventory, ref] = await Promise.all([store.list('wishlist'), store.list('models'), store.list('inventory'), refData()]);
