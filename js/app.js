@@ -17,11 +17,12 @@ import { toCsv, zip, collectionRows } from './export.js';
 import { runAudit } from './audit.js';
 import { growthSeries, decadeOf, tallyBy, share } from './insights.js';
 import { PRIORITIES, priorityRank, ownedMatches, safeUrl, priceNum } from './wishlist.js';
+import { healthScore, healthWord } from './health.js';
 import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn } from './moments.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.42.1';
+export const APP_VERSION = 's1-0.43.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -578,7 +579,37 @@ async function renderDash(v) {
   }
 
   // To check: every gap in one list, each opens the matching Garage list
-  const ctx = checkContext(active.map(r => r.data), inventory, ids);
+  const ctx = checkContext(active.map(r => r.data), inventory, ids, photos);
+
+  // Data health (s1-0.43.0): one number for how complete the catalogue is; tap a gap to fix it
+  {
+    const unsynced = new Set(photos.filter(p => !p.deleted_at && !p.original_file_id).map(p => p.model_id));
+    const live = active.map(r => ({ ...r.data, _dirty: r.dirty || unsynced.has(r.id) }));
+    const parts = [
+      ['photos', 'Front + back photo', (m) => ctx.bothPhotos.has(m.model_id), 'nophoto'],
+      ['name', 'Name', (m) => !!String(m.display_name || '').trim(), 'noname'],
+      ['brand', 'Brand', (m) => !!m.brand_id, 'nobrand'],
+      ['scale', 'Scale', (m) => !!m.scale_id, 'noscale'],
+      ['code', 'Product code', (m) => !!String(m.product_code || '').trim(), 'nocode'],
+      ['barcode', 'Barcode (or marked none)', (m) => ctx.withBarcode.has(m.model_id) || m.barcode_absent === 'yes', 'nobarcode'],
+      ['box', 'In a storage box', (m) => !ctx.ownedNoBox.has(m.model_id), 'nobox'],
+      ['colour', 'Colour', (m) => !!m.colour_family, 'nocolour'],
+      ['synced', 'Synced to Google', (m) => !m._dirty, 'pending'],
+    ];
+    const hs = healthScore(live, parts);
+    if (hs.total) {
+      const fixOf = Object.fromEntries(parts.map(p => [p[0], p[3]]));
+      const go = (k) => (k === 'noname' ? (location.hash = '#/name') : goGarage(k));
+      v.append(h('div', { class: 'card health' },
+        h('div', { class: 'hl-top' },
+          h('div', { class: 'hl-ring', style: `--p:${hs.score}`, role: 'img', 'aria-label': `Data health ${hs.score}%` }, h('b', {}, `${hs.score}%`)),
+          h('div', { class: 'hl-tx' }, h('h3', {}, 'Data health'), h('b', {}, healthWord(hs.score)),
+            h('span', { class: 'muted small' }, `${hs.complete} of ${plural(hs.total, 'car has', 'cars have')} everything · ${parts.length} things checked per car`))),
+        hs.weakest.length ? h('div', { class: 'checklist' }, hs.weakest.slice(0, 3).map(p => h('button', { type: 'button', class: 'checkrow', onclick: () => go(fixOf[p.key]) },
+          h('span', {}, p.label), h('b', {}, `${p.miss.toLocaleString('en-IN')} missing`), h('span', { class: 'chev', 'aria-hidden': 'true' }, '›'))))
+          : h('p', { class: 'muted', style: 'margin:8px 0 0' }, 'Every car has everything ✓')));
+    }
+  }
   const gaps = CHECKS.map(([k, label, test]) => [k, label, active.filter(r => test(r.data, ctx)).length]).filter(g => g[2] > 0);
   v.append(h('div', { class: 'card tocheck' }, h('h3', {}, 'To check'),
     gaps.length ? h('div', { class: 'checklist' }, gaps.map(([k, label, n]) => h('button', { type: 'button', class: 'checkrow', onclick: () => goGarage(k) },
@@ -853,7 +884,7 @@ async function renderGarage(v) {
   photos.forEach(p => { if (p.model_id) (photosByModel.get(p.model_id) || photosByModel.set(p.model_id, []).get(p.model_id)).push(p); });
   const isPending = (r) => r.dirty || (photosByModel.get(r.data.model_id) || []).some(p => !p.original_file_id);
   // One scrolling row of filters (audit G5); a filter only appears when it has something in it.
-  const checkCtx = checkContext(active.map(r => r.data), inventory, ids);
+  const checkCtx = checkContext(active.map(r => r.data), inventory, ids, photos);
   const n = { noname: active.filter(r => !String(r.data.display_name || '').trim()).length, review: active.filter(r => r.data.namespace_status === 'needs_review').length, pending: active.filter(isPending).length, clash: active.filter(r => r.conflict).length, archived: archived.length };
   if (n[garageFilter] === 0) garageFilter = 'all'; // e.g. after restoring the last archived model, don't leave an empty list
   const filters = [['all', 'All'], ['box', 'By box'], ['brand', 'By brand'], ['scale', 'By scale'], ['colour', 'By colour'], ['quick', 'Quick'], ['noname', `Needs a name (${n.noname})`, n.noname], ['review', `Needs review (${n.review})`, n.review], ['pending', `Waiting to sync (${n.pending})`, n.pending], ['clash', `Clashes (${n.clash})`, n.clash], ['archived', `Archived (${n.archived})`, n.archived],
@@ -2631,9 +2662,12 @@ const CHECKS = [
   ['nobarcode', 'No barcode', (m, x) => !x.withBarcode.has(m.model_id) && m.barcode_absent !== 'yes'],
   ['nobox', 'Not in a storage box', (m, x) => x.ownedNoBox.has(m.model_id)],
   ['nocolour', 'No colour', (m) => !m.colour_family],
+  ['nophoto', 'Missing front or back photo', (m, x) => !x.bothPhotos.has(m.model_id)],
   ['dupes', 'Possible duplicates', (m, x) => x.dupes.has(m.model_id)],
 ];
-function checkContext(models, inventory, ids) {
+function checkContext(models, inventory, ids, photos = []) {
+  const roles = new Map(); for (const p of photos) if (!p.deleted_at && p.model_id) (roles.get(p.model_id) || roles.set(p.model_id, new Set()).get(p.model_id)).add(p.shot_role);
+  const bothPhotos = new Set([...roles].filter(([, r]) => r.has('box_front') && r.has('box_rear')).map(([k]) => k));
   const owned = inventory.filter(i => i.ownership_status === 'Owned' && !i.deleted_at);
   const ownedNoBox = new Set(owned.filter(i => !String(i.storage_location || '').trim()).map(i => i.model_id));
   // possible duplicates: two or more entries sharing a code, a barcode or a name (years ignored)
@@ -2643,7 +2677,7 @@ function checkContext(models, inventory, ids) {
   const live = new Set(models.map(m => m.model_id)); const dupes = new Set();
   for (const g of groups.values()) { const inG = [...g].filter(x => live.has(x)); if (inG.length > 1) inG.forEach(x => dupes.add(x)); }
   const withBarcode = new Set(ids.filter(i => i.identifier_type === 'barcode' && !i.deleted_at && String(i.value_raw || '').trim()).map(i => i.model_id));
-  return { ownedNoBox, dupes, withBarcode };
+  return { ownedNoBox, dupes, withBarcode, bothPhotos };
 }
 
 // ---------- Brands screen (roadmap DR-0.2 next build #3) ----------
