@@ -31,9 +31,9 @@ def main():
           const m = ms.find(x => x.display_name); await st.update('models', m.model_id, { display_name: 'Nissan Skyline GT-R R34 V-Spec' });
           const br = (await st.list('brands')).find(b => b.brand_id === m.brand_id); return { code: m.product_code, brand: br.name, id: m.model_id }; })()""")
 
-        page.goto(base + '#/dash'); page.wait_for_selector('.wishlink')
-        check('Cars you want to find' in page.inner_text('.wishlink'), 'Dashboard shows the Wishlist card')
-        page.locator('.wishlink').click(); page.wait_for_selector('text=Wishlist')
+        page.goto(base + '#/dash'); page.wait_for_selector('text=Collection insights')
+        check(page.locator('.wishlink').count() == 0, 'Wishlist card hidden on the Dashboard (parked until after the shop check, s1-0.42.1)')
+        page.goto(base + '#/wish'); page.wait_for_selector('text=Wishlist')
         check('Nothing here yet' in page.inner_text('body'), 'empty wishlist explains itself')
 
         def add(name, prio='Medium', code='', price='', url='', brand=''):
@@ -83,8 +83,6 @@ def main():
         page.locator('details.more summary').click()
         page.locator('.wish', has_text='Porsche 911').get_by_role('button', name='Remove').click(); page.wait_for_timeout(500)
         check(page.locator('.wish', has_text='Porsche 911').count() == 0, 'Remove takes it off (archived, after asking)')
-        page.goto(base + '#/dash'); page.wait_for_selector('.wishlink')
-        check('2 cars you want' in page.inner_text('.wishlink'), f'Dashboard card counts wanted cars ({page.inner_text(".wishlink")!r})')
         if os.environ.get('SHOTS'): page.goto(base + '#/wish'); page.wait_for_selector('.wish'); page.wait_for_timeout(300); page.screenshot(path='/tmp/wish.png', full_page=True)
 
         # sync to the WISHLIST tab
