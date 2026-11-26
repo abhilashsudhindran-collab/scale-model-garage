@@ -16,11 +16,12 @@ import { straighten, validQuad } from './crop.js';
 import { toCsv, zip, collectionRows } from './export.js';
 import { runAudit } from './audit.js';
 import { growthSeries, decadeOf, tallyBy, share } from './insights.js';
+import { PRIORITIES, priorityRank, ownedMatches, safeUrl, priceNum } from './wishlist.js';
 import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn } from './moments.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.41.0';
+export const APP_VERSION = 's1-0.42.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -256,6 +257,7 @@ async function route() {
     else if (hash.startsWith('#/crop/')) await renderCrop(v, decodeURIComponent(hash.slice(7)));
     else if (hash.startsWith('#/settings')) await renderSettings(v);
     else if (hash.startsWith('#/brands')) await renderBrands(v);
+    else if (hash.startsWith('#/wish')) await renderWish(v);
     else if (hash.startsWith('#/import')) await renderImport(v);
     else if (hash.startsWith('#/showroom/')) await renderShowroom(v, decodeURIComponent(hash.slice(11)));
     else if (hash.startsWith('#/boxsheet/')) await renderBoxSheet(v, decodeURIComponent(hash.slice(11)));
@@ -567,6 +569,14 @@ async function renderDash(v) {
     tile('⚑', 'need review', review, 'warn', () => goGarage('review')),
     tile('⇅', 'waiting to sync', pending, 'info', () => goGarage('pending'))));
 
+  // Wishlist (s1-0.42.0)
+  {
+    const wl = (await store.list('wishlist')).filter(w => (w.status || 'wanted') === 'wanted');
+    v.append(h('a', { href: '#/wish', class: 'card wishlink' }, h('span', { class: 'wl-ic', 'aria-hidden': 'true' }, '⭐'),
+      h('span', { class: 'wl-tx' }, h('b', {}, 'Wishlist'), h('span', { class: 'muted small' }, wl.length ? `${plural(wl.length, 'car', 'cars')} you want${wl.some(w => w.priority === 'high') ? ` · ${wl.filter(w => w.priority === 'high').length} high priority` : ''}` : 'Cars you want to find')),
+      h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
+  }
+
   // To check: every gap in one list, each opens the matching Garage list
   const ctx = checkContext(active.map(r => r.data), inventory, ids);
   const gaps = CHECKS.map(([k, label, test]) => [k, label, active.filter(r => test(r.data, ctx)).length]).filter(g => g[2] > 0);
@@ -713,6 +723,93 @@ async function insightCards(v, { active, copies, byId, photos, brandName, goGara
   if (withYear) v.append(h('div', { class: 'card' }, h('h3', {}, 'By model year'),
     barList(decades.sort((a, b) => a[0].localeCompare(b[0]))),
     h('p', { class: 'muted small', style: 'margin:8px 0 0' }, `Year saved for ${withYear} of ${plural(N, 'car', 'cars')}.`)));
+}
+
+// =====================================================================
+// Wishlist (s1-0.42.0): cars B wants, with priority, target price and a link.
+// "You may already have this" is a hint from code or name; nothing is changed or merged.
+// =====================================================================
+let wishEdit = null; // wishlist_id being edited, 'new' for the add form, null when closed
+async function renderWish(v) {
+  const [all, models, inventory, ref] = await Promise.all([store.list('wishlist'), store.list('models'), store.list('inventory'), refData()]);
+  const brandName = Object.fromEntries(ref.brands.map(b => [b.brand_id, b.name]));
+  const scaleLabel = Object.fromEntries(ref.scales.map(x => [x.scale_id, x.label]));
+  const ownedIds = new Set(inventory.filter(i => i.ownership_status === 'Owned').map(i => i.model_id));
+  const owned = models.filter(m => !m.deleted_at && ownedIds.has(m.model_id));
+  const status = (w) => w.status || 'wanted';
+  const wanted = all.filter(w => status(w) === 'wanted').sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority) || String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  const done = all.filter(w => status(w) !== 'wanted').sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  const money = (n) => `₹${Math.round(n).toLocaleString('en-IN')}`;
+
+  v.append(h('div', { class: 'row' }, h('h2', {}, 'Wishlist'), h('div', { class: 'muted' }, plural(wanted.length, 'car wanted', 'cars wanted'))));
+  const priced = wanted.filter(w => priceNum(w.target_price) != null);
+  if (wanted.length) v.append(h('p', { class: 'muted small', style: 'margin:0 2px 10px' }, priced.length ? `Target prices add up to ${money(priced.reduce((a, w) => a + priceNum(w.target_price), 0))} · price set for ${priced.length} of ${wanted.length}` : 'No target prices set yet.'));
+
+  const form = (w) => {
+    const f = { name: h('input', { type: 'text', placeholder: 'e.g. Nissan Skyline GT-R R34 V-Spec', value: w?.object_name || '', 'aria-label': 'Car name' }),
+      brand: h('select', { 'aria-label': 'Brand', onchange: async (e) => { await pickedBrandId(e.target.value, ref.brands, e.target); } }, brandOptions(ref.brands, w?.brand_id || '', 'Brand (optional)')),
+      scale: h('select', { 'aria-label': 'Scale' }, h('option', { value: '' }, 'Scale (optional)'), ref.scales.map(x => h('option', { value: x.scale_id, selected: x.scale_id === w?.scale_id ? true : undefined }, x.label))),
+      code: h('input', { type: 'text', placeholder: 'Product code (optional)', value: w?.product_code || '', 'aria-label': 'Product code' }),
+      price: h('input', { type: 'text', inputmode: 'numeric', placeholder: 'Target price ₹ (optional)', value: w?.target_price || '', 'aria-label': 'Target price in rupees' }),
+      url: h('input', { type: 'url', placeholder: 'Link to a listing (optional)', value: w?.purchase_url || '', 'aria-label': 'Link' }),
+      notes: h('textarea', { rows: 2, placeholder: 'Notes (optional): colour, shop, who has it…', 'aria-label': 'Notes' }, w?.notes || '') };
+    let prio = w?.priority || 'medium';
+    const prioRow = h('div', { class: 'chips', role: 'radiogroup', 'aria-label': 'Priority' });
+    const drawPrio = () => prioRow.replaceChildren(h('span', { class: 'muted small', style: 'align-self:center;margin-right:4px' }, 'Priority'),
+      ...PRIORITIES.map(([k, label]) => h('button', { type: 'button', role: 'radio', 'aria-checked': String(prio === k), class: `chip ${prio === k ? 'on' : ''}`, onclick: () => { prio = k; drawPrio(); } }, label)));
+    drawPrio();
+    const save = async () => {
+      const name = f.name.value.trim();
+      if (!name) { toast('Give the car a name first', 2200, 'bad'); f.name.focus(); return; }
+      if (f.price.value.trim() && priceNum(f.price.value) == null) { toast('Target price should be a number', 2200, 'bad'); f.price.focus(); return; }
+      if (f.url.value.trim() && !safeUrl(f.url.value)) { toast('That link doesn\'t look like a web address', 2400, 'bad'); f.url.focus(); return; }
+      const brandId = f.brand.value.startsWith('known:') || f.brand.value === '__new' ? '' : f.brand.value;
+      const fields = { object_name: name, brand_id: brandId, scale_id: f.scale.value, product_code: f.code.value.trim(), target_price: f.price.value.trim() ? String(priceNum(f.price.value)) : '', target_currency: 'INR',
+        priority: prio, purchase_url: f.url.value.trim() ? safeUrl(f.url.value) : '', notes: f.notes.value.trim() };
+      if (w) await store.update('wishlist', w.wishlist_id, fields);
+      else await store.create('wishlist', { ...fields, status: 'wanted' });
+      wishEdit = null; toast(w ? 'Saved ✓' : `${name} added to your wishlist ⭐`); autoSyncSoon(); route();
+    };
+    return h('div', { class: 'card wishform' }, h('h3', {}, w ? 'Edit' : 'Add a car you want'), f.name,
+      h('div', { class: 'grid2' }, f.brand, f.scale), h('div', { class: 'grid2' }, f.code, f.price), prioRow, f.url, f.notes,
+      h('div', { class: 'row', style: 'gap:8px;justify-content:flex-end' }, h('button', { type: 'button', class: 'quiet', onclick: () => { wishEdit = null; route(); } }, 'Cancel'), h('button', { type: 'button', class: 'primary', onclick: save }, w ? 'Save' : 'Add to wishlist')));
+  };
+
+  if (wishEdit === 'new') v.append(form(null));
+  else v.append(h('button', { type: 'button', class: 'wide', onclick: () => { wishEdit = 'new'; route(); } }, '＋ Add a car you want'));
+
+  const setStatus = async (w, st, msg) => { await store.update('wishlist', w.wishlist_id, { status: st }); toast(msg); autoSyncSoon(); route(); };
+  const card = (w) => {
+    if (wishEdit === w.wishlist_id) return form(w);
+    const st = status(w);
+    const facts = [brandName[w.brand_id], scaleLabel[w.scale_id], w.product_code].filter(Boolean).join(' · ');
+    const url = safeUrl(w.purchase_url);
+    const matches = st === 'wanted' ? ownedMatches(w, owned) : [];
+    const pr = PRIORITIES.find(p => p[0] === w.priority);
+    return h('div', { class: `card wish ${st}` },
+      h('div', { class: 'row', style: 'align-items:flex-start;gap:8px' },
+        h('div', { style: 'flex:1;min-width:0' }, h('b', { class: 'wname' }, w.object_name || '(no name)'), facts ? h('div', { class: 'muted small' }, facts) : null),
+        st === 'wanted' && pr ? h('span', { class: `prio p-${pr[0]}` }, pr[1]) : h('span', { class: 'prio' }, st === 'got' ? 'Got it ✓' : 'Dropped')),
+      priceNum(w.target_price) != null || url ? h('div', { class: 'row small', style: 'gap:12px;justify-content:flex-start;margin-top:6px' },
+        priceNum(w.target_price) != null ? h('span', {}, 'Target ', h('b', {}, money(priceNum(w.target_price)))) : null,
+        url ? h('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, `Open link ↗`) : null) : null,
+      w.notes ? h('p', { class: 'small', style: 'margin:6px 0 0;white-space:pre-wrap' }, w.notes) : null,
+      matches.length ? h('div', { class: 'banner warn wmatch' }, h('b', {}, matches[0].reason === 'code' ? 'You already have this code' : 'You may already have this'), ' · ',
+        ...matches.slice(0, 3).flatMap((x, i) => [i ? ', ' : '', h('a', { href: `#/item/${encodeURIComponent(x.model.model_id)}` }, x.model.display_name || x.model.product_code || 'a car')]),
+        matches.length > 3 ? ` and ${matches.length - 3} more` : '') : null,
+      h('div', { class: 'row wacts' },
+        st === 'wanted' ? h('button', { type: 'button', class: 'small', onclick: () => setStatus(w, 'got', `${w.object_name}: got it ✓ Add it in Quick capture when it arrives.`) }, '✓ Got it') : h('button', { type: 'button', class: 'small quiet', onclick: () => setStatus(w, 'wanted', 'Back on your wishlist') }, 'Want again'),
+        h('button', { type: 'button', class: 'small quiet', onclick: () => { wishEdit = w.wishlist_id; route(); } }, 'Edit'),
+        st === 'wanted' ? h('button', { type: 'button', class: 'small quiet', onclick: () => setStatus(w, 'dropped', 'Moved to Got / dropped') }, 'Not any more') :
+          h('button', { type: 'button', class: 'small quiet', onclick: async () => { if (!confirm(`Remove "${w.object_name}" from the wishlist?`)) return; await store.archive('wishlist', w.wishlist_id); toast('Removed'); autoSyncSoon(); route(); } }, 'Remove')));
+  };
+  if (!all.length && wishEdit !== 'new') v.append(h('p', { class: 'muted', style: 'margin-top:14px' }, 'Nothing here yet. Add a car you\'re hunting for: if you already own one like it, the app tells you.'));
+  for (const g of [['high', 'High priority'], ['medium', 'Medium'], ['low', 'Low']]) {
+    const items = wanted.filter(w => (w.priority || 'medium') === g[0]);
+    if (items.length) v.append(h('div', { class: 'ghead' }, h('span', { class: 'g-name' }, g[1]), h('span', { class: 'g-count' }, String(items.length))), ...items.map(card));
+  }
+  if (done.length) v.append(h('details', { class: 'more', style: 'margin-top:14px' }, h('summary', {}, `Got / dropped · ${done.length}`), ...done.map(card)));
+  if (wishEdit && wishEdit !== 'new') setTimeout(() => v.querySelector('.wishform')?.scrollIntoView({ block: 'center' }), 0);
 }
 
 async function renderGarage(v) {
