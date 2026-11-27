@@ -1,7 +1,7 @@
 // Service worker: app opens offline. App files: network first (updates arrive), cache fallback.
 // Big library files: cache first. Google sign-in/API traffic is never touched (cross-origin passes through).
 // Cache names start with "smg-" (the R0 test kit on the same site uses "sgr0-").
-const CACHE = 'smg-s1-0.49.0';
+const CACHE = 'smg-s1-0.50.0';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './css/app.css', './icons/icon-192.png', './icons/icon-512.png', './icons/icon.svg', './icons/favicon-32.png', './icons/apple-touch-icon.png',
   './js/app.js', './js/store.js', './js/idb.js', './js/ids.js', './js/rules.js', './js/schema.js', './js/google.js',
   './js/setup.js', './js/sync.js', './js/images.js', './js/barcode.js', './js/md5.js', './js/timing.js', './js/backup.js', './js/ai.js', './js/audit.js', './js/insights.js', './js/wishlist.js', './js/health.js', './js/sort.js', './js/review.js', './js/lines.js', './js/money.js', './js/share.js', './js/crop.js', './js/export.js', './js/brands.js', './js/colours.js', './js/qr.js', './js/moments.js', './vendor/qrcode/qrcode.mjs'];
@@ -11,7 +11,7 @@ self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith('smg-') && k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith('smg-') && k !== CACHE && k !== SHARE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 // Share into the app (s1-0.49.0, D16): photos/text shared from WhatsApp or the gallery arrive here as a POST.
 // They are kept on this phone only (cache 'smg-share'), then the app opens #/share to use them.

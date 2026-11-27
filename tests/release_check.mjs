@@ -8,6 +8,7 @@ const ver = app.match(/APP_VERSION = '([^']+)'/)?.[1];
 ok(sw.length > 1000, `sw.js is not empty (${sw.length} bytes)`);
 ok(sw.includes(`const CACHE = 'smg-${ver}'`), `sw.js cache name matches APP_VERSION ${ver}`);
 ok(/addEventListener\('fetch'/.test(sw), 'sw.js handles fetch (offline)');
+ok(/k !== SHARE/.test(sw), 'sw.js update clean-up keeps shared photos (smg-share), s1-0.50.0');
 const shell = [...sw.matchAll(/'\.\/([^']*)'/g)].map(m => m[1]).filter(Boolean);
 ok(shell.every(f => existsSync(f)), `every offline file exists (${shell.filter(f => !existsSync(f)).join(', ') || 'all'})`);
 const js = readdirSync('js').filter(f => f.endsWith('.js'));
