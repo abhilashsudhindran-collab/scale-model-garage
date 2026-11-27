@@ -110,13 +110,13 @@ def main():
         sid = next(iter(fake.sheets)); settings = fake.sheets[sid]['SETTINGS']
         lb = next((r for r in settings if r and r[0] == 'last_backup_at'), ['', ''])
         check(bool(lb[1]), f'SETTINGS last_backup_at filled ({lb[1][:19]})')
-        page.click('#syncBtn'); page.wait_for_timeout(2000)
+        page.click('#status'); page.wait_for_timeout(2000)
         check(len(tagged('daily')) == 1, 'second sync the same day makes no new daily copy')
 
         # Keep 7 daily copies: pretend the last daily copy is 2 days old, eight more times
         for _ in range(7):
             ev("(async () => { const i = await import('./js/idb.js'); const lb = await i.meta.get('lastBackup', {}); lb.dailyAt = new Date(Date.now() - 2 * 864e5).toISOString(); await i.meta.set('lastBackup', lb); })()")
-            page.click('#syncBtn'); page.wait_for_timeout(1500)
+            page.click('#status'); page.wait_for_timeout(1500)
         check(len(tagged('daily')) == 7, f"only 7 daily copies kept, older ones trashed (kept {len(tagged('daily'))})")
 
         # Back up now

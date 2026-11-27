@@ -128,7 +128,7 @@ def main():
 
         # S3: offline sync error is not green
         ctx.set_offline(True); page.wait_for_timeout(300)
-        page.click('#syncBtn'); page.wait_for_selector('.toast'); page.wait_for_timeout(100)
+        page.click('#status'); page.wait_for_selector('.toast'); page.wait_for_timeout(100)
         cls = page.locator('.toast').first.get_attribute('class')
         check('warn' in cls or 'bad' in cls, f'S3 offline sync toast is amber/red (class "{cls}")')
         page.screenshot(path=f'{SHOTS}/04-offline-toast.png')

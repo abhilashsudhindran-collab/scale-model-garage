@@ -27,7 +27,7 @@ import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn }
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.51.0';
+export const APP_VERSION = 's1-0.52.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -440,6 +440,18 @@ function shelfEl(boxes, names, onTap, { selected = '', scroll = false, onNew = n
   }), onNew ? h('button', { type: 'button', class: 'boxtile newbox', onclick: onNew, 'aria-label': 'Add a new storage box' }, boxShape('＋'), h('span', { class: 'bxl' }, 'New box')) : null);
 }
 
+// Long Dashboard lists show the first few, then 'Show all N' (usability review UR-0.1 S2, B 27 Nov: "123").
+function foldRows(nodes, keep, what) {
+  if (nodes.length <= keep + 1) return nodes;
+  const rest = nodes.slice(keep);
+  const more = h('div', { class: 'foldrest', hidden: true }, ...rest);
+  const btn = h('button', { type: 'button', class: 'small quiet foldbtn', 'aria-expanded': 'false', onclick: () => {
+    const open = more.hidden; more.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+    btn.textContent = open ? 'Show fewer' : `Show all ${nodes.length} ${what}`;
+  } }, `Show all ${nodes.length} ${what}`);
+  return [...nodes.slice(0, keep), more, btn];
+}
+
 // Removing a box never deletes cars: they move to "No box yet". The box is soft-deleted and every car it held is
 // logged in CHANGE_LOG with a tag, so "Restore" can put the box and its cars back (B, 24 Nov).
 // ---------- Box journey (B, 25 Nov): Photos → Names → Gaps fixed → Label → Packed, per storage box ----------
@@ -642,16 +654,20 @@ async function renderDash(v) {
   const priced = copies.filter(i => String(i.purchase_price || '').trim() !== '' && !isNaN(Number(i.purchase_price)));
   const thisMonth = copies.filter(i => String(i.purchase_date || '').startsWith(month));
   const tmPriced = thisMonth.filter(i => priced.includes(i));
-  v.append(h('div', { class: 'card purchases' }, h('h3', {}, 'Purchases'),
+  const txAll = await store.list('transactions'); const byInv = new Map(); txAll.forEach(t => (byInv.get(t.inventory_id) || byInv.set(t.inventory_id, []).get(t.inventory_id)).push(t));
+  const T = moneyTotals(inventory.filter(i => byId.has(i.model_id)).map(i => ({ inv: i, money: copyMoney(i, byInv.get(i.inventory_id) || []) })));
+  // Nothing money-related recorded yet → one line instead of six blanks (UR-0.1 S3, B 27 Nov: "123")
+  if (!priced.length && !T.costKnown && !T.soldN && !T.repairs && !T.gifted) v.append(h('div', { class: 'card purchases' },
+    h('div', { class: 'row', style: 'align-items:baseline' }, h('h3', { style: 'margin:0' }, 'Purchases'), h('span', { class: 'muted small' }, `no prices yet · ${plural(copies.length, 'car', 'cars')}`)),
+    h('p', { class: 'muted small', style: 'margin:6px 0 0' }, 'Tap "🛍 Just bought?" when you photograph a new car, or add a price on a car page under its copy. Unknown prices are never counted as ₹0.'),
+    h('div', { class: 'row', style: 'gap:8px;justify-content:flex-start;margin-top:8px' }, h('a', { href: '#/order', class: 'btnlink small' }, '📦 Split an order\'s shipping'))));
+  else v.append(h('div', { class: 'card purchases' }, h('h3', {}, 'Purchases'),
     h('div', { class: 'pgrid' },
       h('div', {}, h('div', { class: 'muted small' }, 'This month'), h('b', {}, thisMonth.length ? money(tmPriced.reduce((a, i) => a + Number(i.purchase_price), 0)) : '—'),
         h('div', { class: 'muted small' }, thisMonth.length ? `${plural(thisMonth.length, 'car', 'cars')}${tmPriced.length < thisMonth.length ? ` · ${tmPriced.length} with a price` : ''}` : 'nothing yet')),
       h('div', {}, h('div', { class: 'muted small' }, 'All prices known'), h('b', {}, priced.length ? money(priced.reduce((a, i) => a + Number(i.purchase_price), 0)) : '—'),
         h('div', { class: 'muted small' }, `price known for ${priced.length} of ${plural(copies.length, 'car', 'cars')}`))),
-    await (async () => { // s1-0.48.0: cost incl. shipping − refunds, repairs, sold — each with coverage
-      const txAll = await store.list('transactions'); const byInv = new Map(); txAll.forEach(t => (byInv.get(t.inventory_id) || byInv.set(t.inventory_id, []).get(t.inventory_id)).push(t));
-      const allCopies = inventory.filter(i => byId.has(i.model_id));
-      const T = moneyTotals(allCopies.map(i => ({ inv: i, money: copyMoney(i, byInv.get(i.inventory_id) || []) })));
+    (() => { // s1-0.48.0: cost incl. shipping − refunds, repairs, sold — each with coverage
       return h('div', { class: 'pgrid', style: 'margin-top:10px' },
         h('div', {}, h('div', { class: 'muted small' }, 'Cost incl. shipping, less refunds'), h('b', {}, T.costKnown ? rupees(T.cost) : '—'), h('div', { class: 'muted small' }, `known for ${T.costKnown} of ${plural(T.ownedN, 'car', 'cars')} owned`)),
         h('div', {}, h('div', { class: 'muted small' }, 'Sold'), h('b', {}, T.soldN ? rupees(T.proceeds) : '—'), h('div', { class: 'muted small' }, T.soldN ? `${plural(T.soldN, 'car', 'cars')} · ${T.gainKnown ? `${T.gain >= 0 ? 'gain' : 'loss'} ${rupees(Math.abs(T.gain))} on ${T.gainKnown}` : 'gain not computable'}` : 'nothing sold')),
@@ -676,8 +692,8 @@ async function renderDash(v) {
   const boxes = boxes0.sort((a, b) => (parseInt(a[0].replace(/\D/g, ''), 10) || 0) - (parseInt(b[0].replace(/\D/g, ''), 10) || 0));
   const names = await boxNames();
   const noBox = copies.filter(i => !i.storage_location).length;
-  v.append(h('div', { class: 'card' }, h('h3', {}, 'Storage boxes · tap to open'),
-    shelfEl(boxes, names, (k) => goGarage('all', k), { onNew: async () => goGarage('all', await newBox()) }) ,
+  v.append(h('div', { class: 'card' }, h('h3', {}, 'Storage boxes · tap to open'), boxes.length > 3 ? h('p', { class: 'muted small', style: 'margin:-4px 0 6px' }, `${plural(boxes.length, 'box', 'boxes')} · swipe for more`) : null,
+    shelfEl(boxes, names, (k) => goGarage('all', k), { scroll: true, onNew: async () => goGarage('all', await newBox()) }),
     (() => { // packing progress (D30)
       const used = boxes.filter(([, n]) => n > 0);
       if (!used.length) return null;
@@ -696,10 +712,11 @@ async function renderDash(v) {
       const jd = await journeyData();
       const rows = used.map(([k]) => ({ k, rec: names.get(k.toLowerCase()), j: boxJourneyFrom(jd, k, names.get(k.toLowerCase())) }));
       const full = rows.filter(r => !r.j.next).length;
+      rows.sort((x, y) => (x.j.next ? 0 : 1) - (y.j.next ? 0 : 1)); // boxes still in progress first
       return h('details', { class: 'more jlist', open: true }, h('summary', {}, `Box journey · ${full} of ${plural(rows.length, 'box', 'boxes')} done`),
-        ...rows.map(r => h('a', { href: '#/', class: 'jrow', onclick: (e) => { e.preventDefault(); goGarage('all', r.k); } },
+        ...foldRows(rows.map(r => h('a', { href: '#/', class: 'jrow', onclick: (e) => { e.preventDefault(); goGarage('all', r.k); } },
           h('span', { class: 'jlab' }, h('b', {}, r.k), r.rec?.box_name ? h('span', { class: 'muted small' }, ` ${r.rec.box_name}`) : null),
-          journeyTrack(r.j, { mini: true }), h('span', { class: 'muted small jnum' }, r.j.next ? r.j.next.label : 'Done'))));
+          journeyTrack(r.j, { mini: true }), h('span', { class: 'muted small jnum' }, r.j.next ? r.j.next.label : 'Done'))), 5, 'boxes'));
     })(),
     noBox && !boxes.some(([, n]) => n > 0) ? h('p', { class: 'muted' }, `${plural(noBox, 'car is', 'cars are')} not in a storage box yet.`) : null));
 
@@ -716,9 +733,9 @@ async function renderDash(v) {
   // Removed boxes: history with Restore
   const gone = await removedBoxes();
   if (gone.length) v.append(h('div', { class: 'card' }, h('h3', {}, 'Removed boxes'),
-    gone.slice(0, 20).map(e => h('div', { class: 'row removed' },
+    ...foldRows(gone.slice(0, 20).map(e => h('div', { class: 'row removed' },
       h('div', {}, h('b', {}, e.box.box_label), e.box.box_name ? ` · ${e.box.box_name}` : '', h('div', { class: 'muted small' }, `removed ${new Date(e.box.deleted_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} · ${plural(e.cars.length, 'car was', 'cars were')} inside`)),
-      h('button', { type: 'button', class: 'small quiet', onclick: async () => { const n = await restoreBox(e); if (n !== false) { toast(`${e.box.box_label} restored · ${plural(n, 'car', 'cars')} back inside`); route(); } } }, 'Restore')))));
+      h('button', { type: 'button', class: 'small quiet', onclick: async () => { const n = await restoreBox(e); if (n !== false) { toast(`${e.box.box_label} restored · ${plural(n, 'car', 'cars')} back inside`); route(); } } }, 'Restore'))), 3, 'removed boxes')));
 
   // Box state (sealed / opened / loose), when recorded
   const states = tally(copies.filter(i => i.packaging_state && i.packaging_state !== 'unknown'), i => ({ sealed: 'Sealed', opened: 'Opened', loose: 'Loose' }[i.packaging_state] || i.packaging_state));
@@ -3469,7 +3486,6 @@ async function start() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
   requestPersistentStorage();
   await seedLocal();
-  $('#syncBtn').addEventListener('click', () => runSync(true));
   $('#status').addEventListener('click', () => runSync(true));
   setInterval(refreshStatus, 30_000); // sign-in expiry has no event of its own
   window.addEventListener('hashchange', route);
