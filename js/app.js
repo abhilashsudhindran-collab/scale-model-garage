@@ -20,11 +20,12 @@ import { PRIORITIES, priorityRank, ownedMatches, safeUrl, priceNum } from './wis
 import { healthScore, healthWord } from './health.js';
 import { SORTS, sortCompare } from './sort.js';
 import { buildReview } from './review.js';
+import { suggestLine, cleanLineName } from './lines.js';
 import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn } from './moments.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.46.0';
+export const APP_VERSION = 's1-0.47.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -763,6 +764,14 @@ async function insightCards(v, { active, copies, byId, photos, brandName, goGara
       h('p', { class: 'muted small', style: 'margin:8px 0 0' }, `${plural(noted.length, 'car has', 'cars have')} a note, of ${active.length} · ${mine} written or edited by you, ${noted.length - mine} from Gemini.`)));
   }
 
+  // By product line (s1-0.47.0; only when lines are set)
+  const lineName = Object.fromEntries((await refData()).lines.map(l => [l.line_id, l.name]));
+  const byLine = tallyBy(copies, i => { const m = modelOf(i); return lineName[m.line_id] ? `${brandName[m.brand_id] || ''} · ${lineName[m.line_id]}` : ''; });
+  const withLine = byLine.reduce((a, [, n]) => a + n, 0);
+  if (withLine) v.append(h('div', { class: 'card' }, h('h3', {}, 'By product line'),
+    barList(topN(byLine, 8), { onTap: () => goGarage('line') }),
+    h('p', { class: 'muted small', style: 'margin:8px 0 0' }, `Line set for ${withLine} of ${plural(N, 'car', 'cars')}.`)));
+
   // By model year (only when some years are saved)
   const decades = tallyBy(copies, i => decadeOf(modelOf(i).release_year));
   const withYear = decades.reduce((a, [, n]) => a + n, 0);
@@ -859,6 +868,15 @@ async function renderWish(v) {
   if (wishEdit && wishEdit !== 'new') setTimeout(() => v.querySelector('.wishform')?.scrollIntoView({ block: 'center' }), 0);
 }
 
+// Product lines (s1-0.47.0): a new line under a brand, logged; lines group and count only (no duplicate-check change)
+async function newLine(brandId, name) {
+  const t = cleanLineName(name); if (!t || !brandId) return null;
+  const lines = (await store.list('product_lines')).filter(l => l.brand_id === brandId);
+  const same = lines.find(l => l.name.toLowerCase() === t.toLowerCase()); if (same) return same;
+  const l = await store.create('product_lines', { brand_id: brandId, name: t, is_code_namespace: 'no', code_prefix_hint: '', record_status: 'confirmed' });
+  await store.logChange('product_lines', l.line_id, 'name', '', t, 'line added in app'); autoSyncSoon(); return l;
+}
+
 // Confirm a brand (D10.1 rule 4): its cars get their code namespace and become checkable for duplicates.
 async function confirmBrand(b, models, why) {
   await store.update('brands', b.brand_id, { record_status: 'confirmed' });
@@ -919,6 +937,7 @@ async function renderGarage(v) {
   const names = await boxNames();
   const brandName = Object.fromEntries(ref.brands.map(b => [b.brand_id, b.name]));
   brandNameCache = brandName; scaleLabelCache = Object.fromEntries(ref.scales.map(x => [x.scale_id, x.label]));
+  const lineName = Object.fromEntries(ref.lines.filter(l => !l.deleted_at).map(l => [l.line_id, l.name]));
   const scaleLabel = Object.fromEntries(ref.scales.map(s => [s.scale_id, s.label]));
   const active = models.filter(r => !r.data.deleted_at);
   const archived = models.filter(r => r.data.deleted_at);
@@ -953,7 +972,7 @@ async function renderGarage(v) {
   const checkCtx = checkContext(active.map(r => r.data), inventory, ids, photos);
   const n = { noname: active.filter(r => !String(r.data.display_name || '').trim()).length, review: active.filter(r => r.data.namespace_status === 'needs_review').length, pending: active.filter(isPending).length, clash: active.filter(r => r.conflict).length, archived: archived.length };
   if (n[garageFilter] === 0) garageFilter = 'all'; // e.g. after restoring the last archived model, don't leave an empty list
-  const filters = [['all', 'All'], ['box', 'By box'], ['brand', 'By brand'], ['scale', 'By scale'], ['colour', 'By colour'], ['quick', 'Quick'], ['noname', `Needs a name (${n.noname})`, n.noname], ['review', `Needs review (${n.review})`, n.review], ['pending', `Waiting to sync (${n.pending})`, n.pending], ['clash', `Clashes (${n.clash})`, n.clash], ['archived', `Archived (${n.archived})`, n.archived],
+  const filters = [['all', 'All'], ['box', 'By box'], ['brand', 'By brand'], ['scale', 'By scale'], ['colour', 'By colour'], ...(active.some(r => r.data.line_id) ? [['line', 'By line']] : []), ['quick', 'Quick'], ['noname', `Needs a name (${n.noname})`, n.noname], ['review', `Needs review (${n.review})`, n.review], ['pending', `Waiting to sync (${n.pending})`, n.pending], ['clash', `Clashes (${n.clash})`, n.clash], ['archived', `Archived (${n.archived})`, n.archived],
     ...CHECKS.filter(c => c[0] === garageFilter).map(c => [c[0], `${c[1]} ✕`, 1])]
     .filter(([k, , c]) => c === undefined || c > 0 || garageFilter === k);
   const chips = h('div', { class: 'chips scroll', style: 'margin:10px 0' }, filters.map(([k, label]) => h('button', { class: `chip ${garageFilter === k ? 'on' : ''}`, onclick: () => { garageFilter = garageFilter === k && CHECKS.some(c => c[0] === k) ? 'all' : k; route(); } }, label)));
@@ -999,7 +1018,7 @@ async function renderGarage(v) {
       // "box 3" (typed, or a tap on the Dashboard) means exactly storage Box 3, not Box 30 or scale 1:43
       const boxQ = q.match(/^box\s*([a-z0-9-]+)$/i);
       if (boxQ) return String(storageByModel.get(m.model_id) || '').toLowerCase().split(/\s+(?=box)/).some(loc => loc.trim().replace(/^box\s*/, '') === boxQ[1]);
-      const hay = [m.display_name, m.product_code, brandName[m.brand_id], m.printed_brand_text, scaleLabel[m.scale_id], m.variant, m.series, m.notes, storageByModel.get(m.model_id), ...(barcodesByModel.get(m.model_id) || [])].filter(Boolean).join(' ');
+      const hay = [m.display_name, m.product_code, brandName[m.brand_id], lineName[m.line_id], m.printed_brand_text, scaleLabel[m.scale_id], m.variant, m.series, m.notes, storageByModel.get(m.model_id), ...(barcodesByModel.get(m.model_id) || [])].filter(Boolean).join(' ');
       return searchMatch(q, hay);
     });
     // Looking inside one storage box: a header card to name it, with what's in it at a glance.
@@ -1054,10 +1073,10 @@ async function renderGarage(v) {
     if (!list.length) { grid.append(h('p', { class: 'muted' }, oneBox ? 'No cars in this box yet.' : active.length || archived.length ? 'Nothing matches.' : 'No models yet. Tap ＋ Add to catalogue your first box.')); return; }
     // Grouped views: by storage box (number order, no box last), by brand (A–Z), by scale (smallest scale number first).
     const scaleOrder = Object.fromEntries(ref.scales.map(sc => [sc.scale_id, Number(sc.sort_order) || 0]));
-    const grouping = { box: true, brand: true, scale: true, colour: true }[garageFilter] ? garageFilter : null;
-    const gkey = (r) => grouping === 'box' ? (boxesOf(r.data.model_id)[0] || '') : grouping === 'brand' ? (brandName[r.data.brand_id] || '') : grouping === 'scale' ? (r.data.scale_id || '') : grouping === 'colour' ? (r.data.colour_family || '') : '';
+    const grouping = { box: true, brand: true, scale: true, colour: true, line: true }[garageFilter] ? garageFilter : null;
+    const gkey = (r) => grouping === 'box' ? (boxesOf(r.data.model_id)[0] || '') : grouping === 'brand' ? (brandName[r.data.brand_id] || '') : grouping === 'scale' ? (r.data.scale_id || '') : grouping === 'colour' ? (r.data.colour_family || '') : grouping === 'line' ? (lineName[r.data.line_id] ? `${brandName[r.data.brand_id] || ''} · ${lineName[r.data.line_id]}` : '') : '';
     const gnum = (k) => grouping === 'box' ? ((k.match(/\d+/) || [])[0] ? Number(k.match(/\d+/)[0]) : Infinity) : grouping === 'scale' ? (scaleOrder[k] ?? Infinity) : grouping === 'colour' ? (k ? COLOUR_FAMILIES.findIndex(f => f[0] === k) : Infinity) : 0;
-    const glabel = (k) => grouping === 'box' ? (k ? [k, names.get(k.toLowerCase())?.box_size, names.get(k.toLowerCase())?.box_name].filter(Boolean).join(' · ') : 'No box yet') : grouping === 'brand' ? (k || 'Brand not set') : grouping === 'colour' ? (familyLabel(k) || 'No colour yet') : (scaleLabel[k] || 'Scale not set');
+    const glabel = (k) => grouping === 'box' ? (k ? [k, names.get(k.toLowerCase())?.box_size, names.get(k.toLowerCase())?.box_name].filter(Boolean).join(' · ') : 'No box yet') : grouping === 'brand' ? (k || 'Brand not set') : grouping === 'colour' ? (familyLabel(k) || 'No colour yet') : grouping === 'line' ? (k || 'No line set') : (scaleLabel[k] || 'Scale not set');
     const keyMemo = new Map(); const gk = (r) => { let k = keyMemo.get(r.id); if (k === undefined) { k = gkey(r); keyMemo.set(r.id, k); } return k; };
     if (grouping) list.sort((a, b) => { const ka = gk(a), kb = gk(b); if (!ka !== !kb) return ka ? -1 : 1; return gnum(ka) - gnum(kb) || ka.localeCompare(kb) || cmp(a.data, b.data); });
     // By colour: Gemini already named colours for some cars without one: one tap to use them all (B confirms).
@@ -1098,7 +1117,7 @@ async function renderGarage(v) {
       grid.append(h('a', { class: 'tile', href: `#/item/${encodeURIComponent(m.model_id)}` }, img,
         h('div', { class: 'tx' },
           h('div', { class: 'nm' }, m.colour_family ? h('span', { class: 'cdot', title: familyLabel(m.colour_family), style: `background:${familySwatch(m.colour_family)}` }) : null, m.display_name || '(no name yet)'),
-          h('div', { class: 'sub' }, [brandName[m.brand_id] || m.printed_brand_text || 'Brand?', scaleLabel[m.scale_id], m.product_code].filter(Boolean).join(' · ')),
+          h('div', { class: 'sub' }, [brandName[m.brand_id] || m.printed_brand_text || 'Brand?', lineName[m.line_id], scaleLabel[m.scale_id], m.product_code].filter(Boolean).join(' · ')),
           h('div', { class: 'badges' },
             ...boxesOf(m.model_id).slice(0, 2).map(bx => h('span', { class: 'b box' }, bx)),
             m.completeness_status === 'complete' ? h('span', { class: 'b ok' }, 'Complete') : null, // "Quick" is the normal case, so no badge (G6)
@@ -2591,18 +2610,34 @@ async function renderItem(v, modelId) {
   const barcodes = idfs.filter(i => i.identifier_type === 'barcode');
   const bc0 = barcodes[0];
   const sc0 = idfs.find(i => i.identifier_type === 'second_code'); // s1-0.45.0: e.g. Hot Wheels "-4B10" under the code
-  const f = { display_name: m.display_name || '', brand_id: m.brand_id || '', scale_id: m.scale_id || '', product_code: m.product_code || '', variant: m.variant || '', series: m.series || '', notes: m.notes || '', barcode: bc0?.value_raw || '', barcode_absent: m.barcode_absent || '', second_code: sc0?.value_raw || '' };
+  const f = { line_id: m.line_id || '', display_name: m.display_name || '', brand_id: m.brand_id || '', scale_id: m.scale_id || '', product_code: m.product_code || '', variant: m.variant || '', series: m.series || '', notes: m.notes || '', barcode: bc0?.value_raw || '', barcode_absent: m.barcode_absent || '', second_code: sc0?.value_raw || '' };
   let productDirty = false;
   const set = (k) => (e) => { f[k] = e.target.value; productDirty = true; markDirty(); };
   const markDirty = () => $('#pdpSave')?.classList.remove('quiet');
   const form = h('div', { class: 'card', id: 'pdpDetails' }, h('h3', {}, 'Details'));
   const field = (label, el) => form.append(h('label', { class: 'f' }, label), el);
   field('Name', h('input', { value: f.display_name, oninput: set('display_name') }));
-  field('Brand', h('select', { onchange: async (e) => { const v = e.target.value; const id = v.startsWith('known:') || v === '__new' ? await pickedBrandId(v, ref.brands, e.target) : v; if (v && !id) { e.target.value = f.brand_id; return; } f.brand_id = id; productDirty = true; markDirty(); } }, brandOptions(ref.brands, f.brand_id, '—')));
+  field('Brand', h('select', { onchange: async (e) => { const v = e.target.value; const id = v.startsWith('known:') || v === '__new' ? await pickedBrandId(v, ref.brands, e.target) : v; if (v && !id) { e.target.value = f.brand_id; return; } if (f.brand_id !== id) f.line_id = ''; f.brand_id = id; productDirty = true; markDirty(); drawLine(); } }, brandOptions(ref.brands, f.brand_id, '—')));
   field('Scale', h('select', { onchange: set('scale_id') }, h('option', { value: '' }, '—'), ref.scales.map(s => h('option', { value: s.scale_id, selected: s.scale_id === f.scale_id ? true : undefined }, s.label))));
-  field('Product code (exactly as printed)', h('input', { value: f.product_code, autocapitalize: 'characters', oninput: set('product_code') }));
+  field('Product code (exactly as printed)', h('input', { value: f.product_code, autocapitalize: 'characters', oninput: (e) => { set('product_code')(e); drawLine(); } }));
+  // Product line (s1-0.47.0): lines of the chosen brand; a hint when the code starts like a known line (one tap)
+  const lineWrap = h('div');
+  form.append(h('label', { class: 'f' }, 'Product line (optional)'), lineWrap);
+  function drawLine() {
+    const mine = ref.lines.filter(l => l.brand_id === f.brand_id && !l.deleted_at).sort((a, b) => a.name.localeCompare(b.name));
+    const sel = h('select', { 'aria-label': 'Product line', disabled: f.brand_id ? undefined : true, onchange: async (e) => {
+      if (e.target.value === '__new') { const t = prompt('New product line for this brand (e.g. Silver Series, Premium):', ''); const l = t ? await newLine(f.brand_id, t) : null; if (l) { ref.lines.push(l); f.line_id = l.line_id; productDirty = true; markDirty(); } drawLine(); return; }
+      f.line_id = e.target.value; productDirty = true; markDirty(); drawLine(); } },
+      h('option', { value: '' }, f.brand_id ? (mine.length ? 'No line' : 'No lines yet for this brand') : 'Choose a brand first'),
+      mine.map(l => h('option', { value: l.line_id, selected: l.line_id === f.line_id ? true : undefined }, l.name)),
+      f.brand_id ? h('option', { value: '__new' }, '＋ New line…') : null);
+    const hint = !f.line_id ? suggestLine(f.product_code, mine) : null;
+    lineWrap.replaceChildren(sel, hint ? h('div', { class: 'banner info', style: 'margin-top:6px' }, `Code starts like ${hint.name} (${hint.code_prefix_hint}…). `,
+      h('button', { type: 'button', class: 'small quiet', onclick: () => { f.line_id = hint.line_id; productDirty = true; markDirty(); drawLine(); } }, `Set ${hint.name}`)) : null);
+  }
   // Progressive disclosure: the less-used fields fold away while empty; anything already filled stays visible.
   const moreBox = h('details', { class: 'more inner', open: (f.variant || f.series || f.notes || f.barcode || f.barcode_absent || f.second_code || garageFilter === 'nobarcode') ? true : undefined }, h('summary', {}, 'More details', h('span', { class: 'muted', style: 'font-weight:400' }, 'variant, series, notes, barcode, second code')));
+ drawLine();
   form.append(moreBox);
   const field2 = (label, el) => moreBox.append(h('label', { class: 'f' }, label), el);
   field2('Variant / colour', h('input', { value: f.variant, oninput: set('variant') }));
@@ -2651,7 +2686,7 @@ async function renderItem(v, modelId) {
     const patch = { ...fields, product_code: f.product_code.trim(), product_code_cmp: codeCmp(f.product_code), printed_brand_text: m.printed_brand_text || brand?.name || '',
       code_namespace_type: ns.type, code_namespace_id: ns.id, namespace_status: ns.status };
     patch.duplicate_check_status = duplicateCheckStatus(patch);
-    for (const k of ['brand_id', 'product_code']) if (String(m[k] || '') !== String(patch[k] || '')) await store.logChange('models', modelId, k, m[k], patch[k], 'edited in app');
+    for (const k of ['brand_id', 'product_code', 'line_id']) if (String(m[k] || '') !== String(patch[k] || '')) await store.logChange('models', modelId, k, m[k], patch[k], 'edited in app');
     await store.update('models', modelId, patch);
     Object.assign(m, patch); productDirty = false;
     if (bc0) bc0.value_raw = f.barcode.trim();
@@ -2797,6 +2832,21 @@ async function mergeBrand(fromId, toId) {
   autoSyncSoon();
   return models.length;
 }
+// Product lines under a brand (s1-0.47.0): see, add, rename, mark checked. Lines group and count only.
+function linesBlock(b, ref, models) {
+  const lines = ref.lines.filter(l => l.brand_id === b.brand_id && !l.deleted_at).sort((x, y) => x.name.localeCompare(y.name));
+  const n = (lid) => models.filter(m => !m.deleted_at && m.line_id === lid).length;
+  return h('div', { class: 'lines' }, h('div', { class: 'muted small', style: 'margin:10px 0 4px;font-weight:600' }, 'Product lines'),
+    lines.length ? lines.map(l => h('div', { class: 'linerow' },
+      h('span', { class: 'ln' }, l.name, l.code_prefix_hint ? h('span', { class: 'muted small' }, ` · codes start ${l.code_prefix_hint}`) : null, l.record_status === 'needs_review' ? h('span', { class: 'tag warn' }, 'not checked') : null),
+      h('span', { class: 'muted small' }, plural(n(l.line_id), 'car', 'cars')),
+      n(l.line_id) ? h('button', { type: 'button', class: 'quiet small', onclick: () => { garageFilter = 'line'; garageSearch = l.name; location.hash = '#/'; } }, 'See') : null,
+      l.record_status === 'needs_review' ? h('button', { type: 'button', class: 'quiet small', onclick: async () => { await store.update('product_lines', l.line_id, { record_status: 'confirmed' }); await store.logChange('product_lines', l.line_id, 'record_status', 'needs_review', 'confirmed', 'checked in Brands'); autoSyncSoon(); toast(`${l.name} checked ✓`); route(); } }, 'It\'s right') : null,
+      h('button', { type: 'button', class: 'quiet small', onclick: async () => { const t = cleanLineName(prompt(`Rename "${l.name}" to:`, l.name)); if (!t || t === l.name) return; await store.update('product_lines', l.line_id, { name: t, record_status: 'confirmed' }); await store.logChange('product_lines', l.line_id, 'name', l.name, t, 'renamed in Brands'); autoSyncSoon(); toast('Renamed ✓'); route(); } }, 'Rename')))
+      : h('p', { class: 'muted small', style: 'margin:0' }, 'No lines yet.'),
+    h('button', { type: 'button', class: 'ghost small', style: 'margin-top:6px', onclick: async () => { const t = prompt(`New product line for ${b.name} (e.g. Premium, Silver Series):`, ''); if (!t) return; const l = await newLine(b.brand_id, t); if (l) { toast(`${l.name} added ✓`); route(); } } }, `＋ Add a line to ${b.name}`));
+}
+
 async function renderBrands(v) {
   const ref = await refData();
   const models = await store.list('models');
@@ -2845,6 +2895,7 @@ async function renderBrands(v) {
         } }, 'Merge')),
         !n ? h('button', { type: 'button', class: 'ghost small', onclick: async () => { await store.archive('brands', b.brand_id); await store.logChange('brands', b.brand_id, 'deleted_at', '', 'archived', 'unused brand removed'); autoSyncSoon(); brandOpen = null; route(); } }, 'Remove (no cars)') : null));
     }
+    if (open) row.append(linesBlock(b, ref, models));
     list.append(row);
   }
   v.append(list);
