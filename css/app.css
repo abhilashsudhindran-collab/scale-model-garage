@@ -822,3 +822,12 @@ a.btn.wide { display: flex; width: 100%; justify-content: center; box-sizing: bo
 
 /* Second code (s1-0.45.0) */
 .pdp-code2 { margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: var(--surface2); color: var(--muted); font-size: .85em; }
+
+/* Needs review (s1-0.46.0) */
+.review .rv-ic { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--surface2); font-weight: 700; }
+.review.r-brand .rv-ic, .review.r-dupe .rv-ic { background: var(--accent-soft); color: var(--accent); }
+.reviewlink .g-count { margin-right: 4px; }
+.navlink { display: flex; align-items: center; gap: 12px; color: var(--text); text-decoration: none; }
+.navlink .wl-ic { font-size: 1.4rem; }
+.navlink .wl-tx { flex: 1; display: flex; flex-direction: column; }
+.navlink .chev { color: var(--muted); font-size: 1.3rem; }

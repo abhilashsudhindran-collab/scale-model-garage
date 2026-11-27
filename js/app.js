@@ -19,11 +19,12 @@ import { growthSeries, decadeOf, tallyBy, share } from './insights.js';
 import { PRIORITIES, priorityRank, ownedMatches, safeUrl, priceNum } from './wishlist.js';
 import { healthScore, healthWord } from './health.js';
 import { SORTS, sortCompare } from './sort.js';
+import { buildReview } from './review.js';
 import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn } from './moments.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.45.0';
+export const APP_VERSION = 's1-0.46.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -260,6 +261,7 @@ async function route() {
     else if (hash.startsWith('#/settings')) await renderSettings(v);
     else if (hash.startsWith('#/brands')) await renderBrands(v);
     else if (hash.startsWith('#/wish')) await renderWish(v);
+    else if (hash.startsWith('#/review')) await renderReview(v);
     else if (hash.startsWith('#/import')) await renderImport(v);
     else if (hash.startsWith('#/showroom/')) await renderShowroom(v, decodeURIComponent(hash.slice(11)));
     else if (hash.startsWith('#/boxsheet/')) await renderBoxSheet(v, decodeURIComponent(hash.slice(11)));
@@ -583,6 +585,14 @@ async function renderDash(v) {
       h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
   }
 
+  // Needs review (s1-0.46.0)
+  {
+    const { items } = await reviewItems();
+    v.append(h('a', { href: '#/review', class: `card navlink reviewlink${items.length ? ' has' : ''}` }, h('span', { class: 'wl-ic', 'aria-hidden': 'true' }, items.length ? '🔎' : '✓'),
+      h('span', { class: 'wl-tx' }, h('b', {}, 'Needs review'), h('span', { class: 'muted small' }, items.length ? `${plural(items.length, 'thing', 'things')} the app isn't sure about` : 'Nothing the app is unsure about')),
+      items.length ? h('span', { class: 'g-count' }, String(items.length)) : null, h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
+  }
+
   // To check: every gap in one list, each opens the matching Garage list
   const ctx = checkContext(active.map(r => r.data), inventory, ids, photos);
 
@@ -847,6 +857,57 @@ async function renderWish(v) {
   }
   if (done.length) v.append(h('details', { class: 'more', style: 'margin-top:14px' }, h('summary', {}, `Got / dropped · ${done.length}`), ...done.map(card)));
   if (wishEdit && wishEdit !== 'new') setTimeout(() => v.querySelector('.wishform')?.scrollIntoView({ block: 'center' }), 0);
+}
+
+// Confirm a brand (D10.1 rule 4): its cars get their code namespace and become checkable for duplicates.
+async function confirmBrand(b, models, why) {
+  await store.update('brands', b.brand_id, { record_status: 'confirmed' });
+  for (const m of models.filter(x => x.brand_id === b.brand_id && !x.deleted_at)) { const ns = assignNamespace({ ...b, record_status: 'confirmed' }, null); const patch = { code_namespace_type: ns.type, code_namespace_id: ns.id, namespace_status: ns.status }; patch.duplicate_check_status = duplicateCheckStatus({ ...m, ...patch }); await store.update('models', m.model_id, patch); }
+  await store.logChange('brands', b.brand_id, 'record_status', 'needs_review', 'confirmed', why); autoSyncSoon();
+}
+
+// =====================================================================
+// Needs review (s1-0.46.0): everything the app isn't sure about, in one list, each with a one-tap fix.
+// "Not a problem" is remembered on this device and comes back if the value changes.
+// =====================================================================
+async function reviewItems() {
+  const [models, ref, ids, sugg, dismissed] = await Promise.all([store.list('models'), refData(), store.list('product_identifiers'), meta.get('aiSuggest', {}), meta.get('reviewDismissed', {})]);
+  const live = models.filter(m => !m.deleted_at);
+  return { items: buildReview({ models: live, brands: ref.brands, ids, sugg, dismissed }), live, ref, dismissed };
+}
+async function renderReview(v) {
+  const { items, live, ref, dismissed } = await reviewItems();
+  v.append(h('a', { href: '#/dash', class: 'back' }, '← Dashboard'));
+  v.append(h('div', { class: 'row' }, h('h2', {}, 'Needs review'), h('div', { class: 'muted' }, items.length ? plural(items.length, 'thing', 'things') : '')));
+  v.append(h('p', { class: 'muted small', style: 'margin:0 2px 12px' }, 'Things the app isn\'t sure about, so it won\'t guess. Nothing changes until you tap.'));
+  if (!items.length) { v.append(h('div', { class: 'card' }, h('p', { style: 'margin:0' }, 'Nothing needs review ✓'), Object.keys(dismissed).length ? h('p', { class: 'muted small', style: 'margin:6px 0 0' }, `${plural(Object.keys(dismissed).length, 'item', 'items')} marked "Not a problem".`) : null)); return; }
+  const dismiss = async (key) => { const d = { ...(await meta.get('reviewDismissed', {})) }; d[key] = new Date().toISOString(); await meta.set('reviewDismissed', d); toast('Marked "Not a problem"'); route(); };
+  const openCar = (mid) => { location.hash = `#/item/${encodeURIComponent(mid)}`; };
+  const ICON = { brand: '🏷', dupe: '⧉', alike: '≈', unsure: '?', shape: '⚠' };
+  const HEAD = { brand: 'Brands to confirm', dupe: 'Same car twice?', alike: 'Look-alike brands', unsure: 'Codes Gemini wasn\'t sure of', shape: 'Unusual codes' };
+  let last = null;
+  for (const it of items) {
+    if (it.kind !== last) { last = it.kind; v.append(h('div', { class: 'ghead' }, h('span', { class: 'g-name' }, HEAD[it.kind]), h('span', { class: 'g-count' }, String(items.filter(x => x.kind === it.kind).length)))); }
+    const acts = [];
+    if (it.kind === 'brand') {
+      const b = ref.brands.find(x => x.brand_id === it.brand_id);
+      acts.push(h('button', { type: 'button', class: 'small', onclick: async () => { await confirmBrand(b, live, 'confirmed in Needs review'); toast(`${b.name} confirmed ✓ ${plural(it.n, 'car', 'cars')} can now be checked`, 3000); route(); } }, `✓ ${b.name} is right`),
+        h('button', { type: 'button', class: 'small quiet', onclick: () => { brandOpen = it.brand_id; location.hash = '#/brands'; } }, 'Rename or merge'));
+    } else if (it.kind === 'alike') {
+      acts.push(h('button', { type: 'button', class: 'small', onclick: () => { brandOpen = it.brand_ids[1]; location.hash = '#/brands'; } }, 'Merge on Brands'),
+        h('button', { type: 'button', class: 'small quiet', onclick: () => dismiss(it.key) }, 'Different brands'));
+    } else if (it.kind === 'dupe') {
+      acts.push(h('button', { type: 'button', class: 'small', onclick: () => { mergeFor = it.model_ids[0]; openCar(it.model_ids[0]); } }, 'Compare & merge'),
+        h('button', { type: 'button', class: 'small quiet', onclick: () => dismiss(it.key) }, 'Not the same car'));
+    } else {
+      acts.push(h('button', { type: 'button', class: 'small', onclick: () => openCar(it.model_id) }, 'Open car'),
+        h('button', { type: 'button', class: 'small quiet', onclick: () => dismiss(it.key) }, it.kind === 'shape' ? 'The code is right' : 'Not a problem'));
+    }
+    v.append(h('div', { class: `card review r-${it.kind}` },
+      h('div', { class: 'row', style: 'align-items:flex-start;gap:10px;justify-content:flex-start' }, h('span', { class: 'rv-ic', 'aria-hidden': 'true' }, ICON[it.kind]),
+        h('div', { style: 'flex:1;min-width:0' }, h('b', {}, it.title), h('div', { class: 'muted small' }, it.detail))),
+      h('div', { class: 'row', style: 'gap:8px;justify-content:flex-start;flex-wrap:wrap;margin-top:10px' }, acts)));
+  }
 }
 
 async function renderGarage(v) {
@@ -2775,9 +2836,7 @@ async function renderBrands(v) {
           toast(`Renamed to ${t} ✓ (the old name still works)`, 3000); route();
         } }, 'Rename'),
         b.record_status === 'needs_review' ? h('button', { type: 'button', class: 'quiet small', onclick: async () => {
-          await store.update('brands', b.brand_id, { record_status: 'confirmed' });
-          for (const m of models.filter(x => x.brand_id === b.brand_id)) { const ns = assignNamespace({ ...b, record_status: 'confirmed' }, null); const patch = { code_namespace_type: ns.type, code_namespace_id: ns.id, namespace_status: ns.status }; patch.duplicate_check_status = duplicateCheckStatus({ ...m, ...patch }); await store.update('models', m.model_id, patch); }
-          await store.logChange('brands', b.brand_id, 'record_status', 'needs_review', 'confirmed', 'checked in Brands'); autoSyncSoon(); toast(`${b.name} checked ✓`); route();
+          await confirmBrand(b, models, 'checked in Brands'); toast(`${b.name} checked ✓`); route();
         } }, 'Mark as checked') : null,
         h('div', { class: 'row', style: 'width:100%;margin-top:6px' }, target, h('button', { type: 'button', class: 'small', onclick: async () => {
           const to = others.find(o => o.brand_id === target.value); if (!to) { toast('Pick the brand to merge into', 2500, 'warn'); return; }
