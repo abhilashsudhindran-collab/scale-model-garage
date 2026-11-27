@@ -819,3 +819,6 @@ a.btn.wide { display: flex; width: 100%; justify-content: center; box-sizing: bo
 .grid.list .tile .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .grid.list .tile .badges { margin-top: 4px; }
 .grid.list .more-row { grid-column: 1 / -1; }
+
+/* Second code (s1-0.45.0) */
+.pdp-code2 { margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: var(--surface2); color: var(--muted); font-size: .85em; }

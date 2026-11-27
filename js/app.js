@@ -23,7 +23,7 @@ import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn }
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.44.0';
+export const APP_VERSION = 's1-0.45.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -910,7 +910,7 @@ async function renderGarage(v) {
   const storageByModel = new Map();
   inventory.forEach(i => { if (i.storage_location) storageByModel.set(i.model_id, `${storageByModel.get(i.model_id) || ''} ${i.storage_location}`); });
   const barcodesByModel = new Map();
-  ids.forEach(i => { if (i.identifier_type === 'barcode') (barcodesByModel.get(i.model_id) || barcodesByModel.set(i.model_id, []).get(i.model_id)).push(i.value_raw, i.value_cmp); });
+  ids.forEach(i => { if (!i.deleted_at && (i.identifier_type === 'barcode' || i.identifier_type === 'second_code')) (barcodesByModel.get(i.model_id) || barcodesByModel.set(i.model_id, []).get(i.model_id)).push(i.value_raw, i.value_cmp); });
   // Owned copies per model, built once (perf: the list used to scan every copy for every car).
   const ownedByModel = new Map();
   inventory.forEach(i => { if (i.ownership_status === 'Owned') (ownedByModel.get(i.model_id) || ownedByModel.set(i.model_id, []).get(i.model_id)).push(i); });
@@ -2378,7 +2378,7 @@ async function renderItem(v, modelId) {
       !m.deleted_at ? h('button', { type: 'button', class: `namesw ${m.colour_family ? '' : 'empty'}`, 'aria-label': m.colour_family ? `Colour: ${familyLabel(m.colour_family)}. Tap to change` : 'Set colour',
         title: m.colour_family ? familyLabel(m.colour_family) : 'Set colour', style: m.colour_family ? `background:${familySwatch(m.colour_family)}` : '',
         onclick: () => { colourOpenFor = colourOpenFor === modelId ? null : modelId; route(); } }, m.colour_family ? '' : '+') : null),
-    m.product_code ? h('div', { class: 'pdp-code' }, m.product_code) : null));
+    m.product_code || idfs.some(i => i.identifier_type === 'second_code' && !i.deleted_at) ? h('div', { class: 'pdp-code' }, m.product_code || '', (() => { const sc = idfs.find(i => i.identifier_type === 'second_code' && !i.deleted_at); return sc ? h('span', { class: 'pdp-code2', title: 'Second code on the box' }, sc.value_raw) : null; })()) : null));
   const colourSlot = h('div'); v.append(colourSlot); // the colour picker opens here, right under the name
   if (!m.deleted_at && mergeFor !== modelId) {
     const top = (await mergeCandidates(m))[0];
@@ -2529,7 +2529,8 @@ async function renderItem(v, modelId) {
   // Typed edits are saved before any navigation or redraw (audit I1): see leaveHooks in route().
   const barcodes = idfs.filter(i => i.identifier_type === 'barcode');
   const bc0 = barcodes[0];
-  const f = { display_name: m.display_name || '', brand_id: m.brand_id || '', scale_id: m.scale_id || '', product_code: m.product_code || '', variant: m.variant || '', series: m.series || '', notes: m.notes || '', barcode: bc0?.value_raw || '', barcode_absent: m.barcode_absent || '' };
+  const sc0 = idfs.find(i => i.identifier_type === 'second_code'); // s1-0.45.0: e.g. Hot Wheels "-4B10" under the code
+  const f = { display_name: m.display_name || '', brand_id: m.brand_id || '', scale_id: m.scale_id || '', product_code: m.product_code || '', variant: m.variant || '', series: m.series || '', notes: m.notes || '', barcode: bc0?.value_raw || '', barcode_absent: m.barcode_absent || '', second_code: sc0?.value_raw || '' };
   let productDirty = false;
   const set = (k) => (e) => { f[k] = e.target.value; productDirty = true; markDirty(); };
   const markDirty = () => $('#pdpSave')?.classList.remove('quiet');
@@ -2540,7 +2541,7 @@ async function renderItem(v, modelId) {
   field('Scale', h('select', { onchange: set('scale_id') }, h('option', { value: '' }, '—'), ref.scales.map(s => h('option', { value: s.scale_id, selected: s.scale_id === f.scale_id ? true : undefined }, s.label))));
   field('Product code (exactly as printed)', h('input', { value: f.product_code, autocapitalize: 'characters', oninput: set('product_code') }));
   // Progressive disclosure: the less-used fields fold away while empty; anything already filled stays visible.
-  const moreBox = h('details', { class: 'more inner', open: (f.variant || f.series || f.notes || f.barcode || f.barcode_absent || garageFilter === 'nobarcode') ? true : undefined }, h('summary', {}, 'More details', h('span', { class: 'muted', style: 'font-weight:400' }, 'variant, series, notes, barcode')));
+  const moreBox = h('details', { class: 'more inner', open: (f.variant || f.series || f.notes || f.barcode || f.barcode_absent || f.second_code || garageFilter === 'nobarcode') ? true : undefined }, h('summary', {}, 'More details', h('span', { class: 'muted', style: 'font-weight:400' }, 'variant, series, notes, barcode, second code')));
   form.append(moreBox);
   const field2 = (label, el) => moreBox.append(h('label', { class: 'f' }, label), el);
   field2('Variant / colour', h('input', { value: f.variant, oninput: set('variant') }));
@@ -2558,6 +2559,19 @@ async function renderItem(v, modelId) {
   moreBox.append(bcWarn); bcCheck();
   moreBox.append(noBc); showNoBc();
   if (barcodes.length > 1) moreBox.append(h('p', { class: 'muted' }, `Other barcodes: ${barcodes.slice(1).map(i => i.value_raw).join(', ')}`));
+  // Second code (s1-0.45.0): a smaller code printed near the product code (Hot Wheels "-4B10"). Kept exactly as
+  // printed, separate from the product code, never used for the duplicate check (D11: alternate identifiers apart).
+  field2('Second code on the box (optional)', h('input', { value: f.second_code, autocapitalize: 'characters', placeholder: 'e.g. -4B10', 'aria-label': 'Second code', oninput: set('second_code') }));
+  moreBox.append(h('p', { class: 'muted small', style: 'margin:4px 0 0' }, 'A smaller code near the product code. Kept separate: it never changes the product code or the duplicate check.'));
+  async function saveSecondCode() {
+    const nv = f.second_code.trim(), ov = sc0?.value_raw || '';
+    if (nv === ov) return;
+    const fields = { value_raw: nv, value_cmp: codeCmp(nv), source: 'typed' };
+    if (sc0 && nv) await store.update('product_identifiers', sc0.identifier_id, fields);
+    else if (sc0) await store.archive('product_identifiers', sc0.identifier_id);
+    else await store.create('product_identifiers', { model_id: modelId, identifier_type: 'second_code', ...fields });
+    await store.logChange('models', modelId, 'second_code', ov, nv, 'edited in app');
+  }
   async function saveBarcode() {
     const nb = f.barcode.trim(), ob = bc0?.value_raw || '';
     if (nb === ob) return;
@@ -2569,9 +2583,10 @@ async function renderItem(v, modelId) {
   }
   async function saveProduct() {
     await saveBarcode();
+    await saveSecondCode();
     const brand = ref.brands.find(b => b.brand_id === f.brand_id);
     const ns = assignNamespace(brand, null);
-    const { barcode: _bc, ...fields } = f;
+    const { barcode: _bc, second_code: _sc, ...fields } = f;
     const patch = { ...fields, product_code: f.product_code.trim(), product_code_cmp: codeCmp(f.product_code), printed_brand_text: m.printed_brand_text || brand?.name || '',
       code_namespace_type: ns.type, code_namespace_id: ns.id, namespace_status: ns.status };
     patch.duplicate_check_status = duplicateCheckStatus(patch);
