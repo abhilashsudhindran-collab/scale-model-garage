@@ -21,12 +21,13 @@ import { healthScore, healthWord } from './health.js';
 import { SORTS, sortCompare } from './sort.js';
 import { buildReview } from './review.js';
 import { suggestLine, cleanLineName } from './lines.js';
+import { extractCodes, imagesOnly } from './share.js';
 import { EVENT_TYPES, DISPOSALS, eventLabel, copyMoney, splitByPrice, totals as moneyTotals, num as moneyNum } from './money.js';
 import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn } from './moments.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.48.0';
+export const APP_VERSION = 's1-0.49.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -265,6 +266,7 @@ async function route() {
     else if (hash.startsWith('#/wish')) await renderWish(v);
     else if (hash.startsWith('#/review')) await renderReview(v);
     else if (hash.startsWith('#/order')) await renderOrder(v);
+    else if (hash.startsWith('#/share')) await renderShare(v);
     else if (hash.startsWith('#/import')) await renderImport(v);
     else if (hash.startsWith('#/showroom/')) await renderShowroom(v, decodeURIComponent(hash.slice(11)));
     else if (hash.startsWith('#/boxsheet/')) await renderBoxSheet(v, decodeURIComponent(hash.slice(11)));
@@ -1021,6 +1023,67 @@ async function renderOrder(v) {
     h('span', {}, name.get(i.model_id), h('span', { class: 'muted small' }, ` · ${[i.purchase_date, moneyNum(i.purchase_price) != null ? rupees(moneyNum(i.purchase_price)) : 'price unknown', i.storage_location].filter(Boolean).join(' · ')}`)))));
   v.append(h('div', { class: 'card', style: 'display:grid;gap:8px' }, vendor, odate, ship), listEl, preview);
   if (orders.length) v.append(h('p', { class: 'muted small' }, `${plural(orders.filter(o => !o.deleted_at).length, 'order', 'orders')} saved so far.`));
+}
+
+// =====================================================================
+// Share into the app (s1-0.49.0, D16): photos/text shared from WhatsApp or the gallery.
+// "Do I own this?" reads barcodes from the photos and codes from the text; "Add to garage" hands the photos to Import.
+// Shared items stay on this phone (cache 'smg-share') and are cleared after use.
+// =====================================================================
+async function sharedItems() {
+  if (!('caches' in window)) return { files: [], meta: null };
+  const c = await caches.open('smg-share');
+  const sharedUrl = (k) => new URL(`shared/${k}`, location.href.split('#')[0]).href;
+  const metaRes = await c.match(sharedUrl('meta')); if (!metaRes) return { files: [], meta: null };
+  const meta = await metaRes.json(); const files = [];
+  for (let i = 0; i < (meta.n || 0); i++) { const r = await c.match(sharedUrl(i)); if (!r) continue; const b = await r.blob();
+    files.push(new File([b], decodeURIComponent(r.headers.get('X-Name') || `photo-${i}.jpg`), { type: b.type || 'image/jpeg', lastModified: Number(r.headers.get('X-Modified')) || Date.now() + i })); }
+  return { files: imagesOnly(files), meta };
+}
+const clearShared = async () => { try { await caches.delete('smg-share'); } catch { /* nothing to clear */ } };
+let shareResult = null; // { lines: [...] } after "Do I own this?"
+async function renderShare(v) {
+  const { files, meta } = await sharedItems();
+  v.append(h('a', { href: '#/', class: 'back' }, '← Garage'), h('h2', {}, 'Shared with Garage'));
+  if (!meta || (!files.length && !meta.text && !meta.title)) {
+    v.append(h('div', { class: 'card' }, h('p', { style: 'margin:0' }, 'Nothing shared right now.'), h('p', { class: 'muted small', style: 'margin:6px 0 0' }, 'From WhatsApp or your gallery: tap Share → Garage. Photos of a box (front, then back) work best.')));
+    return;
+  }
+  const text = [meta.title, meta.text, meta.url].filter(Boolean).join(' ');
+  const urls = files.map(f => URL.createObjectURL(f));
+  v.append(h('div', { class: 'card' },
+    files.length ? h('div', { class: 'sharegrid' }, urls.map(u => h('img', { src: u, alt: 'Shared photo' }))) : null,
+    text ? h('p', { class: 'small', style: 'margin:8px 0 0;white-space:pre-wrap;word-break:break-word' }, text.slice(0, 400)) : null,
+    h('p', { class: 'muted small', style: 'margin:8px 0 0' }, `${plural(files.length, 'photo', 'photos')}${text ? ' + text' : ''} · kept on this phone only`)));
+  const res = h('div');
+  v.append(h('div', { class: 'row sharebtns' },
+    h('button', { type: 'button', onclick: async () => {
+      res.replaceChildren(h('p', { class: 'muted' }, 'Checking…'));
+      const [models, ids, inventory] = await Promise.all([store.list('models'), store.list('product_identifiers'), store.list('inventory')]);
+      const live = models.filter(m => !m.deleted_at);
+      const owned = new Map(); inventory.filter(i => i.ownership_status === 'Owned').forEach(i => (owned.get(i.model_id) || owned.set(i.model_id, []).get(i.model_id)).push(i));
+      const found = new Map(); const read = [];
+      for (const f of files) { try { const r = await scanPhoto(f); if (r) read.push(barcodeCmp(String(r.value).trim())); } catch { /* not readable */ } }
+      const { codes, barcodes } = extractCodes(text);
+      const bcs = [...new Set([...read, ...barcodes.map(barcodeCmp)])].filter(Boolean);
+      for (const i of ids) if (!i.deleted_at && i.identifier_type === 'barcode' && bcs.includes(i.value_cmp)) found.set(i.model_id, 'same barcode');
+      for (const m of live) if (m.product_code && codes.some(c => codeCmp(c) === codeCmp(m.product_code))) found.set(m.model_id, found.has(m.model_id) ? 'same barcode and code' : 'same code');
+      const hits = [...found].map(([id, why]) => ({ m: live.find(x => x.model_id === id), why })).filter(x => x.m);
+      res.replaceChildren(h('div', { class: `card ${hits.length ? 'own-yes' : 'own-no'}` },
+        h('h3', {}, hits.length ? `✅ You have ${hits.length === 1 ? 'this' : `${hits.length} matches`}` : '❓ Not found by barcode or code'),
+        ...hits.map(({ m, why }) => { const cs = owned.get(m.model_id) || []; return h('a', { class: 'txrow', href: `#/item/${encodeURIComponent(m.model_id)}` },
+          h('span', {}, h('b', {}, m.display_name || m.product_code || 'Car with no name yet'), h('span', { class: 'muted small' }, ` · ${why} · ${cs.length ? `${plural(cs.length, 'copy', 'copies')} owned${cs[0].storage_location ? ` · ${cs[0].storage_location}` : ''}` : 'not owned now'}`)), h('span', { class: 'chev' }, '›')); }),
+        h('p', { class: 'muted small', style: 'margin:8px 0 0' }, [
+          `Read: ${bcs.length ? plural(bcs.length, 'barcode', 'barcodes') : 'no barcode'}${codes.length ? `, code ${codes.slice(0, 3).join(', ')}` : ''}.`,
+          hits.length ? '' : ' This only checks barcodes and codes: a car you saved without either can\'t be ruled out. Try a search by name.'].join('')),
+        h('button', { type: 'button', class: 'quiet small', onclick: () => { garageFilter = 'all'; garageSearch = codes[0] || (meta.title || meta.text || '').split(/\s+/).slice(0, 3).join(' '); location.hash = '#/'; } }, 'Search my garage')));
+    } }, '🔍 Do I own this?'),
+    files.length ? h('button', { type: 'button', class: 'ghost', onclick: async () => {
+      importFiles?.forEach(f => URL.revokeObjectURL(f.url));
+      importFiles = files.slice().sort((a, b) => (a.lastModified - b.lastModified) || a.name.localeCompare(b.name)).map(file => ({ file, url: URL.createObjectURL(file) }));
+      importSwap = false; await clearShared(); location.hash = '#/import'; } }, '＋ Add to garage') : null,
+    h('button', { type: 'button', class: 'quiet', onclick: async () => { await clearShared(); toast('Cleared'); location.hash = '#/'; } }, 'Clear')));
+  v.append(res);
 }
 
 async function renderGarage(v) {
