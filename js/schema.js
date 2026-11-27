@@ -41,7 +41,7 @@ export const tabOfEntity = (entity) => Object.keys(TABS).find(k => TABS[k].entit
 export const idColOfEntity = (entity) => TABS[tabOfEntity(entity)].id;
 
 // Entities the Stage 1 app keeps a local copy of and syncs.
-export const SYNCED_ENTITIES = ['brands', 'product_lines', 'scales', 'categories', 'models', 'product_identifiers', 'inventory', 'photos', 'change_log', 'ai_log', 'storage_boxes', 'aliases', 'wishlist'];
+export const SYNCED_ENTITIES = ['brands', 'product_lines', 'scales', 'categories', 'models', 'product_identifiers', 'inventory', 'photos', 'change_log', 'ai_log', 'storage_boxes', 'aliases', 'wishlist', 'orders', 'transactions'];
 
 // Drive folder layout (brief §14; D24 drops 07_SOURCE_CODE).
 export const FOLDERS = ['00_DATABASE', '01_MODEL_IMAGES', '02_PACKAGING', '03_PRODUCT_LABELS', '04_WISHLIST', '05_EXPORTS', '06_BACKUPS', '08_DOCUMENTATION'];

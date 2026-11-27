@@ -21,11 +21,12 @@ import { healthScore, healthWord } from './health.js';
 import { SORTS, sortCompare } from './sort.js';
 import { buildReview } from './review.js';
 import { suggestLine, cleanLineName } from './lines.js';
+import { EVENT_TYPES, DISPOSALS, eventLabel, copyMoney, splitByPrice, totals as moneyTotals, num as moneyNum } from './money.js';
 import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn } from './moments.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.47.0';
+export const APP_VERSION = 's1-0.48.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -263,6 +264,7 @@ async function route() {
     else if (hash.startsWith('#/brands')) await renderBrands(v);
     else if (hash.startsWith('#/wish')) await renderWish(v);
     else if (hash.startsWith('#/review')) await renderReview(v);
+    else if (hash.startsWith('#/order')) await renderOrder(v);
     else if (hash.startsWith('#/import')) await renderImport(v);
     else if (hash.startsWith('#/showroom/')) await renderShowroom(v, decodeURIComponent(hash.slice(11)));
     else if (hash.startsWith('#/boxsheet/')) await renderBoxSheet(v, decodeURIComponent(hash.slice(11)));
@@ -644,7 +646,18 @@ async function renderDash(v) {
         h('div', { class: 'muted small' }, thisMonth.length ? `${plural(thisMonth.length, 'car', 'cars')}${tmPriced.length < thisMonth.length ? ` · ${tmPriced.length} with a price` : ''}` : 'nothing yet')),
       h('div', {}, h('div', { class: 'muted small' }, 'All prices known'), h('b', {}, priced.length ? money(priced.reduce((a, i) => a + Number(i.purchase_price), 0)) : '—'),
         h('div', { class: 'muted small' }, `price known for ${priced.length} of ${plural(copies.length, 'car', 'cars')}`))),
-    h('p', { class: 'muted small', style: 'margin:8px 0 0' }, 'Add a purchase: tap "🛍 Just bought?" when you photograph a new car. Unknown prices are left out, never counted as ₹0.')));
+    await (async () => { // s1-0.48.0: cost incl. shipping − refunds, repairs, sold — each with coverage
+      const txAll = await store.list('transactions'); const byInv = new Map(); txAll.forEach(t => (byInv.get(t.inventory_id) || byInv.set(t.inventory_id, []).get(t.inventory_id)).push(t));
+      const allCopies = inventory.filter(i => byId.has(i.model_id));
+      const T = moneyTotals(allCopies.map(i => ({ inv: i, money: copyMoney(i, byInv.get(i.inventory_id) || []) })));
+      return h('div', { class: 'pgrid', style: 'margin-top:10px' },
+        h('div', {}, h('div', { class: 'muted small' }, 'Cost incl. shipping, less refunds'), h('b', {}, T.costKnown ? rupees(T.cost) : '—'), h('div', { class: 'muted small' }, `known for ${T.costKnown} of ${plural(T.ownedN, 'car', 'cars')} owned`)),
+        h('div', {}, h('div', { class: 'muted small' }, 'Sold'), h('b', {}, T.soldN ? rupees(T.proceeds) : '—'), h('div', { class: 'muted small' }, T.soldN ? `${plural(T.soldN, 'car', 'cars')} · ${T.gainKnown ? `${T.gain >= 0 ? 'gain' : 'loss'} ${rupees(Math.abs(T.gain))} on ${T.gainKnown}` : 'gain not computable'}` : 'nothing sold')),
+        T.repairs ? h('div', {}, h('div', { class: 'muted small' }, 'Repairs / extras'), h('b', {}, rupees(T.repairs)), h('div', { class: 'muted small' }, 'shown apart')) : null,
+        T.gifted ? h('div', {}, h('div', { class: 'muted small' }, 'Given away'), h('b', {}, String(T.gifted)), h('div', { class: 'muted small' }, 'no proceeds')) : null);
+    })(),
+    h('div', { class: 'row', style: 'gap:8px;justify-content:flex-start;flex-wrap:wrap;margin-top:10px' }, h('a', { href: '#/order', class: 'btnlink small' }, '📦 Split an order\'s shipping')),
+    h('p', { class: 'muted small', style: 'margin:8px 0 0' }, 'Add a purchase: tap "🛍 Just bought?" when you photograph a new car. Sold, gifts, refunds and repairs: on the car page, under each copy. Unknown prices are left out, never counted as ₹0.')));
 
   // By brand, by scale
   v.append(h('div', { class: 'card' }, h('div', { class: 'row', style: 'align-items:baseline' }, h('h3', {}, 'By brand'), h('a', { href: '#/brands', class: 'small' }, 'Manage brands ›')),
@@ -926,6 +939,88 @@ async function renderReview(v) {
         h('div', { style: 'flex:1;min-width:0' }, h('b', {}, it.title), h('div', { class: 'muted small' }, it.detail))),
       h('div', { class: 'row', style: 'gap:8px;justify-content:flex-start;flex-wrap:wrap;margin-top:10px' }, acts)));
   }
+}
+
+// =====================================================================
+// Orders and money (s1-0.48.0, D12.1): events per copy, order shipping split, totals with coverage.
+// =====================================================================
+const rupees = (n) => (n == null ? 'not computable' : `${n < 0 ? '−' : ''}₹${Math.abs(Math.round(n)).toLocaleString('en-IN')}`);
+function moneyBlock(c, txs) {
+  const m = copyMoney(c, txs);
+  const box = h('div', { class: 'moneyblk' }, h('div', { class: 'muted small', style: 'font-weight:600;margin:14px 0 4px' }, 'Money and history'));
+  const parts = [m.price == null ? 'Price unknown' : `Paid ${rupees(m.price)}`, m.extra ? `+ ${rupees(m.extra)} shipping/fees` : '', m.refunds ? `− ${rupees(m.refunds)} refund` : ''].filter(Boolean).join(' ');
+  box.append(h('p', { class: 'small', style: 'margin:0' }, parts, m.price != null && (m.extra || m.refunds) ? h('b', {}, ` = ${rupees(m.tac)} cost`) : null));
+  if (m.expenses) box.append(h('p', { class: 'small', style: 'margin:2px 0 0' }, `Repairs / extras: ${rupees(m.expenses)} (shown apart; not part of the cost)`));
+  if (m.disposal && m.disposal.transaction_type !== 'GIFT_OUT') box.append(h('p', { class: 'small', style: 'margin:2px 0 0' }, `${eventLabel(m.disposal.transaction_type)}: ${rupees(m.proceeds)} after fees`, h('b', {}, m.gain == null ? ' · gain not computable' : ` · ${m.gain >= 0 ? 'gain' : 'loss'} ${rupees(Math.abs(m.gain))}`), m.gain == null ? null : h('span', { class: 'muted' }, ` (vs ${m.base})`)));
+  const list = txs.filter(t => !t.deleted_at).sort((a, b) => String(b.transaction_date).localeCompare(String(a.transaction_date)));
+  for (const t of list) box.append(h('div', { class: 'txrow' }, h('span', {}, h('b', {}, eventLabel(t.transaction_type)), ` · ${t.transaction_date || 'date unknown'}`, moneyNum(t.amount) != null ? ` · ${rupees(moneyNum(t.amount))}` : '', t.counterparty ? ` · ${t.counterparty}` : '', t.notes ? h('span', { class: 'muted' }, ` · ${t.notes}`) : null),
+    h('button', { type: 'button', class: 'quiet small', onclick: async () => {
+      if (!confirm(`Undo "${eventLabel(t.transaction_type)}"?`)) return;
+      await store.archive('transactions', t.transaction_id);
+      const st = (EVENT_TYPES.find(e => e[0] === t.transaction_type) || [])[2];
+      if (st && c.ownership_status === st) { await store.update('inventory', c.inventory_id, { ownership_status: 'Owned' }); await store.logChange('inventory', c.inventory_id, 'ownership_status', st, 'Owned', 'event undone'); }
+      autoSyncSoon(); toast('Undone'); route(); } }, 'Undo')));
+  const form = h('div', { class: 'txform', hidden: true });
+  const type = h('select', { 'aria-label': 'What happened' }, EVENT_TYPES.map(([k, label]) => h('option', { value: k }, label)));
+  const date = h('input', { type: 'date', value: todayIso(), 'aria-label': 'Date' });
+  const amt = h('input', { inputmode: 'decimal', placeholder: 'Amount ₹', 'aria-label': 'Amount' });
+  const fees = h('input', { inputmode: 'decimal', placeholder: 'Selling fees + postage you paid ₹ (optional)', 'aria-label': 'Fees' });
+  const who = h('input', { placeholder: 'Who / where (optional)', 'aria-label': 'Who' });
+  const note = h('input', { placeholder: 'Note (optional)', 'aria-label': 'Note' });
+  const hint = h('div', { class: 'muted small' });
+  const sync = () => { const e = EVENT_TYPES.find(x => x[0] === type.value); amt.hidden = !e[3]; amt.placeholder = e[3]; fees.hidden = type.value !== 'SALE';
+    hint.textContent = e[2] ? `This copy will show as ${e[2]} and drop out of your owned counts. You can undo it.` : ''; };
+  type.addEventListener('change', sync); sync();
+  form.append(type, date, amt, fees, who, note, hint, h('div', { class: 'row', style: 'gap:8px;justify-content:flex-end' },
+    h('button', { type: 'button', class: 'quiet', onclick: () => { form.hidden = true; addBtn.hidden = false; } }, 'Cancel'),
+    h('button', { type: 'button', onclick: async () => {
+      const e = EVENT_TYPES.find(x => x[0] === type.value);
+      const a = amt.value.trim(); if (e[3] && a && moneyNum(a) == null) { toast('Amount should be a number', 2200, 'bad'); return; }
+      if (['SALE', 'REFUND', 'EXPENSE', 'TRADE_OUT'].includes(e[0]) && !a) { toast('Add the amount (₹)', 2200, 'bad'); amt.focus(); return; }
+      if (fees.value.trim() && moneyNum(fees.value) == null) { toast('Fees should be a number', 2200, 'bad'); return; }
+      await store.create('transactions', { inventory_id: c.inventory_id, transaction_type: e[0], transaction_date: date.value, amount: a ? String(moneyNum(a)) : '', currency: 'INR', fees: fees.value.trim() ? String(moneyNum(fees.value)) : '', counterparty: who.value.trim(), notes: note.value.trim() });
+      if (e[2] && c.ownership_status !== e[2]) { await store.update('inventory', c.inventory_id, { ownership_status: e[2] }); await store.logChange('inventory', c.inventory_id, 'ownership_status', c.ownership_status, e[2], `event: ${e[1]}`); }
+      autoSyncSoon(); toast(`${e[1]} saved ✓`); route(); } }, 'Save event')));
+  const addBtn = h('button', { type: 'button', class: 'ghost small', style: 'margin-top:8px', onclick: () => { form.hidden = false; addBtn.hidden = true; } }, '＋ Sold, gift, refund, repair…');
+  box.append(addBtn, form);
+  return box;
+}
+
+// Split an order's shipping/fees over several copies (by price; equal if a price is missing). Shares editable.
+async function renderOrder(v) {
+  const [inventory, models, orders] = await Promise.all([store.list('inventory'), store.list('models'), store.list('orders')]);
+  const name = new Map(models.filter(m => !m.deleted_at).map(m => [m.model_id, m.display_name || m.product_code || 'Car with no name yet']));
+  const cand = inventory.filter(i => i.ownership_status === 'Owned' && name.has(i.model_id)).sort((a, b) => String(b.purchase_date || '').localeCompare(String(a.purchase_date || '')) || String(b.created_at).localeCompare(String(a.created_at)));
+  v.append(h('a', { href: '#/dash', class: 'back' }, '← Dashboard'), h('h2', {}, 'Split an order\'s shipping'),
+    h('p', { class: 'muted small', style: 'margin:0 2px 12px' }, 'One parcel, several cars: type the shipping and fees once, tick the cars, and each car gets its share (by price; equal if a price is missing). Prices are never changed.'));
+  const vendor = h('input', { placeholder: 'Shop / seller (optional)', 'aria-label': 'Vendor' });
+  const odate = h('input', { type: 'date', value: todayIso(), 'aria-label': 'Order date' });
+  const ship = h('input', { inputmode: 'decimal', placeholder: 'Shipping + fees for the whole order ₹', 'aria-label': 'Order shipping total' });
+  const picked = new Set(); const manual = new Map();
+  const preview = h('div');
+  const listEl = h('div', { class: 'card orderlist' });
+  const draw = () => {
+    const sel = cand.filter(i => picked.has(i.inventory_id));
+    const total = moneyNum(ship.value);
+    const shares = total != null && sel.length ? splitByPrice(total, sel.map(i => i.purchase_price)) : [];
+    const used = sel.map((i, k) => manual.has(i.inventory_id) ? moneyNum(manual.get(i.inventory_id)) ?? 0 : shares[k] ?? 0);
+    const sum = Math.round(used.reduce((a, b) => a + b, 0) * 100) / 100;
+    preview.replaceChildren(sel.length && total != null ? h('div', { class: 'card' }, h('h3', {}, `${plural(sel.length, 'car', 'cars')} · ${rupees(total)}`),
+      ...sel.map((i, k) => h('div', { class: 'txrow' }, h('span', {}, name.get(i.model_id), h('span', { class: 'muted small' }, ` · ${moneyNum(i.purchase_price) != null ? rupees(moneyNum(i.purchase_price)) : 'price unknown'}`)),
+        h('input', { class: 'share', inputmode: 'decimal', value: String(used[k]), 'aria-label': `Share for ${name.get(i.model_id)}`, onchange: (e) => { manual.set(i.inventory_id, e.target.value); draw(); } }))),
+      Math.abs(sum - total) > 0.009 ? h('div', { class: 'banner warn', style: 'margin-top:8px' }, `Shares add up to ${rupees(sum)}, not ${rupees(total)}.`) : null,
+      sel.some(i => moneyNum(i.purchase_price) == null) ? h('p', { class: 'muted small' }, 'A price is missing, so the split is equal.') : null,
+      sel.some(i => i.order_id) ? h('p', { class: 'muted small' }, 'Some cars are already in an order: saving replaces their shipping share.') : null,
+      h('button', { type: 'button', class: 'wide', style: 'margin-top:10px', onclick: async () => {
+        const o = await store.create('orders', { vendor: vendor.value.trim(), order_date: odate.value, currency: 'INR', shipping_total: String(total), fees_total: '', notes: '' });
+        for (const [k, i] of sel.entries()) { await store.update('inventory', i.inventory_id, { order_id: o.order_id, acquisition_costs: String(used[k]) }); await store.logChange('inventory', i.inventory_id, 'acquisition_costs', i.acquisition_costs || '', String(used[k]), `order ${o.order_id}`); }
+        autoSyncSoon(); toast(`Order saved ✓ shipping split over ${plural(sel.length, 'car', 'cars')}`, 3000); location.hash = '#/dash'; } }, 'Save order')) : null);
+  };
+  ship.addEventListener('input', () => { manual.clear(); draw(); });
+  listEl.append(h('h3', {}, 'Which cars came in it?'), ...cand.slice(0, 80).map(i => h('label', { class: 'pickrow' }, h('input', { type: 'checkbox', onchange: (e) => { e.target.checked ? picked.add(i.inventory_id) : picked.delete(i.inventory_id); manual.clear(); draw(); } }),
+    h('span', {}, name.get(i.model_id), h('span', { class: 'muted small' }, ` · ${[i.purchase_date, moneyNum(i.purchase_price) != null ? rupees(moneyNum(i.purchase_price)) : 'price unknown', i.storage_location].filter(Boolean).join(' · ')}`)))));
+  v.append(h('div', { class: 'card', style: 'display:grid;gap:8px' }, vendor, odate, ship), listEl, preview);
+  if (orders.length) v.append(h('p', { class: 'muted small' }, `${plural(orders.filter(o => !o.deleted_at).length, 'order', 'orders')} saved so far.`));
 }
 
 async function renderGarage(v) {
@@ -2707,6 +2802,7 @@ async function renderItem(v, modelId) {
     } }, '＋ Add a copy')));
 
   // Copies (physical)
+  const allTx = await store.list('transactions');
   for (const [idx, c] of inv.entries()) {
     const cf = { ownership_status: c.ownership_status, packaging_state: c.packaging_state, condition: c.condition, packaging_condition: c.packaging_condition, storage_location: c.storage_location, purchase_price: c.purchase_price, purchase_date: c.purchase_date, purchase_source: c.purchase_source };
     const cc = { dirty: false };
@@ -2743,6 +2839,7 @@ async function renderItem(v, modelId) {
         await store.logChange('inventory', c.inventory_id, 'deleted_at', '', 'archived', 'copy removed');
         toast('Copy removed (archived)'); route(); autoSyncSoon();
       } }, 'Remove this copy') : null));
+    card.append(moneyBlock(c, allTx.filter(t => t.inventory_id === c.inventory_id)));
     v.append(card);
   }
   const dirtyHere = () => productDirty || copies.some(x => x.dirty);
@@ -3206,8 +3303,8 @@ async function renderSettings(v) {
 
   v.append(h('a', { href: '#/brands', class: 'card linkcard' }, h('span', {}, h('b', {}, 'Brands'), h('span', { class: 'muted' }, ' · rename, merge look-alikes')), h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
   const where = h('div', { class: 'card' }, h('h3', {}, 'Your data'),
-    config?.workbookId ? h('p', {}, h('a', { href: `https://docs.google.com/spreadsheets/d/${config.workbookId}`, target: '_blank', rel: 'noopener' }, 'Open SCALE_GARAGE_MASTER sheet ↗')) : h('p', { class: 'muted' }, 'Not set up yet — sign in above.'),
-    config?.rootId ? h('p', {}, h('a', { href: `https://drive.google.com/drive/folders/${config.rootId}`, target: '_blank', rel: 'noopener' }, 'Open SCALE GARAGE folder ↗')) : null);
+    config?.workbookId ? h('p', {}, h('a', { href: `https://docs.google.com/spreadsheets/d/${config.workbookId}`, target: '_blank', rel: 'noopener noreferrer' }, 'Open SCALE_GARAGE_MASTER sheet ↗')) : h('p', { class: 'muted' }, 'Not set up yet — sign in above.'),
+    config?.rootId ? h('p', {}, h('a', { href: `https://drive.google.com/drive/folders/${config.rootId}`, target: '_blank', rel: 'noopener noreferrer' }, 'Open SCALE GARAGE folder ↗')) : null);
   v.append(where);
 
   // Backups (D25): automatic after a successful sync (daily, monthly) + on demand.
