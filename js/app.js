@@ -27,7 +27,7 @@ import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn }
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.50.0';
+export const APP_VERSION = 's1-0.51.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -1016,7 +1016,7 @@ async function renderOrder(v) {
       h('button', { type: 'button', class: 'wide', style: 'margin-top:10px', onclick: async () => {
         const o = await store.create('orders', { vendor: vendor.value.trim(), order_date: odate.value, currency: 'INR', shipping_total: String(total), fees_total: '', notes: '' });
         for (const [k, i] of sel.entries()) { await store.update('inventory', i.inventory_id, { order_id: o.order_id, acquisition_costs: String(used[k]) }); await store.logChange('inventory', i.inventory_id, 'acquisition_costs', i.acquisition_costs || '', String(used[k]), `order ${o.order_id}`); }
-        autoSyncSoon(); toast(`Order saved ✓ shipping split over ${plural(sel.length, 'car', 'cars')}`, 3000); location.hash = '#/dash'; } }, 'Save order')) : null);
+        autoSyncSoon(); toast(`Order saved ✓ shipping split over ${plural(sel.length, 'car', 'cars')}`, 3000); location.hash = '#/dash'; } }, 'Save order')) : '');
   };
   ship.addEventListener('input', () => { manual.clear(); draw(); });
   listEl.append(h('h3', {}, 'Which cars came in it?'), ...cand.slice(0, 80).map(i => h('label', { class: 'pickrow' }, h('input', { type: 'checkbox', onchange: (e) => { e.target.checked ? picked.add(i.inventory_id) : picked.delete(i.inventory_id); manual.clear(); draw(); } }),
@@ -1224,7 +1224,7 @@ async function renderGarage(v) {
             ref.scales.filter(x => ['1:64', '1:43', '1:24', '1:18', '1:12'].includes(x.label)).map(x => h('button', { type: 'button', class: `chip ${cur === x.scale_id ? 'on' : ''}`, 'aria-pressed': cur === x.scale_id ? 'true' : 'false', onclick: () => setS(x.scale_id) }, `Only ${x.label}`)));
         })(),
         h('label', { class: 'f' }, 'Box size'),
-        h('div', { class: 'chips' }, BOX_SIZES.map(sz => h('button', { type: 'button', class: `chip ${rec?.box_size === sz ? 'on' : ''}`, 'aria-pressed': rec?.box_size === sz ? 'true' : 'false', onclick: async () => { await saveBox(label, { box_size: rec?.box_size === sz ? '' : sz }); autoSyncSoon(); route(); } }, sz))),
+        h('div', { class: 'chips sizes' }, BOX_SIZES.map(sz => h('button', { type: 'button', class: `chip ${rec?.box_size === sz ? 'on' : ''}`, 'aria-pressed': rec?.box_size === sz ? 'true' : 'false', onclick: async () => { await saveBox(label, { box_size: rec?.box_size === sz ? '' : sz }); autoSyncSoon(); route(); } }, sz))),
         h('label', { class: 'f' }, rec?.box_name ? 'Box name' : 'Name this box? (optional)'), nameIn, h('button', { type: 'button', class: 'small', style: 'margin-top:8px', onclick: save }, 'Save name'),
         h('button', { type: 'button', class: 'ghost small removebox', onclick: async () => { if (await removeBox(label)) { toast(`${label} removed. Restore it from Dashboard → Removed boxes.`, 4000); garageSearch = ''; route(); } } }, `Remove ${label}`))));
     }
@@ -1723,7 +1723,7 @@ async function renderRun(v) {
         quick.length ? h('div', { class: 'chips', style: 'margin:10px 0' }, quick.map(b => recent.has(b.brand_id)
           ? h('span', { class: 'chipx' }, h('button', { type: 'button', class: 'chip big', onclick: () => pickBrand(b.brand_id) }, b.name),
               h('button', { type: 'button', class: 'x', 'aria-label': `Remove ${b.name} from recent brands`, onclick: () => { forgetRecentBrand(b.brand_id); route(); } }, '×'))
-          : h('button', { type: 'button', class: 'chip big', onclick: () => pickBrand(b.brand_id) }, b.name))) : null,
+          : h('button', { type: 'button', class: 'chip big', onclick: () => pickBrand(b.brand_id) }, b.name))) : '',
         h('select', { 'aria-label': 'Brand for this car', onchange: async (e) => pickBrand(await pickedBrandId(e.target.value, all, e.target)) }, brandOptions(all, '', quick.length ? '— another brand, or a new one —' : '— choose brand —')));
     }
     if (scalePer) {
@@ -2349,7 +2349,7 @@ async function renderShowroom(v, id) {
     info.replaceChildren(
       h('div', { class: 'sr-k' }, [brandName(m), ref.scales.find(x => x.scale_id === m.scale_id)?.label, m.product_code].filter(Boolean).join(' · ')),
       h('h2', { class: 'sr-name' }, fam ? h('span', { class: 'cdot', style: `background:${familySwatch(fam)}` }) : null, m.display_name || 'Name not set', n > 1 ? h('span', { class: 'sr-n' }, ` ×${n}`) : null),
-      np ? h('p', { class: 'sr-note' }, h('b', {}, `${NOTE_ICON[np.kind]} ${np.label} · `), np.body) : null,
+      np ? h('p', { class: 'sr-note' }, h('b', {}, `${NOTE_ICON[np.kind]} ${np.label} · `), np.body) : '', // '' not null: replaceChildren prints null as text
       h('div', { class: 'row', style: 'justify-content:space-between;align-items:center' }, h('span', { class: 'muted small' }, `${i + 1} of ${cars.length}`),
         h('a', { href: `#/item/${encodeURIComponent(m.model_id)}`, class: 'btn ghost small', onclick: () => clearTimeout(showroomTimer) }, 'Open car')));
     if (motionOn()) showroomTimer = setTimeout(() => { if (location.hash.startsWith('#/showroom/')) show(i + 1); }, 5000);
@@ -2446,7 +2446,7 @@ async function renderImport(v) {
   if (importBusy) { v.append(h('p', { id: 'importMsg' }, 'Importing…')); return; }
   // settings
   const set = h('div', { class: 'card' },
-    h('div', {}, h('b', {}, box ? `Into Box ${String(box).replace(/^box\s*/i, '')}` : 'No storage box chosen'), ' · ', h('a', { href: '#/run' }, 'change')),
+    h('div', {}, h('b', {}, box ? `Into Box ${String(box).replace(/^box\s*/i, '')}` : 'No storage box chosen'), ' · ', h('a', { href: '#/run', class: 'tap' }, 'change')),
     h('label', { class: 'f' }, 'Brand'),
     h('select', { 'aria-label': 'Brand for imported cars', onchange: async (e) => { const v2 = e.target.value; const id = v2 === 'later' ? '' : await pickedBrandId(v2, ref.brands, e.target); importSave({ brandId: v2 === 'later' ? '' : id }); route(); } },
       h('option', { value: 'later', selected: !brandId ? true : undefined }, 'Different brands: set them later'), ...brandOptions(ref.brands, brandId, 'Pick one brand…').slice(1)),
@@ -2797,8 +2797,8 @@ async function renderItem(v, modelId) {
       mine.map(l => h('option', { value: l.line_id, selected: l.line_id === f.line_id ? true : undefined }, l.name)),
       f.brand_id ? h('option', { value: '__new' }, '＋ New line…') : null);
     const hint = !f.line_id ? suggestLine(f.product_code, mine) : null;
-    lineWrap.replaceChildren(sel, hint ? h('div', { class: 'banner info', style: 'margin-top:6px' }, `Code starts like ${hint.name} (${hint.code_prefix_hint}…). `,
-      h('button', { type: 'button', class: 'small quiet', onclick: () => { f.line_id = hint.line_id; productDirty = true; markDirty(); drawLine(); } }, `Set ${hint.name}`)) : null);
+    lineWrap.replaceChildren(sel, ...(hint ? [h('div', { class: 'banner info', style: 'margin-top:6px' }, `Code starts like ${hint.name} (${hint.code_prefix_hint}…). `,
+      h('button', { type: 'button', class: 'small quiet', onclick: () => { f.line_id = hint.line_id; productDirty = true; markDirty(); drawLine(); } }, `Set ${hint.name}`))] : [])); // spread: replaceChildren would print a null as the text "null"
   }
   // Progressive disclosure: the less-used fields fold away while empty; anything already filled stays visible.
   const moreBox = h('details', { class: 'more inner', open: (f.variant || f.series || f.notes || f.barcode || f.barcode_absent || f.second_code || garageFilter === 'nobarcode') ? true : undefined }, h('summary', {}, 'More details', h('span', { class: 'muted', style: 'font-weight:400' }, 'variant, series, notes, barcode, second code')));
