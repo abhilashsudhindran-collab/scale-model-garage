@@ -802,3 +802,20 @@ a.btn.wide { display: flex; width: 100%; justify-content: center; box-sizing: bo
 .health .hl-tx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .health .hl-tx h3 { margin: 0; }
 .health .checklist { margin-top: 10px; }
+
+/* List view + sorting (s1-0.44.0) */
+.viewbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; }
+.viewbar .segs { display: inline-flex; background: var(--surface2); border-radius: 999px; padding: 3px; }
+.viewbar .seg { background: transparent; color: var(--muted); border: 0; border-radius: 999px; padding: 6px 12px; font-weight: 600; font-size: .9rem; min-height: 34px; display: inline-flex; align-items: center; gap: 6px; box-shadow: none; }
+.viewbar .seg.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.viewbar .sortsel { width: auto; max-width: 55%; min-height: 38px; padding: 6px 10px; }
+.grid.list { grid-template-columns: 1fr !important; gap: 0 !important; }
+.grid.list .group { grid-column: 1 / -1; }
+.grid.list .tile { display: flex; align-items: center; gap: 12px; padding: 8px 2px; border-bottom: 1px solid var(--line); }
+.grid.list .tile .ph { flex: none; width: 56px; height: 64px; aspect-ratio: auto; border-radius: 10px; }
+.grid.list .tile .ph .ico-in svg.ic { width: 22px; height: 22px; }
+.grid.list .tile .tx { flex: 1; min-width: 0; padding: 0; }
+.grid.list .tile .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grid.list .tile .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grid.list .tile .badges { margin-top: 4px; }
+.grid.list .more-row { grid-column: 1 / -1; }

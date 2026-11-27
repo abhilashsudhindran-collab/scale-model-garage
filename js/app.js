@@ -18,11 +18,12 @@ import { runAudit } from './audit.js';
 import { growthSeries, decadeOf, tallyBy, share } from './insights.js';
 import { PRIORITIES, priorityRank, ownedMatches, safeUrl, priceNum } from './wishlist.js';
 import { healthScore, healthWord } from './health.js';
+import { SORTS, sortCompare } from './sort.js';
 import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn } from './moments.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.43.0';
+export const APP_VERSION = 's1-0.44.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -280,6 +281,10 @@ async function route() {
 // Garage list
 // =====================================================================
 let garageFilter = 'all', garageSearch = '';
+// List view + sorting (s1-0.44.0): remembered on this device
+const lsGet = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
+let garageView = lsGet('smg.garageView', 'grid'), garageSort = lsGet('smg.garageSort', 'newest');
 let selectedPhoto = { model: null, id: null };
 
 // Nameless boxes waiting, shown as a badge on the Name tab.
@@ -892,8 +897,15 @@ async function renderGarage(v) {
     .filter(([k, , c]) => c === undefined || c > 0 || garageFilter === k);
   const chips = h('div', { class: 'chips scroll', style: 'margin:10px 0' }, filters.map(([k, label]) => h('button', { class: `chip ${garageFilter === k ? 'on' : ''}`, onclick: () => { garageFilter = garageFilter === k && CHECKS.some(c => c[0] === k) ? 'all' : k; route(); } }, label)));
   v.append(chips);
+  // View + sort bar (s1-0.44.0)
+  const sortSel = h('select', { class: 'sortsel', 'aria-label': 'Sort cars', onchange: (e) => { garageSort = e.target.value; lsSet('smg.garageSort', garageSort); draw(); } },
+    SORTS.map(([k, label]) => h('option', { value: k, selected: k === garageSort ? true : undefined }, label)));
+  const viewBtn = (k, label, ico) => h('button', { type: 'button', class: `seg ${garageView === k ? 'on' : ''}`, 'aria-pressed': String(garageView === k), 'aria-label': label, title: label,
+    onclick: (e) => { garageView = k; lsSet('smg.garageView', k); grid.classList.toggle('list', k === 'list'); viewBar.querySelectorAll('.seg').forEach(b => { const on = b === e.currentTarget; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); }); } }, ico, h('span', {}, label));
+  const viewBar = h('div', { class: 'viewbar' }, h('div', { class: 'segs', role: 'group', 'aria-label': 'Show as' }, viewBtn('grid', 'Photos', '▦'), viewBtn('list', 'List', '☰')), sortSel);
+  v.append(viewBar);
   const boxHead = h('div');
-  const grid = h('div', { class: 'grid' });
+  const grid = h('div', { class: `grid${garageView === 'list' ? ' list' : ''}` });
   v.append(boxHead, grid);
   const storageByModel = new Map();
   inventory.forEach(i => { if (i.storage_location) storageByModel.set(i.model_id, `${storageByModel.get(i.model_id) || ''} ${i.storage_location}`); });
@@ -910,7 +922,10 @@ async function renderGarage(v) {
     grid.replaceChildren();
     const q = garageSearch.trim().toLowerCase();
     if (q !== lastQuery) { shown = PAGE; lastQuery = q; } // a new search starts at the top again
-    let list = (garageFilter === 'archived' ? archived : active).slice().sort((a, b) => String(b.data.created_at).localeCompare(String(a.data.created_at)));
+    const boxesMemo = new Map();
+    const boxesOf = (mid) => { let b = boxesMemo.get(mid); if (!b) { b = [...new Set((ownedByModel.get(mid) || []).map(i => i.storage_location).filter(Boolean))].sort(new Intl.Collator(undefined, { numeric: true }).compare); boxesMemo.set(mid, b); } return b; };
+    const cmp = sortCompare(garageSort, { brandOf: (m) => brandName[m.brand_id] || m.printed_brand_text || '', boxOf: (m) => boxesOf(m.model_id)[0] || '' });
+    let list = (garageFilter === 'archived' ? archived : active).slice().sort((a, b) => cmp(a.data, b.data));
     list = list.filter(r => {
       const m = r.data;
       if (garageFilter === 'quick' && m.completeness_status !== 'quick') return false;
@@ -977,15 +992,13 @@ async function renderGarage(v) {
     }
     if (!list.length) { grid.append(h('p', { class: 'muted' }, oneBox ? 'No cars in this box yet.' : active.length || archived.length ? 'Nothing matches.' : 'No models yet. Tap ＋ Add to catalogue your first box.')); return; }
     // Grouped views: by storage box (number order, no box last), by brand (A–Z), by scale (smallest scale number first).
-    const boxesMemo = new Map();
-    const boxesOf = (mid) => { let b = boxesMemo.get(mid); if (!b) { b = [...new Set((ownedByModel.get(mid) || []).map(i => i.storage_location).filter(Boolean))]; boxesMemo.set(mid, b); } return b; };
     const scaleOrder = Object.fromEntries(ref.scales.map(sc => [sc.scale_id, Number(sc.sort_order) || 0]));
     const grouping = { box: true, brand: true, scale: true, colour: true }[garageFilter] ? garageFilter : null;
     const gkey = (r) => grouping === 'box' ? (boxesOf(r.data.model_id)[0] || '') : grouping === 'brand' ? (brandName[r.data.brand_id] || '') : grouping === 'scale' ? (r.data.scale_id || '') : grouping === 'colour' ? (r.data.colour_family || '') : '';
     const gnum = (k) => grouping === 'box' ? ((k.match(/\d+/) || [])[0] ? Number(k.match(/\d+/)[0]) : Infinity) : grouping === 'scale' ? (scaleOrder[k] ?? Infinity) : grouping === 'colour' ? (k ? COLOUR_FAMILIES.findIndex(f => f[0] === k) : Infinity) : 0;
     const glabel = (k) => grouping === 'box' ? (k ? [k, names.get(k.toLowerCase())?.box_size, names.get(k.toLowerCase())?.box_name].filter(Boolean).join(' · ') : 'No box yet') : grouping === 'brand' ? (k || 'Brand not set') : grouping === 'colour' ? (familyLabel(k) || 'No colour yet') : (scaleLabel[k] || 'Scale not set');
     const keyMemo = new Map(); const gk = (r) => { let k = keyMemo.get(r.id); if (k === undefined) { k = gkey(r); keyMemo.set(r.id, k); } return k; };
-    if (grouping) list.sort((a, b) => { const ka = gk(a), kb = gk(b); if (!ka !== !kb) return ka ? -1 : 1; return gnum(ka) - gnum(kb) || ka.localeCompare(kb) || String(b.data.created_at).localeCompare(String(a.data.created_at)); });
+    if (grouping) list.sort((a, b) => { const ka = gk(a), kb = gk(b); if (!ka !== !kb) return ka ? -1 : 1; return gnum(ka) - gnum(kb) || ka.localeCompare(kb) || cmp(a.data, b.data); });
     // By colour: Gemini already named colours for some cars without one: one tap to use them all (B confirms).
     if (grouping === 'colour') {
       const ai = await aiColours(ref);
