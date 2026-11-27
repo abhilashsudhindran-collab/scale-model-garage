@@ -53,12 +53,52 @@ export async function liveScan(video, { onTick, timeoutMs = 5000, signal } = {})
 }
 
 // Read a barcode from a photo (fallback). Resolves { value, format, engine } or null.
-export async function scanPhoto(file) {
+// A photo is read in one pass over the whole picture first. If that finds nothing, the reader retries on zoomed,
+// overlapping sections (2×2, then 3×3; never shrunk, small ones enlarged): a slightly blurred barcode in a busy photo
+// is often readable on its own section (s1-0.53.0, B 27 Nov: a Para64
+// sticker barcode was in the photo but not read). Retries accept only formats with a check digit, so a section can't
+// produce a false read; they stop at the first hit or after ~2.5 s. Glare that wipes out the bars can't be fixed here.
+const CHECKED = new Set(['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128']);
+const RETRY_MS = 2500; // a gallery import waits for each rear photo, so failures must stay cheap
+
+export function sections(w, h) {
+  const out = [];
+  for (const n of [2, 3]) {
+    const ov = 0.25; // sections overlap by a quarter so a barcode on a line between two is whole in one of them
+    const sw = w / (n - (n - 1) * ov), sh = h / (n - (n - 1) * ov);
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) out.push({ n, x: Math.round(c * sw * (1 - ov)), y: Math.round(r * sh * (1 - ov)), w: Math.round(sw), h: Math.round(sh) });
+  }
+  return out;
+}
+
+function drawSection(bmp, s) {
+  // Never shrink a section (that throws away the detail we're after); small sections are enlarged up to 2×.
+  const k = Math.max(1, Math.min(2, 1600 / Math.max(s.w, s.h)));
+  const cw = Math.max(1, Math.round(s.w * k)), ch = Math.max(1, Math.round(s.h * k));
+  const cv = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(cw, ch) : Object.assign(document.createElement('canvas'), { width: cw, height: ch });
+  const g = cv.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(bmp, s.x, s.y, s.w, s.h, 0, 0, cw, ch);
+  return cv;
+}
+
+export async function scanPhoto(file, { retry = true } = {}) {
   const { det, engine } = await getDetector();
   let bmp;
   try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch { bmp = await createImageBitmap(file); }
   try {
     const found = await det.detect(bmp);
-    return found.length ? { value: found[0].rawValue, format: found[0].format, engine } : null;
+    if (found.length) return { value: found[0].rawValue, format: found[0].format, engine };
+    if (!retry) return null;
+    const t0 = performance.now();
+    const secs = sections(bmp.width, bmp.height);
+    for (const s of secs) {
+      if (performance.now() - t0 > RETRY_MS) return null;
+      let hits = [];
+      try { hits = await det.detect(drawSection(bmp, s)); } catch { /* section not readable */ }
+      const ok = hits.find(x => CHECKED.has(x.format));
+      if (ok) return { value: ok.rawValue, format: ok.format, engine, retried: `${s.n}x${s.n}` };
+    }
+    return null;
   } finally { bmp.close?.(); }
 }
