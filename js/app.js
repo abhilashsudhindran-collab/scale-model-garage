@@ -27,7 +27,7 @@ import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn }
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.49.0';
+export const APP_VERSION = 's1-0.50.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -2276,7 +2276,14 @@ async function celebrateSave(box) {
 // ---------- Car of the day + Showroom (B's picks from the Garage delight kit, 25 Nov) ----------
 const NOTE_ICON = { fun: '🎉', history: '🏛', pop: '🎬', casting: '🧩' };
 const noteOf = (m, readings) => (m.car_note_source === 'hidden' ? '' : (m.car_note || readings?.get(m.model_id)?.note || ''));
-const frontPhoto = (m, photos) => { const mine = photos.filter(p => p.model_id === m.model_id && !p.deleted_at); return mine.find(p => p.photo_id === m.primary_photo_id) || mine.find(p => p.shot_role === 'box_front') || mine[0]; };
+// Photos grouped by car once per photo list (s1-0.50.0: was a full scan of every photo for every car).
+const photosByCar = new WeakMap();
+const photosOf = (m, photos) => {
+  let map = photosByCar.get(photos);
+  if (!map) { map = new Map(); for (const p of photos) { if (p.deleted_at) continue; const a = map.get(p.model_id); if (a) a.push(p); else map.set(p.model_id, [p]); } photosByCar.set(photos, map); }
+  return map.get(m.model_id) || [];
+};
+const frontPhoto = (m, photos) => { const mine = photosOf(m, photos); return mine.find(p => p.photo_id === m.primary_photo_id) || mine.find(p => p.shot_role === 'box_front') || mine[0]; };
 // Same car all day, a different one tomorrow: a stable pick from today's date among named cars with a photo.
 function dayPick(n, dateStr) { let x = 0; for (const ch of dateStr) x = (x * 31 + ch.charCodeAt(0)) >>> 0; return n ? x % n : -1; }
 async function carOfTheDay(models, photos, names) {

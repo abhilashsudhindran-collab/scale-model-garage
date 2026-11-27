@@ -36,7 +36,12 @@ def main():
         page = ctx.new_page(); errors = []; page.on('pageerror', lambda e: errors.append(str(e)))
         check(st.get('method') == 'POST' and st.get('enctype') == 'multipart/form-data' and st['params']['files'][0]['accept'] == ['image/*'], 'manifest declares a POST share target for photos')
         page.goto(base + '#/'); page.wait_for_selector('text=My Garage')
-        page.wait_for_function("navigator.serviceWorker && navigator.serviceWorker.controller", timeout=15000) if page.evaluate("!!navigator.serviceWorker.controller") else (page.reload(), page.wait_for_function("!!navigator.serviceWorker.controller", timeout=15000))
+        # Wait for the service worker to control the page. Polled from Python: the page's CSP blocks
+        # wait_for_function's string evaluation when it has to poll (seen under load, s1-0.50.0).
+        for attempt in range(60):
+            if page.evaluate("!!(navigator.serviceWorker && navigator.serviceWorker.controller)"): break
+            if attempt in (10, 30): page.reload()
+            page.wait_for_timeout(250)
         page.evaluate(SEED + '(6)')
         info = page.evaluate(f"""(async () => {{ const st = await import('./js/store.js'); const ms = (await st.list('models')).sort((a, b) => a.display_name.localeCompare(b.display_name));
           const ids = await st.list('product_identifiers'); const bc = ids.find(i => i.model_id === ms[0].model_id && i.identifier_type === 'barcode');
