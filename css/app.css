@@ -792,3 +792,13 @@ a.btn.wide { display: flex; width: 100%; justify-content: center; box-sizing: bo
 .wish .wmatch { margin: 10px 0 0; font-size: .9rem; }
 .wish .wacts { gap: 8px; justify-content: flex-start; flex-wrap: wrap; margin-top: 10px; }
 .wish.got, .wish.dropped { opacity: .75; }
+
+/* Data health (s1-0.43.0) */
+.health .hl-top { display: flex; align-items: center; gap: 14px; }
+.health .hl-ring { --p: 0; flex: none; width: 76px; height: 76px; border-radius: 50%; display: grid; place-items: center;
+  background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--surface2) 0); }
+.health .hl-ring::before { content: ""; grid-area: 1 / 1; width: 60px; height: 60px; border-radius: 50%; background: var(--surface); }
+.health .hl-ring b { grid-area: 1 / 1; position: relative; font-size: 1.15rem; }
+.health .hl-tx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.health .hl-tx h3 { margin: 0; }
+.health .checklist { margin-top: 10px; }
