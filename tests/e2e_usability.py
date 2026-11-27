@@ -1,4 +1,4 @@
-"""Developer test for s1-0.51.0 (usability review): no stray "null"/"undefined"/"NaN" text on any screen, the car
+"""Developer test for s1-0.51.0 / s1-0.52.0 (usability review UR-0.1): no stray "null"/"undefined"/"NaN" text on any screen, the car
 page facts row keeps its pills (Dashboard insight styles no longer leak into it) with the barcode inside its pill,
 and key controls are at least 44 px tall. Fake Google; NOT a phone test.
 
@@ -49,8 +49,23 @@ def main():
         check(d2 in ('grid', 'none'), f'Dashboard insight facts keep their grid ({d2})')
         # Tap targets
         page.goto(base + '#/'); page.wait_for_selector('.tile'); page.wait_for_timeout(300)
-        hs = page.evaluate("({ sync: document.querySelector('#syncBtn').getBoundingClientRect().height, seg: document.querySelector('.viewbar .seg').getBoundingClientRect().height, sort: document.querySelector('.viewbar .sortsel').getBoundingClientRect().height })")
-        check(all(v >= 44 for v in hs.values()), f'header sync, Photos/List and sort are at least 44 px tall {hs}')
+        hs = page.evaluate("({ seg: document.querySelector('.viewbar .seg').getBoundingClientRect().height, sort: document.querySelector('.viewbar .sortsel').getBoundingClientRect().height })")
+        check(all(v >= 44 for v in hs.values()), f'Photos/List and sort are at least 44 px tall {hs}')
+        check(page.evaluate("!document.querySelector('#syncBtn')"), 'one sync control in the header: the status pill (s1-0.52.0)')
+        # s1-0.52.0 (B: "123"): compact Purchases while no money is recorded, storage boxes in one row, long journey folded
+        page.goto(base + '#/settings'); page.goto(base + '#/dash'); page.wait_for_selector('.card.purchases'); page.wait_for_timeout(400)
+        pur = page.inner_text('.card.purchases')
+        check('no prices yet' in pur and 'Split an order' in pur and '—' not in pur, f'Purchases is one line when nothing is priced ({pur[:80]!r})')
+        check(page.locator('.view-dash .shelf.scrollrow').count() == 1, 'Dashboard storage boxes are one swipeable row')
+        shown = page.evaluate("[...document.querySelectorAll('.jlist > .jrow')].length"); hidden = page.evaluate("document.querySelectorAll('.jlist .foldrest .jrow').length")
+        check(shown == 5 and hidden > 0, f'Box journey shows 5 boxes then Show all ({shown} shown, {hidden} folded)')
+        page.locator('.jlist .foldbtn').click(); page.wait_for_timeout(200)
+        check(page.evaluate("!document.querySelector('.jlist .foldrest').hidden") and page.inner_text('.jlist .foldbtn') == 'Show fewer', 'Show all opens the rest; button says Show fewer')
+        # priced: the full Purchases card comes back
+        page.evaluate("(async () => { const st = await import('./js/store.js'); const inv = await st.list('inventory'); await st.update('inventory', inv[0].inventory_id, { purchase_price: '1499' }); })()")
+        page.goto(base + '#/settings'); page.goto(base + '#/dash'); page.wait_for_selector('.card.purchases'); page.wait_for_timeout(400)
+        pur2 = page.inner_text('.card.purchases')
+        check('₹1,499' in pur2 and 'price known for 1 of' in pur2, f'with a price, the full Purchases card shows ({pur2[:80]!r})')
         check(not errors, f'no page errors {errors[:2]}')
         b.close()
     httpd.shutdown()
