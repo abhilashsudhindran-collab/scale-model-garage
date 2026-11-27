@@ -835,3 +835,12 @@ a.btn.wide { display: flex; width: 100%; justify-content: center; box-sizing: bo
 /* Product lines (s1-0.47.0) */
 .lines .linerow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-top: 1px solid var(--line); }
 .lines .linerow .ln { flex: 1; min-width: 50%; }
+
+/* Orders and money (s1-0.48.0) */
+.btnlink { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px; background: var(--surface2); color: var(--text); text-decoration: none; font-weight: 600; }
+.txrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: .92rem; }
+.txform { display: grid; gap: 8px; margin-top: 8px; }
+.txform [hidden] { display: none; }
+.pickrow { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.pickrow input { flex: none; }
+.txrow .share { width: 96px; text-align: right; }
