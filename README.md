@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.59.0
+## Status: Stage 1 (quick-capture slice), version s1-0.60.0
+
+**s1-0.60.0 (28 Nov 2026): photo backup reminder.** D25 says to download the original photos every 3 months (a copy in the same Drive doesn't protect against losing the account), but nothing reminded B. Settings → Backups → Photo backup shows the next date (90 days after the last one; the first one 90 days after the first synced photo), the size estimate and four steps (Drive → right-click SCALE GARAGE → Download → keep the zips off Drive); "I've downloaded them" records the date on the phone and in the sheet's SETTINGS tab (key last_photo_backup_at), so another device sees it, and logs it. When due, the Dashboard shows "Photo backup due". New js/photobackup.js.
 
 **s1-0.59.0 (28 Nov 2026): the barcode re-check reads extra side photos too.** Since s1-0.56.0 a barcode can be on an extra photo (Back, Bottom, End, Top) or a code label, but Garage → To check → No barcode → Re-check only read the barcode close-up. It now reads, per car, the close-up first and then those photos, stopping at the first barcode found (the rest aren't downloaded); front, box art and car photos aren't read. Photos already read with nothing found are skipped, so a car comes back when it gets a new photo (e.g. a Bottom photo added later). The card counts cars and photos; the change log names the photo the barcode came from.
 

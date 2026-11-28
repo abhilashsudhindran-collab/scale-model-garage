@@ -40,6 +40,26 @@ async function recordInSheet(config, at) {
 
 export const lastBackup = () => meta.get('lastBackup', {});
 
+// Photo backup (s1-0.60.0): B downloads the SCALE GARAGE folder himself (D25, quarterly) and marks it done. The date is
+// kept on this phone and in SETTINGS (key last_photo_backup_at, added if missing), so another device sees it too.
+const PHOTO_KEY = 'last_photo_backup_at';
+export const photoBackupLocal = () => meta.get('photoBackupAt', '');
+export async function photoBackupFromSheet(config) {
+  const r = await sheets.batchGet(config.workbookId, [`${SETTINGS_TAB.name}!A1:B80`]);
+  const row = (r.valueRanges?.[0]?.values || []).find(x => x[0] === PHOTO_KEY);
+  return row?.[1] || '';
+}
+export async function recordPhotoBackup(config, at) {
+  await meta.set('photoBackupAt', at);
+  if (!config?.workbookId) return false;
+  const r = await sheets.batchGet(config.workbookId, [`${SETTINGS_TAB.name}!A1:A80`]);
+  const rows = r.valueRanges?.[0]?.values || [];
+  let i = rows.findIndex(x => x[0] === PHOTO_KEY);
+  if (i < 0) i = Math.max(rows.length, 1); // append after the last key (row 1 = headers)
+  await sheets.batchUpdate(config.workbookId, [{ range: `${SETTINGS_TAB.name}!A${i + 1}:C${i + 1}`, values: [[PHOTO_KEY, at, at]] }]);
+  return true;
+}
+
 // Called after a successful sync. Returns { daily, monthly } = which copies were made.
 // Only one check runs at a time: two syncs finishing together must not make two copies.
 let running = null;

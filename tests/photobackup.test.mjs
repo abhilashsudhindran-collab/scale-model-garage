@@ -1,0 +1,24 @@
+// s1-0.60.0: photo backup reminder timing (D25, every 90 days), size estimate, newest-of-two dates.
+import assert from 'node:assert/strict';
+import { photoBackupDue, folderSizeGB, newest, EVERY_DAYS } from '../js/photobackup.js';
+assert.equal(EVERY_DAYS, 90);
+const now = new Date('2026-11-28T18:00:00Z');
+assert.deepEqual(photoBackupDue({ now }), { dueAt: null, due: false, days: 0 }, 'no synced photo → nothing due');
+let r = photoBackupDue({ firstPhotoAt: '2026-11-24T04:00:00Z', now });
+assert.equal(r.due, false); assert.equal(r.dueAt.toISOString().slice(0, 10), '2027-02-22', 'never done: 90 days after the first synced photo');
+assert.equal(r.days, 86);
+r = photoBackupDue({ firstPhotoAt: '2026-08-01T00:00:00Z', now });
+assert.ok(r.due && r.days < 0, 'never done and the first photo is over 90 days old → due');
+r = photoBackupDue({ lastAt: '2026-11-20T00:00:00Z', firstPhotoAt: '2026-01-01T00:00:00Z', now });
+assert.ok(!r.due && r.dueAt.toISOString().startsWith('2027-02-18'), 'last done wins over the first photo');
+r = photoBackupDue({ lastAt: '2026-08-30T18:00:00Z', now });
+assert.ok(r.due && r.days === 0, 'exactly 90 days → due today');
+assert.equal(photoBackupDue({ lastAt: 'not a date', now }).dueAt, null);
+const gb = folderSizeGB([{ original_file_id: 'a' }, { original_file_id: 'b', cropped_file_id: 'c' }, { original_file_id: 'd', deleted_at: 'x' }, {}]);
+assert.ok(Math.abs(gb - (3.3 + 3.9) / 1024) < 1e-9, 'synced, live photos only; cropped adds 0.6 MB');
+assert.equal(newest('2026-11-01T00:00:00Z', '2026-11-20T00:00:00Z'), '2026-11-20T00:00:00Z');
+assert.equal(newest('2026-11-21T00:00:00Z', '2026-11-20T00:00:00Z'), '2026-11-21T00:00:00Z');
+assert.equal(newest('', '2026-11-20T00:00:00Z'), '2026-11-20T00:00:00Z');
+assert.equal(newest('2026-11-20T00:00:00Z', ''), '2026-11-20T00:00:00Z');
+assert.equal(newest('', ''), '');
+console.log('photobackup: all checks passed');
