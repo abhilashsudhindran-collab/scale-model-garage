@@ -86,6 +86,8 @@ export const records = {
     if ((gen.get(entity) || 0) === g && allGen === ag) cache.set(entity, clone(rows));
     return rows;
   },
+  // Helper mode (D32): drop the rows of an older lookup file before loading a newer one
+  removeMany: async (recs) => { if (!recs.length) return; const es = entitiesOf(recs); drop(es); try { return await run(['records'], 'readwrite', t => { const s = t.objectStore('records'); recs.forEach(r => s.delete(r.key)); }); } finally { drop(es); } },
   dirty: () => run(['records'], 'readonly', t => reqP(t.objectStore('records').index('dirty').getAll(1))),
   count: () => run(['records'], 'readonly', t => reqP(t.objectStore('records').count())),
   clearAll: async () => { drop('*'); try { return await run(['records', 'blobs', 'meta'], 'readwrite', t => { ['records', 'blobs', 'meta'].forEach(n => t.objectStore(n).clear()); }); } finally { drop('*'); } },

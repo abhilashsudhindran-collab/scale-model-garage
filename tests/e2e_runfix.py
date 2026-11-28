@@ -26,7 +26,7 @@ def main():
         nmod = lambda: page.evaluate("(async () => (await (await import('./js/store.js')).list('models')).length)()")
         def shoot(role, f):
             with page.expect_file_chooser() as fc: page.get_by_role('button', name=role).click()
-            fc.value.set_files(f'/tmp/smg-runfix/{f}.jpg'); page.wait_for_timeout(900)
+            fc.value.set_files(f'/tmp/smg-runfix/{f}.jpg'); page.wait_for_selector(f'text={role} ✓', timeout=15000); page.wait_for_timeout(600)  # wait for the photo to be prepared and the draft saved (fixed 900 ms was flaky under load)
 
         # Bburago remembered as a recent brand (as on B's phone), then a mixed-brand, 1:43 box
         page.evaluate("(async () => { const st = await import('./js/store.js'); const br = await st.list('brands'); localStorage.setItem('smg.recentBrands', JSON.stringify([br.find(b => b.name === 'Bburago').brand_id])); })()")

@@ -872,3 +872,18 @@ a.small[href="#/brands"], .need > a, a.tap { display: inline-block; padding: 12p
 .facts:not(.view-dash .facts) .fact { min-height: 44px; }
 .namelink { display: inline-block; padding: 10px 0; }
 #status.pill { min-height: 44px; } /* the one sync control in the header (s1-0.52.0) */
+
+/* Helper mode (D32, s1-0.54.0): the helper's phone hides the owner's money, the Gemini tab and sign-in */
+body.helper #navname, body.helper .card.purchases, body.helper .moneyblk { display: none !important; }
+.helperbanner .hd { margin-bottom: 2px; }
+.steps { margin: 8px 0 12px; padding-left: 1.3rem; line-height: 1.45; }
+.steps li { margin: 4px 0; }
+.helperlink { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: .8rem; background: var(--surface2); padding: 6px 8px; border-radius: 8px; }
+.sendbox .pillish { font-size: .8rem; font-weight: 700; }
+.sendbox .pillish.new, .sendbox .pillish.changed { color: var(--warn); }
+.sendbox .pillish.sent { color: var(--ok); }
+.inboxthumb { width: 64px; height: 80px; object-fit: contain; background: var(--surface2); border-radius: 8px; flex: 0 0 auto; }
+.inboxthumb.none { display: block; }
+.inboxrow .chips { margin-top: 10px; }
+.inboxrow.already, .inboxrow.missing { opacity: .6; }
+.st-new { color: var(--ok); } .st-warn { color: var(--warn); } .st-have { color: var(--accent); } .st-muted { color: var(--muted); }
