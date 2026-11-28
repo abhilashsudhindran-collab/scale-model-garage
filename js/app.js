@@ -1,6 +1,6 @@
 // Scale Model Garage — Stage 1 (quick-capture slice, D22). Screens: Garage list · Add (quick capture) · Item · Settings.
 import * as store from './store.js';
-import { blobs, meta, requestPersistentStorage, storageEstimate } from './idb.js';
+import { blobs, meta, records, requestPersistentStorage, storageEstimate } from './idb.js';
 import { preparePhoto, pickPhoto } from './images.js';
 import { liveScan, scanPhoto } from './barcode.js';
 import { codeCmp, barcodeCmp, gtinCheckOk, assignNamespace, duplicateCheckStatus, checkDuplicate, searchMatch } from './rules.js';
@@ -8,7 +8,7 @@ import { SHOT_ROLES, CONDITIONS, SCHEMA_VERSION, TABS, SYNCED_ENTITIES, headersF
 import { syncNow, isSyncing } from './sync.js';
 import { getClientId, setClientId, hasToken, signIn, tokenMinutesLeft, drive } from './google.js';
 import { getConfig, seedLocal } from './setup.js';
-import { newId } from './ids.js';
+import { newId, isId } from './ids.js';
 import { resolveName, moreBrands, KNOWN_BRANDS, looksLike, normName } from './brands.js';
 import { COLOUR_FAMILIES, familyFrom, familyLabel, familySwatch } from './colours.js';
 import { newTimer, touch, seconds, paceFromTimes } from './timing.js';
@@ -26,9 +26,10 @@ import { recheckTargets, runRecheck, recheckSummary } from './recheck.js';
 import { EVENT_TYPES, DISPOSALS, eventLabel, copyMoney, splitByPrice, totals as moneyTotals, num as moneyNum } from './money.js';
 import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn } from './moments.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
+import { LOOKUP_KIND, INBOX_KIND, FORMAT as HELPER_FORMAT, LOOKUP_ENTITIES, buildLookup, helperBoxes, boxRecords, planImport, applyPlan, unzip, fileText, photoPath, PHOTO_VARIANTS, cleanInboxRecord } from './helper.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.54.0';
+export const APP_VERSION = 's1-0.55.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -140,6 +141,7 @@ async function quickBrands(all) {
 // ---------- status bar ----------
 // Header pill (audit S1, S2): counts boxes, and says plainly when a sign-in is needed. Tap = sync.
 async function refreshStatus() {
+  if (helperInfo) return refreshHelperStatus();
   const [c, p, config] = await Promise.all([store.counts(), store.pendingSummary(), getConfig()]);
   const pill = $('#status');
   const what = p.boxes ? plural(p.boxes, 'box', 'boxes') : (p.other ? 'changes' : '');
@@ -186,6 +188,7 @@ window.addEventListener('online', () => syncButtons());
 window.addEventListener('offline', () => syncButtons());
 let syncBusy = false;
 async function runSync(interactive) {
+  if (helperInfo) return; // Helper mode (D32): never signs in or syncs; boxes go to the owner as files
   if (isSyncing() || syncBusy) return;
   syncBusy = true; syncButtons();
   // Keep the screen on while syncing (B, 24 Nov: a sync stopped when the phone left the app). Chrome may refuse; that is fine.
@@ -227,7 +230,7 @@ document.addEventListener('visibilitychange', async () => {
   const p = await store.pendingSummary(); if (p.boxes || p.other) autoSyncSoon();
 });
 let autoTimer = null;
-function autoSyncSoon() { clearTimeout(autoTimer); autoTimer = setTimeout(() => { if (navigator.onLine && hasToken()) runSync(false); }, 2500); }
+function autoSyncSoon() { if (helperInfo) return; clearTimeout(autoTimer); autoTimer = setTimeout(() => { if (navigator.onLine && hasToken()) runSync(false); }, 2500); }
 
 // ---------- router ----------
 let routeSeq = 0;
@@ -260,9 +263,13 @@ async function route() {
     else if (hash.startsWith('#/run')) await renderRun(v);
     else if (hash.startsWith('#/name')) await renderName(v);
     else if (hash.startsWith('#/dash')) await renderDash(v);
+    else if (hash.startsWith('#/item/') && helperInfo && (await store.getRecord('models', decodeURIComponent(hash.slice(7))))?.lookup) await renderLookupItem(v, decodeURIComponent(hash.slice(7)));
     else if (hash.startsWith('#/item/')) await renderItem(v, decodeURIComponent(hash.slice(7)));
     else if (hash.startsWith('#/crop/')) await renderCrop(v, decodeURIComponent(hash.slice(7)));
+    else if (hash.startsWith('#/settings') && helperInfo) await renderHelperHome(v);
     else if (hash.startsWith('#/settings')) await renderSettings(v);
+    else if (hash.startsWith('#/helper')) await renderHelperStart(v);
+    else if (hash.startsWith('#/inbox')) await renderInbox(v);
     else if (hash.startsWith('#/brands')) await renderBrands(v);
     else if (hash.startsWith('#/wish')) await renderWish(v);
     else if (hash.startsWith('#/review')) await renderReview(v);
@@ -273,6 +280,7 @@ async function route() {
     else if (hash.startsWith('#/boxsheet/')) await renderBoxSheet(v, decodeURIComponent(hash.slice(11)));
     else if (hash.startsWith('#/box/')) { garageFilter = 'all'; garageSearch = `Box ${decodeURIComponent(hash.slice(6)).replace(/^box\s*/i, '').toUpperCase()}`; location.replace('#/'); return; }
     else await renderGarage(v);
+    if (helperInfo && page === 'garage') v.prepend(helperBanner());
   } catch (e) {
     v.append(h('div', { class: 'banner bad' }, `Something went wrong: ${e.message}`));
     console.error(e);
@@ -501,6 +509,7 @@ async function carsInBox(label) {
   return inventory.filter(i => i.ownership_status === 'Owned' && live.has(i.model_id) && String(i.storage_location || '').toLowerCase() === label.toLowerCase());
 }
 async function removeBox(label) {
+  if (helperInfo) { const own = (await store.listRecords('storage_boxes')).find(r => String(r.data.box_label).trim().toLowerCase() === label.replace(/^box\s*/i, '').trim().toLowerCase()); if (!own || own.lookup) { toast(`${label} is in the owner's garage: it can't be removed here.`, 3500, 'warn'); return false; } }
   const cars = await carsInBox(label);
   if (cars.length && !confirm(`${label} has ${plural(cars.length, 'car', 'cars')}. Remove the box?\n\nThe cars stay in your collection and move to "No box yet". You can restore the box later from Dashboard → Removed boxes.`)) return false;
   let rec = (await boxNames()).get(label.toLowerCase());
@@ -1106,7 +1115,7 @@ async function renderShare(v) {
 
 async function renderGarage(v) {
   const config = await getConfig();
-  if (!getClientId() || !config) {
+  if (!helperInfo && (!getClientId() || !config)) {
     v.append(h('div', { class: 'banner info' }, 'Welcome! Start in ', h('a', { href: '#/settings' }, 'Settings'), ': sign in with Google once, and the app sets up your SCALE GARAGE folder and sheet. You can also start capturing offline right away.'));
   }
   const [models, inventory, photos, ids, ref] = await Promise.all([store.listRecords('models'), store.list('inventory'), store.list('photos'), store.list('product_identifiers'), refData()]);
@@ -1429,7 +1438,7 @@ async function renderAdd(v) {
   if (/^\d+$/.test(cap.box)) boxRow.append(h('button', { type: 'button', class: 'quiet', style: 'flex:0 0 auto', onclick: () => { setBox(Number(cap.box) + 1); toast(`Now filling Box ${cap.box}`); route(); } }, `Next box → ${Number(cap.box) + 1}`));
   v.append(boxRow);
   { const used = await boxesInUse(); const pk = boxPicker(cap.box, used, await boxNames(), (id) => { setBox(id); route(); }); if (pk) v.append(pk); }
-  v.append(boughtCard());
+  { const bc = boughtCard(); if (bc) v.append(bc); }
 
   // --- Barcode ---
   v.append(h('label', { class: 'f' }, 'Barcode (if the box has one)'));
@@ -1686,7 +1695,7 @@ async function renderRun(v) {
   const say = h('p', { class: 'muted', id: 'runSay' });
   v.append(h('div', { class: 'runhead' }, h('b', {}, `Car ${cap.count + 1} of this run`), ` · ${brand ? brand.name : 'brand after photos'} · ${scale ? scale.label : 'scale after photos'}${cap.box ? ` · Box ${cap.box}` : ''}`));
   v.append(h('a', { href: '#/import', class: 'btn ghost small importlink' }, '📥 Shot them with the camera app? Import from gallery'));
-  v.append(boughtCard());
+  { const bc = boughtCard(); if (bc) v.append(bc); }
   const strip = h('div', { class: 'shots' });
   for (const role of ['box_front', 'box_rear', ...(cap.sealed ? ['box_art'] : [])]) {
     const p = cap.photos[role];
@@ -2535,11 +2544,12 @@ function boughtSet(o) { try { localStorage.setItem('smg.bought', JSON.stringify(
 function recentShops() { try { return JSON.parse(localStorage.getItem('smg.shops') || '[]'); } catch { return []; } }
 function rememberShop(name) { const t = String(name || '').trim(); if (!t) return; try { localStorage.setItem('smg.shops', JSON.stringify([t, ...recentShops().filter(x => x.toLowerCase() !== t.toLowerCase())].slice(0, 6))); } catch {} }
 function boughtFields() {
-  const b = boughtGet(); if (!b.on) return {};
+  const b = boughtGet(); if (!b.on || helperInfo) return {};
   const price = String(cap.price || '').replace(/[^\d.]/g, '');
   return { acquisition_type: 'Purchase', purchase_price: price, purchase_date: b.date || todayIso(), purchase_date_precision: 'day', purchase_source: b.source || '' };
 }
 function boughtCard() {
+  if (helperInfo) return null; // Helper mode: prices are the owner's business
   const b = boughtGet();
   if (!b.on) return h('button', { type: 'button', class: 'quiet small boughtbtn', onclick: () => { boughtSet({ on: true, day: todayIso(), date: todayIso(), source: b.source || '' }); route(); } }, '🛍 Just bought? Add price and shop');
   const shopIn = h('input', { value: b.source || '', placeholder: 'Shop or seller', 'aria-label': 'Bought from', oninput: (e) => boughtSet({ ...boughtGet(), source: e.target.value }) });
@@ -3440,6 +3450,7 @@ async function renderSettings(v) {
   v.append(sync);
   v.append(await auditCard());
 
+  v.append(await helperCard());
   v.append(h('a', { href: '#/brands', class: 'card linkcard' }, h('span', {}, h('b', {}, 'Brands'), h('span', { class: 'muted' }, ' · rename, merge look-alikes')), h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
   const where = h('div', { class: 'card' }, h('h3', {}, 'Your data'),
     config?.workbookId ? h('p', {}, h('a', { href: `https://docs.google.com/spreadsheets/d/${config.workbookId}`, target: '_blank', rel: 'noopener noreferrer' }, 'Open SCALE_GARAGE_MASTER sheet ↗')) : h('p', { class: 'muted' }, 'Not set up yet — sign in above.'),
@@ -3533,12 +3544,337 @@ async function renderSettings(v) {
     persisted ? null : h('button', { class: 'quiet', style: 'margin-top:8px', onclick: async () => { const ok = await requestPersistentStorage(); toast(ok ? 'Storage protected ✓' : 'Chrome said no (try after installing the app)', 3500, ok ? 'ok' : 'warn'); route(); } }, 'Protect storage on this phone')));
 }
 
+// =====================================================================
+// Helper mode (D32, helper-mode-plan.md). A helper catalogues the backlog on THEIR phone: no sign-in, no sync.
+// Owner: Settings → Helper → "File for a helper" (lookup: what you own, no money) and "Import a helper's boxes".
+// Helper: opens #/helper, loads the file, fills boxes, sends one file per box (the Send tab).
+// =====================================================================
+let helperInfo = null; // { made_at, cars, photos, loaded_at } once this phone is in Helper mode
+let inboxState = null; // owner side: the helper files being reviewed
+function applyHelperLook() {
+  document.body.classList.toggle('helper', !!helperInfo);
+  const a = document.querySelector('nav.bottom a[href="#/settings"]');
+  if (a?.lastChild?.nodeType === 3) a.lastChild.textContent = helperInfo ? 'Send' : 'Settings';
+}
+async function allRecs() { return (await Promise.all(SYNCED_ENTITIES.map(e => store.listRecords(e)))).flat(); }
+const mb = (bytes) => `${(bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0)} MB`;
+const boxTitle = (label) => label || 'Cars not in a storage box';
+// Share sheet when the phone can share files (Drive, WhatsApp…), otherwise a download. Returns false if cancelled.
+async function shareOrDownload(blob, name, title) {
+  const file = new File([blob], name, { type: blob.type || 'application/zip' });
+  try {
+    if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title }); return 'shared'; }
+  } catch (e) { if (e?.name === 'AbortError') return false; console.warn('share', e); }
+  download(blob, name);
+  return 'downloaded';
+}
+async function helperToSend() {
+  const sent = await meta.get('helperSent', {});
+  return helperBoxes(await allRecs()).map(b => ({ ...b, sent: sent[b.label] || null, state: !sent[b.label] ? 'new' : sent[b.label].signature === b.signature ? 'sent' : 'changed' }));
+}
+async function refreshHelperStatus() {
+  const pill = $('#status');
+  let n = 0; try { n = (await helperToSend()).filter(b => b.state !== 'sent').length; } catch {}
+  pill.textContent = n ? `Helper · ${plural(n, 'box', 'boxes')} to send` : 'Helper mode';
+  pill.style.color = `var(--${n ? 'warn' : 'ok'})`;
+  pill.setAttribute('aria-label', `${pill.textContent}. Tap to send.`);
+}
+function helperBanner() {
+  return h('div', { class: 'banner info helperbanner' }, h('div', { class: 'hd' }, 'Helper mode'),
+    h('div', {}, `You're cataloguing for the owner. Their cars are here so you can spot ones they already have. Fill a box, then send it from the Send tab.`));
+}
+
+// ---------- owner: the lookup file ----------
+async function exportForHelper(btn) {
+  btn.disabled = true; btn.textContent = 'Making the file…';
+  try {
+    const tables = {}; for (const e of LOOKUP_ENTITIES) tables[e] = await store.list(e);
+    const L = buildLookup(tables);
+    const files = [], made = store.nowIso();
+    let withPhoto = 0;
+    for (const id of L.photoIds) {
+      const b = await blobs.get(`${id}:thumb`);
+      if (b) { files.push({ name: photoPath(id, 'thumb'), bytes: new Uint8Array(await b.arrayBuffer()) }); withPhoto++; }
+    }
+    const manifest = { kind: LOOKUP_KIND, format: HELPER_FORMAT, app_version: APP_VERSION, made_at: made, cars: L.tables.models.length, photos: withPhoto };
+    files.unshift({ name: 'manifest.json', text: JSON.stringify(manifest) }, { name: 'lookup.json', text: JSON.stringify(L.tables) });
+    const blob = new Blob([zip(files)], { type: 'application/zip' });
+    await meta.set('helperLookupMade', { at: made, cars: manifest.cars, photos: withPhoto, bytes: blob.size });
+    const how = await shareOrDownload(blob, `Garage helper file ${stamp()}.zip`, 'Scale Model Garage: file for your helper');
+    if (how) toast(`Helper file ready ✓ ${plural(manifest.cars, 'car', 'cars')}, ${withPhoto} with a photo · ${mb(blob.size)}`, 4500);
+  } catch (e) { toast(`Couldn't make the helper file: ${e.message}`, 4500, 'bad'); }
+  route();
+}
+async function helperCard() {
+  const made = await meta.get('helperLookupMade', null);
+  const link = new URL('#/helper', location.href.split('#')[0]).href;
+  return h('div', { class: 'card helpercard' }, h('h3', {}, 'Helper'),
+    h('p', { class: 'muted' }, 'Someone helping you catalogue, on their own phone. They never sign in or see prices: they get a file of what you own (names, codes, barcodes, small box photos) to spot duplicates, and send you one file per storage box.'),
+    h('ol', { class: 'steps small' },
+      h('li', {}, 'Make the helper file just before you hand over (it\'s a snapshot) and send it to them.'),
+      h('li', {}, 'They open the helper link on their phone and load the file.'),
+      h('li', {}, 'Split the work by box number, so nobody does the same car twice.'),
+      h('li', {}, 'When they send a box, import it here and check it.')),
+    h('button', { type: 'button', class: 'wide', onclick: (e) => exportForHelper(e.target) }, 'Make the file for a helper'),
+    made ? h('p', { class: 'muted small' }, `Last made ${new Date(made.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${plural(made.cars, 'car', 'cars')} · ${mb(made.bytes)}`) : null,
+    h('div', { class: 'row', style: 'margin-top:8px' }, h('code', { class: 'helperlink' }, link),
+      h('button', { type: 'button', class: 'quiet small', onclick: async () => toast(await copyText(link) ? 'Helper link copied ✓' : 'Copy the link by hand', 2500, 'ok') }, 'Copy link')),
+    h('a', { href: '#/inbox', class: 'btn ghost wide', style: 'margin-top:10px' }, "Import a helper's boxes…"));
+}
+
+// ---------- helper: loading the owner's file ----------
+async function phoneHasOwnGarage() {
+  if (await getConfig()) return true;
+  return (await store.listRecords('models')).some(r => !r.lookup);
+}
+async function loadLookup(file) {
+  const files = unzip(new Uint8Array(await file.arrayBuffer()));
+  const man = JSON.parse(fileText(files, 'manifest.json') || 'null');
+  if (man?.kind === INBOX_KIND) throw new Error('This is a box file from a helper. The owner imports it in Settings → Helper.');
+  if (man?.kind !== LOOKUP_KIND) throw new Error('This is not a helper file from Scale Model Garage');
+  if (man.format > HELPER_FORMAT) throw new Error('This file is from a newer app version. Reopen the app to update it, then try again.');
+  const tables = JSON.parse(fileText(files, 'lookup.json'));
+  // A newer file replaces the older one; what the helper made is never touched
+  const old = (await allRecs()).filter(r => r.lookup && !r.dirty);
+  await records.removeMany(old);
+  const recs = [];
+  for (const [entity, rows] of Object.entries(tables)) {
+    if (!LOOKUP_ENTITIES.includes(entity)) continue;
+    const idCol = TABS[Object.keys(TABS).find(k => TABS[k].entity === entity)].id;
+    for (const row of rows) recs.push({ key: `${entity}:${row[idCol]}`, entity, id: row[idCol], data: { ...store.blank(entity), ...row }, dirty: 0, lookup: true, sync: { base: null } });
+  }
+  await records.putMany(recs);
+  let photos = 0;
+  for (const f of files) { const m = /^photos\/(pho_[^-]+)-thumb\.jpg$/.exec(f.name); if (m) { await blobs.put(`${m[1]}:thumb`, new Blob([f.bytes], { type: 'image/jpeg' })); photos++; } }
+  helperInfo = { made_at: man.made_at, cars: man.cars, photos, loaded_at: store.nowIso(), app_version: man.app_version };
+  await meta.set('helper', helperInfo);
+  urlCache.clear(); store.notifyChange(); applyHelperLook();
+  return helperInfo;
+}
+function lookupPicker(after) {
+  const inp = h('input', { type: 'file', accept: '.zip,application/zip', hidden: true, onchange: async (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    try { const i = await loadLookup(f); toast(`Loaded ✓ ${plural(i.cars, 'car', 'cars')} from the owner's garage`, 3500); after(); }
+    catch (err) { toast(err.message, 5000, 'bad'); }
+  } });
+  return [inp, () => inp.click()];
+}
+async function renderHelperStart(v) {
+  v.append(h('h2', {}, 'Helper mode'));
+  if (helperInfo) { v.append(h('p', {}, 'This phone is already in Helper mode.'), h('a', { href: '#/settings', class: 'btn wide' }, 'Go to Send')); return; }
+  if (await phoneHasOwnGarage()) {
+    v.append(h('div', { class: 'banner bad' }, h('div', { class: 'hd' }, 'This phone has its own garage'),
+      h('div', {}, 'Helper mode is for a helper\'s phone. To help someone, use a phone that hasn\'t been set up with a garage.')), h('a', { href: '#/', class: 'back' }, '← Garage'));
+    return;
+  }
+  const [inp, pickFile] = lookupPicker(() => { location.hash = '#/'; });
+  v.append(h('p', {}, 'You\'re helping someone catalogue their scale model collection.'),
+    h('ol', { class: 'steps' },
+      h('li', {}, h('b', {}, 'Load the file'), ' the owner sent you (a .zip). It shows what they already own, so you can spot duplicates. Nothing is uploaded and you don\'t sign in.'),
+      h('li', {}, h('b', {}, 'Fill a storage box: '), 'Garage → tap the box → Fill box. Take the box front and back for each car.'),
+      h('li', {}, h('b', {}, 'Send the box'), ' from the Send tab when it\'s done. Send each box when you finish it, so nothing is lost.')),
+    h('p', { class: 'muted small' }, 'Tip: install this page on your home screen (browser menu → Install app / Add to Home Screen) so it opens like an app.'),
+    inp, h('button', { type: 'button', class: 'wide', onclick: pickFile }, "Load the owner's file"));
+}
+
+// ---------- helper: the Send tab ----------
+async function sendBox(b, btn) {
+  btn.disabled = true; btn.textContent = 'Packing…';
+  try {
+    const recs = await allRecs();
+    const part = boxRecords(recs, b.label);
+    const files = [];
+    for (const id of part.photoIds) for (const variant of PHOTO_VARIANTS) {
+      const blob = await blobs.get(`${id}:${variant}`);
+      if (blob) files.push({ name: photoPath(id, variant), bytes: new Uint8Array(await blob.arrayBuffer()) });
+    }
+    const manifest = { kind: INBOX_KIND, format: HELPER_FORMAT, app_version: APP_VERSION, made_at: store.nowIso(), box: b.label, helper_device: store.deviceId(), cars: b.cars, copies: b.copies, photos: part.photoIds.length };
+    files.unshift({ name: 'manifest.json', text: JSON.stringify(manifest) }, { name: 'records.json', text: JSON.stringify(part.records) });
+    const blob = new Blob([zip(files)], { type: 'application/zip' });
+    const safe = (b.label || 'no box').replace(/[^\w -]+/g, '').trim();
+    const how = await shareOrDownload(blob, `Garage helper ${safe} ${stamp()}.zip`, `Scale Model Garage: ${boxTitle(b.label)}`);
+    if (!how) { toast('Not sent', 2000, 'warn'); route(); return; }
+    const sent = await meta.get('helperSent', {});
+    sent[b.label] = { signature: part.signature, at: store.nowIso(), bytes: blob.size, how };
+    await meta.set('helperSent', sent);
+    toast(how === 'shared' ? `${boxTitle(b.label)} shared ✓ ${mb(blob.size)}` : `${boxTitle(b.label)} saved to Downloads ✓ ${mb(blob.size)}: send it to the owner`, 4500);
+  } catch (e) { toast(`Couldn't pack ${boxTitle(b.label)}: ${e.message}`, 5000, 'bad'); }
+  route();
+}
+async function renderHelperHome(v) {
+  v.append(h('h2', {}, 'Send to the owner'));
+  const boxes = await helperToSend();
+  const todo = boxes.filter(b => b.state !== 'sent');
+  const when = (iso) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  if (!boxes.length) v.append(h('div', { class: 'card' }, h('p', {}, 'Nothing to send yet.'), h('p', { class: 'muted' }, 'Fill a box first: Garage → tap a box → Fill box.')));
+  else {
+    v.append(h('p', { class: 'muted' }, todo.length ? `${plural(todo.length, 'box', 'boxes')} to send. Send each box when it's done.` : 'Everything you made has been sent ✓'));
+    for (const b of boxes) {
+      const extra = b.copies - b.cars;
+      v.append(h('div', { class: `card sendbox ${b.state}` },
+        h('div', { class: 'row', style: 'justify-content:space-between' }, h('b', {}, boxTitle(b.label)),
+          h('span', { class: `pillish ${b.state}` }, b.state === 'sent' ? `Sent ✓ ${when(b.sent.at)}` : b.state === 'changed' ? 'Changed since you sent it' : 'Not sent yet')),
+        h('p', { class: 'muted small', style: 'margin:4px 0 8px' }, [plural(b.cars, 'new car', 'new cars'), extra > 0 ? plural(extra, 'extra copy', 'extra copies') : '', plural(b.photos, 'photo', 'photos')].filter(Boolean).join(' · ')),
+        h('button', { type: 'button', class: b.state === 'sent' ? 'quiet wide' : 'wide', onclick: (e) => sendBox(b, e.target) }, b.state === 'sent' ? 'Send again' : `Send ${boxTitle(b.label)}`)));
+    }
+  }
+  const est = await storageEstimate();
+  const persisted = await (navigator.storage?.persisted?.() ?? Promise.resolve(false));
+  v.append(h('div', { class: 'card' }, h('h3', {}, 'This phone'),
+    h('dl', { class: 'kv' },
+      h('dt', {}, "Owner's file"), h('dd', {}, helperInfo?.made_at ? `made ${when(helperInfo.made_at)} · ${plural(helperInfo.cars || 0, 'car', 'cars')}` : '—'),
+      h('dt', {}, 'Storage used'), h('dd', {}, est ? `${mb(est.usage)} of ${(est.quota / 1073741824).toFixed(1)} GB` : '—'),
+      h('dt', {}, 'Protected storage'), h('dd', {}, persisted ? 'Yes ✓' : 'No'),
+      h('dt', {}, 'App version'), h('dd', {}, APP_VERSION)),
+    persisted ? null : h('button', { class: 'quiet', style: 'margin-top:8px', onclick: async () => { const ok = await requestPersistentStorage(); toast(ok ? 'Storage protected ✓' : 'The browser said no (try after installing the app)', 3500, ok ? 'ok' : 'warn'); route(); } }, 'Protect storage on this phone')));
+  const [inp, pickFile] = lookupPicker(() => route());
+  v.append(h('div', { class: 'card' }, h('h3', {}, 'Newer file from the owner'),
+    h('p', { class: 'muted' }, 'If the owner sends you a newer file, load it here. What you made stays.'), inp,
+    h('button', { type: 'button', class: 'quiet wide', onclick: pickFile }, 'Load a newer file')));
+  v.append(h('div', { class: 'card' }, h('h3', {}, 'Finished helping?'),
+    todo.length ? h('p', { class: 'muted' }, `Send ${todo.length === 1 ? 'the last box' : `the ${todo.length} boxes`} first. Leaving Helper mode clears everything on this phone.`)
+      : h('p', { class: 'muted' }, 'Leaving Helper mode clears the owner\'s file and your photos from this phone.'),
+    h('button', { type: 'button', class: 'ghost wide', disabled: todo.length ? true : undefined, onclick: async () => {
+      if (!confirm('Leave Helper mode?\n\nEverything on this phone (the owner\'s file and your photos) is cleared. Everything you made was sent.')) return;
+      await records.clearAll(); try { localStorage.clear(); } catch {}
+      helperInfo = null; location.hash = '#/'; location.reload();
+    } }, 'Leave Helper mode')));
+}
+// The owner's car, seen on the helper's phone: look, don't touch; ＋1 adds a copy the owner will check.
+async function renderLookupItem(v, modelId) {
+  const m = await store.get('models', modelId);
+  const ref = await refData();
+  const inv = (await store.listRecords('inventory')).filter(r => r.data.model_id === modelId && !r.data.deleted_at);
+  const photos = (await store.list('photos')).filter(p => p.model_id === modelId);
+  const idfs = (await store.list('product_identifiers')).filter(i => i.model_id === modelId);
+  const brandN = ref.brands.find(b => b.brand_id === m.brand_id)?.name || m.printed_brand_text || '';
+  const scaleN = ref.scales.find(x => x.scale_id === m.scale_id)?.label || '';
+  v.append(h('a', { href: '#/', class: 'back' }, '← Garage'),
+    h('div', { class: 'pdp-head' }, h('div', { class: 'pdp-kicker' }, [brandN, scaleN].filter(Boolean).join(' · ') || 'Brand and scale not set'), h('h2', {}, m.display_name || '(no name yet)'),
+      m.product_code ? h('div', { class: 'muted' }, m.product_code) : null));
+  const url = await photoUrl(photos.find(p => p.photo_id === m.primary_photo_id) || photos[0]);
+  if (url) v.append(h('div', { class: 'pdp-photo' }, h('img', { src: url, alt: m.display_name || 'Box front' })));
+  const mine = inv.filter(r => !r.lookup), theirs = inv.filter(r => r.lookup);
+  const where = [...new Set(theirs.map(r => r.data.storage_location || 'no box'))].join(', ');
+  v.append(h('div', { class: 'banner have' }, h('div', { class: 'hd' }, `The owner has ${plural(theirs.length, 'copy', 'copies')}`), h('div', {}, where ? `In ${where}.` : ''),
+    idfs.filter(i => i.identifier_type === 'barcode').length ? h('div', { class: 'muted small' }, `Barcode ${idfs.filter(i => i.identifier_type === 'barcode').map(i => i.value_raw).join(', ')}`) : null,
+    mine.length ? h('div', { style: 'margin-top:6px' }, `You added ${plural(mine.length, 'more copy', 'more copies')}: ${mine.map(r => r.data.storage_location || 'no box').join(', ')}`) : null));
+  const boxIn = h('input', { inputmode: 'numeric', value: cap?.box || '', placeholder: 'Box number', 'aria-label': 'Box number for the extra copy', style: 'max-width:9rem' });
+  v.append(h('div', { class: 'card' }, h('h3', {}, 'Found another one of these?'),
+    h('p', { class: 'muted' }, 'Add it as an extra copy. The owner checks it when they import your box.'),
+    h('div', { class: 'row' }, boxIn, h('button', { type: 'button', onclick: async () => {
+      const b = String(boxIn.value || '').replace(/^box\s*/i, '').trim();
+      if (!b) { toast('Which box is it going in?', 2500, 'warn'); return; }
+      await store.create('inventory', { model_id: modelId, ownership_status: 'Owned', storage_location: boxLoc(b), packaging_state: '', purchase_date_precision: 'unknown' });
+      toast(`＋1 copy in Box ${b} ✓ Send Box ${b} when it's done`, 3500); route();
+    } }, '＋1 copy')),
+    h('p', { class: 'muted small' }, "This car is in the owner's garage, so it can't be changed here.")));
+}
+
+// ---------- owner: importing a helper's boxes ----------
+async function readInbox(fileList) {
+  const pkgs = [], photoFiles = new Map(), seen = new Set(), records0 = [];
+  for (const f of fileList) {
+    const files = unzip(new Uint8Array(await f.arrayBuffer()));
+    const man = JSON.parse(fileText(files, 'manifest.json') || 'null');
+    if (man?.kind === LOOKUP_KIND) throw new Error(`${f.name} is the file you made for your helper, not a box from them.`);
+    if (man?.kind !== INBOX_KIND) throw new Error(`${f.name} is not a helper box file from Scale Model Garage`);
+    if (man.format > HELPER_FORMAT) throw new Error(`${f.name} is from a newer app version. Reopen the app to update it.`);
+    let list = []; try { list = JSON.parse(fileText(files, 'records.json') || '[]'); } catch { throw new Error(`${f.name} is damaged (records can't be read)`); }
+    for (const raw of Array.isArray(list) ? list : []) {
+      const r = cleanInboxRecord(raw, (e) => Object.keys(store.blank(e)), isId); // only what a box file may carry, known columns only
+      if (!r) continue;
+      const k = `${r.entity}:${Object.values(r.data)[0]}`; if (seen.has(k)) continue; seen.add(k); records0.push(r);
+    }
+    for (const x of files) if (x.name.startsWith('photos/')) photoFiles.set(x.name, x.bytes);
+    pkgs.push({ name: f.name, manifest: man });
+  }
+  const live = {};
+  for (const e of ['models', 'product_identifiers', 'inventory', 'brands', 'product_lines', 'storage_boxes', 'photos', 'aliases']) live[e] = await store.list(e, { includeDeleted: e === 'inventory' || e === 'photos' });
+  return { pkgs, photoFiles, plan: planImport({ records: records0 }, live) };
+}
+async function renderInbox(v) {
+  v.append(h('a', { href: '#/settings', class: 'back' }, '← Settings'), h('h2', {}, "Import a helper's boxes"));
+  if (helperInfo) { v.append(h('p', {}, 'Not on a helper\'s phone: the owner imports boxes.')); return; }
+  const pick = h('input', { type: 'file', accept: '.zip,application/zip', multiple: true, hidden: true, onchange: async (e) => {
+    const fl = [...(e.target.files || [])]; if (!fl.length) return;
+    try { inboxState = await readInbox(fl); } catch (err) { toast(err.message, 5000, 'bad'); }
+    route();
+  } });
+  if (!inboxState) {
+    v.append(h('p', { class: 'muted' }, 'Pick the box files your helper sent you (one or several). Nothing goes into your garage until you check it and tap Import.'), pick,
+      h('button', { type: 'button', class: 'wide', onclick: () => pick.click() }, 'Pick helper box files'));
+    return;
+  }
+  const { pkgs, photoFiles, plan } = inboxState;
+  const ref = await refData();
+  const models = await store.list('models');
+  const nameOf = (id) => { const m = models.find(x => x.model_id === id); return m ? (m.display_name || m.product_code || 'a car with no name yet') : 'a car'; };
+  const brandName = (id) => ref.brands.find(b => b.brand_id === id)?.name || plan.brands.find(b => b.create && b.data.brand_id === id)?.name || '';
+  const urls = new Map();
+  const thumbOf = (row) => { const p = row.photos.find(x => x.shot_role === 'box_front') || row.photos[0]; if (!p) return null;
+    const bytes = photoFiles.get(photoPath(p.photo_id, 'thumb')) || photoFiles.get(photoPath(p.photo_id, 'display')); if (!bytes) return null;
+    if (!urls.has(p.photo_id)) urls.set(p.photo_id, URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }))); return urls.get(p.photo_id); };
+  v.append(h('p', { class: 'muted' }, `${plural(pkgs.length, 'file', 'files')}: ${pkgs.map(p => boxTitle(p.manifest.box)).join(', ')}`));
+  const newBrands = plan.brands.filter(b => b.create), sameBrands = plan.brands.filter(b => b.use);
+  if (newBrands.length || sameBrands.length) v.append(h('div', { class: 'banner info' },
+    newBrands.length ? h('div', {}, `New brand${newBrands.length > 1 ? 's' : ''} from your helper: ${newBrands.map(b => b.name).join(', ')} (added only if you import a car that uses it; shown under Needs review to check).`) : null,
+    sameBrands.length ? h('div', {}, `Matched to your brands: ${sameBrands.map(b => `${b.name} → ${b.use}`).join(', ')}.`) : null));
+  const STATUS = { new: ['New car', 'new'], possible: ['Might be one you have', 'warn'], duplicate: ['You already have this', 'have'], copy: ['Another copy of your car', 'have'], already: ['Already imported', 'muted'], missing: ["Its car isn't in your garage any more", 'muted'] };
+  const list = h('div', { class: 'inboxlist' });
+  const count = () => plan.rows.filter(r => r.choice !== 'skip').length;
+  const goBtn = h('button', { type: 'button', class: 'wide' });
+  const setGo = () => { const n = count(); goBtn.textContent = n ? `Import ${plural(n, 'car', 'cars')}` : 'Nothing chosen to import'; goBtn.disabled = !n || undefined; };
+  for (const row of plan.rows) {
+    const [label, cls] = STATUS[row.status];
+    const m = row.model;
+    const title = row.kind === 'copy' ? nameOf(row.target) : (m.display_name || m.product_code || '(no name yet)');
+    const sub = [row.kind === 'copy' ? brandName(models.find(x => x.model_id === row.target)?.brand_id) : brandName(m.brand_id), row.kind === 'car' ? m.product_code : '', row.box, row.inventory.length > 1 ? `×${row.inventory.length}` : ''].filter(Boolean).join(' · ');
+    const why = row.status === 'duplicate' ? `Same code as your ${nameOf(row.target)}.` : row.status === 'possible' ? `Like your ${nameOf(row.target)} (${row.dup.possible[0].reason}).` : row.status === 'copy' ? 'Your helper marked it as another copy.' : '';
+    const chips = h('div', { class: 'chips' });
+    const drawChips = () => {
+      const opts = row.status === 'already' || row.status === 'missing' ? [] : row.kind === 'copy' ? [['copy', 'Add copy'], ['skip', 'Skip']]
+        : [['new', 'Add as a new car'], ...(row.target ? [['copy', `Copy of your ${nameOf(row.target)}`]] : []), ['skip', 'Skip']];
+      chips.replaceChildren(...opts.map(([k, t]) => h('button', { type: 'button', class: `chip ${row.choice === k ? 'on' : ''}`, 'aria-pressed': row.choice === k ? 'true' : 'false', onclick: () => { row.choice = k; drawChips(); setGo(); } }, t)));
+    };
+    drawChips();
+    const img = thumbOf(row);
+    list.append(h('div', { class: `card inboxrow ${row.status}` },
+      h('div', { class: 'row', style: 'align-items:flex-start;flex-wrap:nowrap' },
+        img ? h('img', { src: img, alt: '', class: 'inboxthumb' }) : h('div', { class: 'inboxthumb none' }),
+        h('div', { style: 'flex:1;min-width:0' }, h('b', {}, title), h('div', { class: 'muted small' }, sub), h('div', { class: `small st-${cls}`, style: 'font-weight:700;margin-top:2px' }, label), why ? h('div', { class: 'muted small' }, why) : null)),
+      chips));
+  }
+  v.append(list);
+  goBtn.onclick = async () => {
+    goBtn.disabled = true; goBtn.textContent = 'Importing…';
+    try {
+      const out = applyPlan(plan);
+      await store.importRecords(out.records);
+      let pics = 0;
+      for (const id of out.photoIds) for (const variant of PHOTO_VARIANTS) {
+        const bytes = photoFiles.get(photoPath(id, variant));
+        if (bytes) { await blobs.put(`${id}:${variant}`, new Blob([bytes], { type: 'image/jpeg' })); if (variant === 'original') pics++; }
+      }
+      const boxes = pkgs.map(p => boxTitle(p.manifest.box)).join(', ');
+      for (const r of out.records.filter(x => x.entity === 'models' || x.entity === 'inventory')) await store.logChange(r.entity, r.data[r.entity === 'models' ? 'model_id' : 'inventory_id'], 'created', '', 'imported from helper', `helper box file: ${boxes}`);
+      urls.forEach(u => URL.revokeObjectURL(u)); inboxState = null;
+      toast(`Imported ✓ ${plural(out.cars, 'new car', 'new cars')}, ${plural(out.copies, 'copy', 'copies')}, ${plural(pics, 'photo', 'photos')} · syncing`, 4500);
+      autoSyncSoon(); location.hash = '#/';
+    } catch (e) { toast(`Import failed: ${e.message}. Nothing was lost; try again.`, 5000, 'bad'); setGo(); }
+  };
+  setGo();
+  v.append(h('div', { class: 'savebar' }, goBtn), h('button', { type: 'button', class: 'ghost wide', style: 'margin-top:8px', onclick: () => { urls.forEach(u => URL.revokeObjectURL(u)); inboxState = null; route(); } }, 'Cancel'));
+}
+
 // ---------- start ----------
 async function start() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
   requestPersistentStorage();
   await seedLocal();
-  $('#status').addEventListener('click', () => runSync(true));
+  helperInfo = await meta.get('helper', null);
+  applyHelperLook();
+  $('#status').addEventListener('click', () => { if (helperInfo) location.hash = '#/settings'; else runSync(true); });
   setInterval(refreshStatus, 30_000); // sign-in expiry has no event of its own
   window.addEventListener('hashchange', route);
   window.addEventListener('online', () => { refreshStatus(); autoSyncSoon(); });

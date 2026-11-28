@@ -112,4 +112,17 @@ export async function logChange(entity, recordId, field, oldValue, newValue, rea
   return create('change_log', { entity, record_id: recordId, field, old_value: String(oldValue ?? ''), new_value: String(newValue ?? ''), reason, changed_at: nowIso() });
 }
 
+// Helper mode (D32): rows from a helper's inbox file keep their own IDs, dates and device, so importing the same
+// file twice finds them again; they are marked changed so the next sync sends them to the Sheet.
+export async function importRecords(items) {
+  const recs = items.map(({ entity, data }) => {
+    const idCol = idColOfEntity(entity);
+    const d = { ...blank(entity), ...data };
+    return { key: `${entity}:${d[idCol]}`, entity, id: d[idCol], data: d, dirty: 1, sync: { base: null } };
+  });
+  await records.putMany(recs);
+  emit();
+  return recs.length;
+}
+
 export { emit as notifyChange };
