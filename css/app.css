@@ -887,3 +887,9 @@ body.helper #navname, body.helper .card.purchases, body.helper .moneyblk { displ
 .inboxrow .chips { margin-top: 10px; }
 .inboxrow.already, .inboxrow.missing { opacity: .6; }
 .st-new { color: var(--ok); } .st-warn { color: var(--warn); } .st-have { color: var(--accent); } .st-muted { color: var(--muted); }
+
+/* s1-0.57.0 (B, 28 Nov: "the status obscures any interaction"): messages and moments never block a tap.
+   Messages sit at the top under the header, below a moment if one is playing, away from the buttons. */
+.moment { pointer-events: none; }
+.toast { pointer-events: none; top: calc(66px + env(safe-area-inset-top)); bottom: auto; }
+body:has(.m-drive) .toast, body:has(.m-pack) .toast { top: calc(66px + 84px + env(safe-area-inset-top)); }

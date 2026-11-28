@@ -29,7 +29,7 @@ import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from '
 import { LOOKUP_KIND, INBOX_KIND, FORMAT as HELPER_FORMAT, LOOKUP_ENTITIES, buildLookup, helperBoxes, boxRecords, planImport, applyPlan, unzip, fileText, photoPath, PHOTO_VARIANTS, cleanInboxRecord } from './helper.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.56.0';
+export const APP_VERSION = 's1-0.57.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -1348,6 +1348,7 @@ async function saveDraft() {
   if (!cap) return;
   const photos = {};
   for (const [role, p] of Object.entries(cap.photos)) {
+    if (!p.prep) continue; // still being prepared: stored when ready
     if (!p.draftStored) { for (const v of DRAFT_VARIANTS) await blobs.put(`draft:${p.photoId}:${v}`, p.prep[v]); p.draftStored = true; }
     photos[role] = { photoId: p.photoId, capturedAt: p.capturedAt, info: Object.fromEntries(PHOTO_INFO.map(k => [k, p.prep[k]])) };
   }
@@ -1591,25 +1592,51 @@ async function takeCapPhoto(role, say = () => {}) {
   const [f] = await pickPhoto({ camera: true });
   if (!f) return false;
   capTouch();
-  say('Preparing photo…');
-  try {
-    const prep = await preparePhoto(f);
-    const old = cap.photos[role];
-    if (old?.url) URL.revokeObjectURL(old.url);
-    if (old?.draftStored) await dropDraftPhoto(old.photoId);
-    cap.photos[role] = { photoId: newId('photos'), prep, url: URL.createObjectURL(prep.thumb), capturedAt: new Date().toISOString() };
-    // The rear of the box usually carries the barcode: try to read it from the photo just taken (audit C2).
-    // A scanned or typed barcode is never overwritten.
-    if (role === 'box_rear' && (!cap.barcode || cap.barcode.source === 'rear_photo')) {
-      say('Looking for a barcode in the photo…');
-      try {
-        const r = await scanPhoto(f);
-        if (r) { const raw = String(r.value).trim(); cap.barcode = { raw, cmp: barcodeCmp(raw), format: r.format, source: 'rear_photo', checkOk: gtinCheckOk(raw) }; }
-      } catch (e) { console.warn('barcode from rear photo:', e); }
+  // s1-0.57.0 (B, 28 Nov: "it freezes on the old screen before the photo appears"): the photo shows at once and the
+  // next button is ready; the copies, the fingerprint (md5) and the barcode reading run in the background.
+  // Saving the car waits for them (capReady), so nothing is skipped.
+  const old = cap.photos[role];
+  if (old?.url) URL.revokeObjectURL(old.url);
+  if (old?.draftStored) await dropDraftPhoto(old.photoId);
+  const entry = { photoId: newId('photos'), prep: null, url: URL.createObjectURL(f), capturedAt: new Date().toISOString() };
+  const t0 = performance.now(), mine = cap;
+  cap.photos[role] = entry;
+  entry.ready = (async () => {
+    try {
+      entry.prep = await preparePhoto(f);
+      const prepMs = performance.now() - t0;
+      // The barcode close-up usually carries the barcode: read it (audit C2). A scanned or typed barcode is never overwritten.
+      let found = false;
+      if (role === 'box_rear' && mine === cap && cap.photos[role] === entry && (!cap.barcode || cap.barcode.source === 'rear_photo')) {
+        try {
+          const r = await scanPhoto(f);
+          if (r && cap.photos[role] === entry) { const raw = String(r.value).trim(); cap.barcode = { raw, cmp: barcodeCmp(raw), format: r.format, source: 'rear_photo', checkOk: gtinCheckOk(raw) }; found = true; }
+        } catch (e) { console.warn('barcode from rear photo:', e); }
+      }
+      if (mine === cap && cap.photos[role] === entry) await saveDraft();
+      logPhotoTiming(role, prepMs, performance.now() - t0);
+      if (found && location.hash.startsWith('#/add')) route(); // Quick capture shows the barcode it read
+    } catch (e) {
+      if (cap.photos[role] === entry) { delete cap.photos[role]; URL.revokeObjectURL(entry.url); }
+      toast(`Could not read that photo: ${e.message}. Please take it again.`, 4500, 'bad'); route();
+      throw e;
     }
-    await saveDraft();
-    return true;
-  } catch (e) { say(`Could not read that photo: ${e.message}`); return false; }
+  })();
+  entry.ready.catch(() => {});
+  return true;
+}
+// Every photo of the box in progress is fully prepared (copies, md5, barcode). Throws if one couldn't be read.
+async function capReady() {
+  const pend = Object.values(cap?.photos || {}).filter(p => p.ready && !p.prep).map(p => p.ready);
+  if (pend.length) await Promise.all(pend);
+}
+// Photo timing (s1-0.57.0): the last few photos, shown in Settings → This phone, so a slow phone can be measured.
+function logPhotoTiming(role, prepMs, totalMs) {
+  try {
+    const list = JSON.parse(localStorage.getItem('smg.photoTiming') || '[]');
+    list.unshift({ role, prep: Math.round(prepMs), total: Math.round(totalMs), at: Date.now() });
+    localStorage.setItem('smg.photoTiming', JSON.stringify(list.slice(0, 10)));
+  } catch {}
 }
 
 // =====================================================================
@@ -1697,10 +1724,10 @@ async function renderRun(v) {
   // Extra sides (B, 28 Nov): optional photos of the car just saved, before the next car is started
   if (runLast && !Object.keys(cap.photos).length && !cap.runDecision) v.append(h('div', { class: 'card extras' },
     h('div', { class: 'small', style: 'font-weight:700' }, `＋ Another side of ${runLast.label}? (optional)`),
-    h('div', { class: 'muted small', style: 'margin:2px 0 8px' }, 'Only if it shows something new: a car name, a code, damage. Any photo can supply a missing barcode.'),
+    h('div', { class: 'muted small', style: 'margin:2px 0 8px' }, 'Only if it shows something new: a car name, a code, damage. Plain box with just a logo? Take "Car inside": it becomes the main photo. Any photo can supply a missing barcode.'),
     h('div', { class: 'chips' }, EXTRA_SIDES.map(([role, label]) => h('button', { type: 'button', class: 'chip', onclick: async (e) => {
       e.currentTarget.disabled = true;
-      try { const r = await addSidePhoto(runLast.id, role); if (r) { runLast.extras = (runLast.extras || 0) + 1; toast(`${label} added to ${runLast.label}${r.barcode ? ` · barcode ${r.barcode} read ✓` : ''}`, 3500); } }
+      try { const r = await addSidePhoto(runLast.id, role); if (r) { runLast.extras = (runLast.extras || 0) + 1; toast(`${label} added to ${runLast.label}${role === 'car_inside' ? ' · now its main photo' : ''}${r.barcode ? ` · barcode ${r.barcode} read ✓` : ''}`, 3500); } }
       catch (err) { toast(`Photo not added: ${err.message}`, 4000, 'bad'); }
       route();
     } }, icon('camera'), label))),
@@ -1776,7 +1803,7 @@ async function renderRun(v) {
     v.append(h('button', { class: 'wide runshot', onclick: async () => { runSetOpen = false; if (await takeCapPhoto(next, (t) => { say.textContent = t; })) await afterRunPhoto(); } }, icon('camera'), SHOT_ROLES[next].label));
     if (next === 'box_art') v.append(h('button', { class: 'wide ghost', style: 'margin-top:8px', onclick: async () => { cap.artSkipped = true; await afterRunPhoto(); } }, 'Skip box art'));
   } else {
-    v.append(runSaving ? h('button', { class: 'wide', disabled: true, 'aria-busy': 'true' }, 'Saving…') : h('button', { class: 'wide', onclick: () => afterRunPhoto() }, 'Save this car'));
+    v.append(runSaving ? h('button', { class: 'wide', disabled: true, 'aria-busy': 'true' }, 'Saving…') : Object.values(cap.photos).some(p => !p.prep) ? h('button', { class: 'wide', disabled: true, 'aria-busy': 'true' }, 'Reading the photo…') : h('button', { class: 'wide', onclick: () => afterRunPhoto() }, 'Save this car'));
   }
   if (runLast) v.append(h('button', { class: 'wide quiet plusone', style: 'margin-top:10px', onclick: async () => {
     const { n, box } = await addCopy(runLast.id); runLast.copies = n; // same box as the car just saved
@@ -1792,6 +1819,7 @@ async function renderRun(v) {
   async function afterRunPhotoInner() {
     const need = ['box_front', 'box_rear', ...(cap.sealed && !cap.artSkipped ? ['box_art'] : [])];
     if (need.some(r => !cap.photos[r])) { route(); return; }
+    if (Object.values(cap.photos).some(p => !p.prep)) { route(); try { await capReady(); } catch { return; } } // shows the photo, then finishes reading it
     if ((perCar && !cap.brandId) || (scalePer && !cap.scaleId)) { route(); return; } // ask what the box doesn't decide
     const [models, ids] = await Promise.all([store.list('models'), store.list('product_identifiers')]);
     const ns = assignNamespace(ref.brands.find(b => b.brand_id === cap.brandId) || brand, null);
@@ -1801,7 +1829,7 @@ async function renderRun(v) {
   }
 }
 // Extra sides (s1-0.56.0, B 28 Nov): beyond the two required photos, only when a side shows something new.
-const EXTRA_SIDES = [['box_back', 'Back'], ['box_bottom', 'Bottom'], ['box_top', 'Top'], ['box_side', 'End'], ['detail', 'Damage']];
+const EXTRA_SIDES = [['car_inside', 'Car inside'], ['box_back', 'Back'], ['box_bottom', 'Bottom'], ['box_top', 'Top'], ['box_side', 'End'], ['detail', 'Damage']];
 async function addSidePhoto(modelId, role) {
   const [f] = await pickPhoto({ camera: true }); if (!f) return null;
   const prep = await preparePhoto(f);
@@ -1809,6 +1837,8 @@ async function addSidePhoto(modelId, role) {
   const items = await savePhotoRecords(modelId, { [role]: { photoId, prep, capturedAt: new Date().toISOString() } });
   items[0].fields.is_primary = 'no';
   await store.createMany(items);
+  // A plain box (logo only, no picture of the car): the car itself becomes the main photo (B, 28 Nov)
+  if (role === 'car_inside') { await store.update('models', modelId, { primary_photo_id: photoId }); await store.logChange('models', modelId, 'primary_photo_id', '', photoId, 'car inside the box made the main photo'); }
   const barcode = await barcodeFromPhoto(modelId, f, photoId, role);
   autoSyncSoon();
   return { photoId, barcode };
@@ -1967,13 +1997,14 @@ async function photoFileFor(p, name) {
   if (!b) b = await blobs.get(`${p.photo_id}:thumb`);
   return b ? new File([b], name, { type: 'image/jpeg' }) : null;
 }
-const aiCombine = () => localStorage.getItem('smg.aiCombine') === '1';
+// Combined photos became the default in s1-0.57.0 (B, 28 Nov: combined 14/14 right, codes 7/7 vs separate 9/17, 14/17)
+const aiCombine = () => localStorage.getItem('smg.aiCombine') !== '0';
 // The switch; changing it while a batch is prepared prepares it again in the new mode.
 function combineChips() {
   const setMode = (on) => { if (aiCombine() === on) return; localStorage.setItem('smg.aiCombine', on ? '1' : '0'); if (aiPrep && aiPrep.mode === 'names') { aiPrep = null; nameAutoNext = true; } route(); };
   return h('div', { class: 'chips', style: 'margin:8px 0' },
     h('button', { type: 'button', class: `chip ${!aiCombine() ? 'on' : ''}`, onclick: () => setMode(false) }, '2 photos per box · 5 boxes'),
-    h('button', { type: 'button', class: `chip ${aiCombine() ? 'on' : ''}`, onclick: () => setMode(true) }, 'Combine front + back · 10 boxes (trial)'));
+    h('button', { type: 'button', class: `chip ${aiCombine() ? 'on' : ''}`, onclick: () => setMode(true) }, 'Combine front + back · 10 boxes'));
 }
 const batchSize = () => (aiCombine() ? MAX_BATCH_COMBINED : MAX_BATCH);
 // Front on the left, back on the right, same height (up to the display copy's 1600 px), one JPEG. No location data
@@ -2178,7 +2209,18 @@ async function renderName(v) {
   const todo = [...nameless, ...incomplete];
   v.append(h('div', { class: 'row' }, h('h2', {}, 'Name them'), h('div', { class: 'muted', style: 'text-align:right' }, [nameless.length ? `${plural(nameless.length, 'box needs', 'boxes need')} a name` : '', incomplete.length ? `${plural(incomplete.length, 'named car misses', 'named cars miss')} a code, colour or note` : ''].filter(Boolean).join(' · '))));
   const scoreCard = await geminiScoreCard(ref);
-  if (!todo.length && !batch && !aiPrep && !live.some(m => sugg[m.model_id])) { nameSkipped.clear(); v.append(h('div', { class: 'banner ok' }, 'Every car has its name, code, colour and note (or Gemini has had a go) ✓'), scoreCard || '', h('p', {}, h('a', { href: '#/' }, '← Garage'))); return; }
+  // Cars Gemini already tried that still have no product code (B, 28 Nov): ask again, or type it from the box
+  const noCodeAsked = live.filter(m => asked[m.model_id] && !String(m.product_code || '').trim());
+  const askAgainCard = noCodeAsked.length ? h('div', { class: 'card askagain' },
+    h('div', { style: 'font-weight:700' }, `${plural(noCodeAsked.length, 'car', 'cars')} still without a product code`),
+    h('p', { class: 'muted small', style: 'margin:4px 0 8px' }, 'Gemini had a go but found none. Ask again (combined photos read codes better), or type it from the box: it is printed near the barcode. Some boxes have no code at all.'),
+    h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'small', onclick: async () => {
+        const a = { ...(await meta.get('aiAsked', {})) }; for (const m of noCodeAsked) delete a[m.model_id]; await meta.set('aiAsked', a);
+        toast(`${plural(noCodeAsked.length, 'car goes', 'cars go')} back to Gemini`, 2500); route();
+      } }, `✨ Ask Gemini again (${noCodeAsked.length})`),
+      h('button', { type: 'button', class: 'small quiet', onclick: () => { garageFilter = 'nocode'; garageSearch = ''; location.hash = '#/'; } }, 'Type them in'))) : null;
+  if (!todo.length && !batch && !aiPrep && !live.some(m => sugg[m.model_id])) { nameSkipped.clear(); v.append(h('div', { class: 'banner ok' }, 'Every car has its name, code, colour and note (or Gemini has had a go) ✓'), ...(askAgainCard ? [askAgainCard] : []), scoreCard || '', h('p', {}, h('a', { href: '#/' }, '← Garage'))); return; }
 
   // --- AI panel: prepare → share → paste answer ---
   const aiCard = h('div', { class: 'card aicard' }, h('h3', {}, '✨ Names, codes, colours and notes from Gemini'));
@@ -2603,6 +2645,7 @@ function boughtCard() {
 }
 
 async function saveCapture({ quiet = false } = {}) {
+  try { await capReady(); } catch { return false; }
   const ref = await refData();
   const brand = ref.brands.find(b => b.brand_id === cap.brandId);
   const ns = assignNamespace(brand, null);
@@ -2630,6 +2673,7 @@ async function saveCapture({ quiet = false } = {}) {
 }
 
 async function saveCopyOf(m) {
+  try { await capReady(); } catch { return; }
   // This box's photos are attached to the new physical copy (never made the product's main photo).
   const items = [{ entity: 'inventory', fields: { inventory_id: cap.inventoryId, model_id: m.model_id, ownership_status: 'Owned', packaging_state: cap.sealed ? 'sealed' : 'unknown', storage_location: boxLoc(cap.box), acquisition_type: 'Unknown', purchase_date_precision: 'unknown', currency: 'INR', ...boughtFields() } },
     ...(await savePhotoRecords(m.model_id, photosToSave())).map(it => ({ ...it, fields: { ...it.fields, inventory_id: cap.inventoryId, is_primary: 'no' } }))];
@@ -3577,6 +3621,7 @@ async function renderSettings(v) {
       h('dt', {}, 'Protected storage'), h('dd', {}, persisted ? 'Yes ✓' : 'No'),
       h('dt', {}, 'Capture time'), h('dd', {}, median ? `median ${median} s per box (${plural(times.length, 'box', 'boxes')}; time spent on each box in the app)` : 'Not measured yet (counts from this version on)'),
       h('dt', {}, 'Shooting pace'), h('dd', {}, paceText(await shootingPace()) || 'Not enough photos yet'),
+      h('dt', {}, 'Last photos'), h('dd', {}, (() => { try { const l = JSON.parse(localStorage.getItem('smg.photoTiming') || '[]').slice(0, 4); return l.length ? l.map(x => `${SHOT_ROLES[x.role]?.label || x.role}: ${(x.total / 1000).toFixed(1)} s`).join(' · ') + ' (prepared in the background)' : 'Not measured yet'; } catch { return '—'; } })()),
       h('dt', {}, 'App version'), h('dd', {}, APP_VERSION),
       h('dt', {}, 'Schema version'), h('dd', {}, String(SCHEMA_VERSION))),
     persisted ? null : h('button', { class: 'quiet', style: 'margin-top:8px', onclick: async () => { const ok = await requestPersistentStorage(); toast(ok ? 'Storage protected ✓' : 'Chrome said no (try after installing the app)', 3500, ok ? 'ok' : 'warn'); route(); } }, 'Protect storage on this phone')));
@@ -3911,6 +3956,8 @@ async function start() {
   requestPersistentStorage();
   await seedLocal();
   helperInfo = await meta.get('helper', null);
+  // s1-0.57.0: combined photos become the default once, even if separate was picked during the trial
+  try { if (!localStorage.getItem('smg.combineV1')) { localStorage.setItem('smg.aiCombine', '1'); localStorage.setItem('smg.combineV1', '1'); } } catch {}
   applyHelperLook();
   $('#status').addEventListener('click', () => { if (helperInfo) location.hash = '#/settings'; else runSync(true); });
   setInterval(refreshStatus, 30_000); // sign-in expiry has no event of its own

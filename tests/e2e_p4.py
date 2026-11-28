@@ -40,6 +40,7 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
         ctx = browser.new_context(viewport={'width': 400, 'height': 860}, is_mobile=True, has_touch=True)
+        ctx.add_init_script("try { if (!localStorage.getItem('smg.combineV1')) { localStorage.setItem('smg.combineV1', '1'); localStorage.setItem('smg.aiCombine', '0'); } } catch (e) {}")  # these checks use separate photos (default became combined in s1-0.57.0)
         ctx.add_init_script(MOCK_SHARE)
         page = ctx.new_page()
         errors = []

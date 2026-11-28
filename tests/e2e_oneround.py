@@ -21,6 +21,7 @@ def main():
     with sync_playwright() as p:
         b = p.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--no-sandbox'])
         ctx = b.new_context(viewport={'width': 400, 'height': 860}); ctx.add_init_script(MOCK)
+        ctx.add_init_script("try { if (!localStorage.getItem('smg.combineV1')) { localStorage.setItem('smg.combineV1', '1'); localStorage.setItem('smg.aiCombine', '0'); } } catch (e) {}")  # these checks use separate photos (default became combined in s1-0.57.0)
         ctx.route('https://accounts.google.com/gsi/client', lambda r, q: r.fulfill(content_type='text/javascript', body=m.FAKE_GIS))
         page = ctx.new_page(); errors = []; page.on('pageerror', lambda e: errors.append(str(e)))
         page.goto(base + '#/'); page.wait_for_selector('text=My Garage'); page.evaluate("localStorage.setItem('smg.motion', 'off')")
