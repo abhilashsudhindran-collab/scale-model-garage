@@ -58,6 +58,7 @@ export const SHOT_ROLES = {
   box_top: { label: 'Box top', type: 'Packaging', folder: '02_PACKAGING' },
   box_side: { label: 'Box end / side', type: 'Packaging', folder: '02_PACKAGING' },
   label: { label: 'Code label', type: 'Label', folder: '03_PRODUCT_LABELS' },
+  car_inside: { label: 'Car inside the box', type: 'Model', folder: '01_MODEL_IMAGES' },
   car_front34: { label: 'Car front ¾', type: 'Model', folder: '01_MODEL_IMAGES' },
   car_rear34: { label: 'Car rear ¾', type: 'Model', folder: '01_MODEL_IMAGES' },
   car_side: { label: 'Side profile', type: 'Model', folder: '01_MODEL_IMAGES' },

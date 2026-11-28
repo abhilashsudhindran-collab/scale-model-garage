@@ -252,6 +252,7 @@ def main():
         capture(f'{tmp}/b.jpg', f'{tmp}/d.jpg', 'Pop Race', '1:64', 'Skyline GT-R', code='PR64-0161', barcode='6973027529752', sealed=True, art=f'{tmp}/a.jpg')
         page.get_by_role('button', name='Save & next box').click(); page.wait_for_selector('text=Saved ✓')
 
+        page.wait_for_timeout(1500)  # s1-0.57.0: photos are prepared in the background; the save finishes them first
         page.goto(base + '#/'); page.wait_for_selector('text=My Garage'); page.wait_for_selector('.tile')
         print('   header:', page.inner_text('main .row'))
         check(page.is_visible('text=3 models · 4 copies'), 'garage counts 3 models, 4 copies')
