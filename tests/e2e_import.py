@@ -37,7 +37,7 @@ def main():
         fc.value.set_files([f'{d}/{n}' for n in sorted(names)])  # handed over alphabetically on purpose
         page.wait_for_selector('.importgrid')
         check(page.is_visible('text=6 photos → 3 cars') and page.locator('.importcar').count() == 3, 'preview: 6 photos → 3 cars')
-        page.get_by_role('button', name='⇄ Swap front and barcode side').click(); page.wait_for_timeout(200)
+        page.get_by_role('button', name='⇄ Swap front and barcode').click(); page.wait_for_timeout(200)
         check(page.is_visible('text=↺ Undo swap'), 'swap offered (and can be undone)')
         page.get_by_role('button', name='↺ Undo swap').click(); page.wait_for_timeout(200)
         page.get_by_role('button', name='Import 3 cars').click()

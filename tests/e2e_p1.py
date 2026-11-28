@@ -72,10 +72,10 @@ def main():
 
         # C2: barcode read from the rear photo
         pick('Box front', f'{tmp}/a.jpg'); page.wait_for_selector('text=Box front ✓')
-        pick('Barcode side', f'{tmp}/rear_bc.jpg'); page.wait_for_selector('text=Barcode side ✓'); page.wait_for_timeout(500)
+        pick('Barcode close-up', f'{tmp}/rear_bc.jpg'); page.wait_for_selector('text=Barcode close-up ✓'); page.wait_for_timeout(500)
         val = page.input_value('input[inputmode=numeric]')
         check(val == EAN, f'C2 barcode read from the rear photo (got "{val}")')
-        check(page.is_visible('text=Read from the barcode-side photo'), 'C2 tells B where the barcode came from')
+        check(page.is_visible('text=Read from the barcode photo'), 'C2 tells B where the barcode came from')
         page.screenshot(path=f'{SHOTS}/01-barcode-from-photo.png')
 
         # C1: Sealed is a toggle and is remembered for the next box
@@ -132,13 +132,13 @@ def main():
         stored = ev(f"(async () => (await (await import('./js/store.js')).list('product_identifiers')).filter(i => i.model_id === '{mid}').map(i => i.value_cmp))()")
         check(stored == ['0840456393215'], f'I2 corrected barcode saved and standardised ({stored})')
         n_photos = page.locator('.gallery .fig').count()
-        page.locator('.gallery .fig', has_text='Barcode side').click(); page.wait_for_selector('text=This photo')
+        page.locator('.gallery .fig', has_text='Barcode close-up').click(); page.wait_for_selector('text=This photo')
         page.screenshot(path=f'{SHOTS}/03-photo-options.png')
-        page.locator('.card', has_text='This photo').locator('select').select_option(label='Box side / end flap'); page.wait_for_timeout(500)
-        check(page.locator('.gallery .fig', has_text='Box side / end flap').count() == 1, 'I2 photo relabelled')
+        page.locator('.card', has_text='This photo').locator('select').select_option(label='Box end / side'); page.wait_for_timeout(500)
+        check(page.locator('.gallery .fig', has_text='Box end / side').count() == 1, 'I2 photo relabelled')
         # the relabelled photo stays selected, so its options are still open
         page.get_by_role('button', name='Make main photo').click(); page.wait_for_timeout(500)
-        check(page.locator('.gallery .fig', has_text='★ Box side').count() == 1, 'I2 relabelled photo made the main photo')
+        check(page.locator('.gallery .fig', has_text='★ Box end').count() == 1, 'I2 relabelled photo made the main photo')
         page.get_by_role('button', name='Remove photo').click(); page.wait_for_timeout(500)
         check(page.locator('.gallery .fig').count() == n_photos - 1, 'I2 photo removed')
         check(page.locator('.gallery .fig', has_text='★ Box front').count() == 1, 'I2 removing the main photo falls back to the box front')

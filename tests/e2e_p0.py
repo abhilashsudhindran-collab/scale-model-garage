@@ -46,7 +46,7 @@ def main():
         def start_box(brand='Mini GT', front='a', rear='b'):
             page.goto(base + '#/add'); page.wait_for_selector('text=Quick capture')
             pick('Box front', f'{tmp}/{front}.jpg'); page.wait_for_selector('text=Box front ✓')
-            pick('Barcode side', f'{tmp}/{rear}.jpg'); page.wait_for_selector('text=Barcode side ✓')
+            pick('Barcode close-up', f'{tmp}/{rear}.jpg'); page.wait_for_selector('text=Barcode close-up ✓')
             page.select_option('select', label=brand); page.wait_for_timeout(200)
             page.get_by_role('button', name='1:64', exact=True).click(); page.wait_for_timeout(200)
 
@@ -107,7 +107,7 @@ def main():
         page.reload(); page.wait_for_selector('text=Quick capture'); page.wait_for_timeout(500)
         check(page.is_visible('text=Restored the box you were working on'), 'C5 restore banner shown after reload')
         check(page.input_value('input[placeholder^="e.g. Range Rover"]') == 'Draft survives reload', 'C5 name restored')
-        check(page.is_visible('text=Box front ✓') and page.is_visible('text=Barcode side ✓'), 'C5 photos restored')
+        check(page.is_visible('text=Box front ✓') and page.is_visible('text=Barcode close-up ✓'), 'C5 photos restored')
         page.screenshot(path=f'{SHOTS}/03-draft-restored.png')
         page.get_by_role('button', name='Discard').click(); page.wait_for_timeout(400)
         page.reload(); page.wait_for_selector('text=Quick capture'); page.wait_for_timeout(400)
