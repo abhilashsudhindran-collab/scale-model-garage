@@ -72,7 +72,7 @@ def main():
         page.get_by_role('button', name='Sign in & set up').click(); page.wait_for_selector('text=Synced:', timeout=60000)
         for i in range(3):
             page.goto(base + '#/add'); page.wait_for_selector('text=Quick capture')
-            for role, f in (('Box front', f'f{i}'), ('Box rear', f'r{i}')):
+            for role, f in (('Box front', f'f{i}'), ('Barcode side', f'r{i}')):
                 with page.expect_file_chooser() as fc: page.get_by_text(role, exact=False).first.click()
                 fc.value.set_files(f'{d}/{f}.jpg'); page.wait_for_selector(f'text={role} ✓')
             page.select_option('select[aria-label="Brand"]', label='Mini GT'); page.wait_for_timeout(200)

@@ -213,7 +213,7 @@ def main():
         def capture(front, rear, brand, scale, name, code='', barcode='', sealed=False, art=None):
             page.goto(base + '#/add'); page.wait_for_selector('text=Quick capture')
             pick('Box front', front); page.wait_for_selector('text=Box front ✓')
-            pick('Box rear', rear); page.wait_for_selector('text=Box rear ✓')
+            pick('Barcode side', rear); page.wait_for_selector('text=Barcode side ✓')
             if sealed:
                 page.get_by_role('button', name='Sealed box', exact=True).click()
                 page.wait_for_selector('text=Box art (sealed box)')

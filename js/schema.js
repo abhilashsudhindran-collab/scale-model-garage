@@ -51,7 +51,7 @@ export const ROOT_FOLDER = 'SCALE GARAGE';
 // Photo shot roles (D20) → brief photo_type and Drive folder.
 export const SHOT_ROLES = {
   box_front: { label: 'Box front', type: 'Packaging', folder: '02_PACKAGING' },
-  box_rear: { label: 'Box rear', type: 'Packaging', folder: '02_PACKAGING' },
+  box_rear: { label: 'Barcode side', type: 'Packaging', folder: '02_PACKAGING' },
   box_art: { label: 'Box art (sealed box)', type: 'Packaging', folder: '02_PACKAGING' },
   box_side: { label: 'Box side / end flap', type: 'Packaging', folder: '02_PACKAGING' },
   label: { label: 'Code label', type: 'Label', folder: '03_PRODUCT_LABELS' },
