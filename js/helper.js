@@ -46,7 +46,7 @@ export const LOOKUP_FIELDS = {
   categories: ['category_id', 'name', 'parent_id', 'sort_order', 'active'],
   aliases: ['alias_id', 'alias_text', 'alias_cmp', 'target_type', 'target_id'],
   models: ['model_id', 'brand_id', 'line_id', 'printed_brand_text', 'code_namespace_type', 'code_namespace_id', 'namespace_status', 'product_code', 'product_code_cmp',
-    'display_name', 'scale_id', 'category_id', 'variant', 'colour_family', 'colour_name', 'primary_photo_id', 'completeness_status', 'duplicate_check_status', 'barcode_absent'],
+    'display_name', 'scale_id', 'category_id', 'variant', 'colour_family', 'colour_name', 'primary_photo_id', 'completeness_status', 'duplicate_check_status', 'barcode_absent', 'code_absent'],
   product_identifiers: ['identifier_id', 'model_id', 'identifier_type', 'value_raw', 'value_cmp', 'barcode_format', 'check_digit_ok'],
   inventory: ['inventory_id', 'model_id', 'ownership_status', 'storage_location', 'packaging_state'],
   storage_boxes: ['storage_box_id', 'box_label', 'box_name', 'box_size', 'box_brand', 'box_scale'],

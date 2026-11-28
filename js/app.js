@@ -29,7 +29,7 @@ import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from '
 import { LOOKUP_KIND, INBOX_KIND, FORMAT as HELPER_FORMAT, LOOKUP_ENTITIES, buildLookup, helperBoxes, boxRecords, planImport, applyPlan, unzip, fileText, photoPath, PHOTO_VARIANTS, cleanInboxRecord } from './helper.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.57.0';
+export const APP_VERSION = 's1-0.58.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -632,7 +632,7 @@ async function renderDash(v) {
       ['name', 'Name', (m) => !!String(m.display_name || '').trim(), 'noname'],
       ['brand', 'Brand', (m) => !!m.brand_id, 'nobrand'],
       ['scale', 'Scale', (m) => !!m.scale_id, 'noscale'],
-      ['code', 'Product code', (m) => !!String(m.product_code || '').trim(), 'nocode'],
+      ['code', 'Product code (or marked none)', (m) => !!String(m.product_code || '').trim() || m.code_absent === 'yes', 'nocode'],
       ['barcode', 'Barcode (or marked none)', (m) => ctx.withBarcode.has(m.model_id) || m.barcode_absent === 'yes', 'nobarcode'],
       ['box', 'In a storage box', (m) => !ctx.ownedNoBox.has(m.model_id), 'nobox'],
       ['colour', 'Colour', (m) => !!m.colour_family, 'nocolour'],
@@ -2086,6 +2086,7 @@ async function nameList(cars, sugg, ref, models, inv, ids) {
       const others = (bcOwners.get(barcodeCmp(bc)) || []).filter(x => x !== m.model_id && liveModels.some(y => y.model_id === x));
       out.push(others.length ? ['warn', `Barcode ${bc} is also on ${nameOf(others[0])}: same car?`] : ['ok', `Barcode ${bc} (scanned)`]);
     } else if (m.barcode_absent === 'yes') out.push(['info', 'No barcode on this box']);
+    if (m.code_absent === 'yes' && !String(m.product_code || '').trim()) out.push(['info', 'No product code on this box']);
     else out.push(['info', 'No barcode read']);
     const c = String(code || '').trim();
     if (c && m.brand_id) {
@@ -2204,13 +2205,13 @@ async function renderName(v) {
   const live = models.filter(m => !m.deleted_at);
   const nameless = live.filter(m => !String(m.display_name || '').trim()).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   const incomplete = live.filter(m => String(m.display_name || '').trim() && !asked[m.model_id] && (
-    !String(m.product_code || '').trim() || (!m.colour_family && !readings.get(m.model_id)?.family) || (!m.car_note && m.car_note_source !== 'hidden' && !readings.get(m.model_id)?.note)))
+    (!String(m.product_code || '').trim() && m.code_absent !== 'yes') || (!m.colour_family && !readings.get(m.model_id)?.family) || (!m.car_note && m.car_note_source !== 'hidden' && !readings.get(m.model_id)?.note)))
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   const todo = [...nameless, ...incomplete];
   v.append(h('div', { class: 'row' }, h('h2', {}, 'Name them'), h('div', { class: 'muted', style: 'text-align:right' }, [nameless.length ? `${plural(nameless.length, 'box needs', 'boxes need')} a name` : '', incomplete.length ? `${plural(incomplete.length, 'named car misses', 'named cars miss')} a code, colour or note` : ''].filter(Boolean).join(' · '))));
   const scoreCard = await geminiScoreCard(ref);
   // Cars Gemini already tried that still have no product code (B, 28 Nov): ask again, or type it from the box
-  const noCodeAsked = live.filter(m => asked[m.model_id] && !String(m.product_code || '').trim());
+  const noCodeAsked = live.filter(m => asked[m.model_id] && !String(m.product_code || '').trim() && m.code_absent !== 'yes');
   const askAgainCard = noCodeAsked.length ? h('div', { class: 'card askagain' },
     h('div', { style: 'font-weight:700' }, `${plural(noCodeAsked.length, 'car', 'cars')} still without a product code`),
     h('p', { class: 'muted small', style: 'margin:4px 0 8px' }, 'Gemini had a go but found none. Ask again (combined photos read codes better), or type it from the box: it is printed near the barcode. Some boxes have no code at all.'),
@@ -2886,7 +2887,7 @@ async function renderItem(v, modelId) {
   const barcodes = idfs.filter(i => i.identifier_type === 'barcode');
   const bc0 = barcodes[0];
   const sc0 = idfs.find(i => i.identifier_type === 'second_code'); // s1-0.45.0: e.g. Hot Wheels "-4B10" under the code
-  const f = { line_id: m.line_id || '', display_name: m.display_name || '', brand_id: m.brand_id || '', scale_id: m.scale_id || '', product_code: m.product_code || '', variant: m.variant || '', series: m.series || '', notes: m.notes || '', barcode: bc0?.value_raw || '', barcode_absent: m.barcode_absent || '', second_code: sc0?.value_raw || '' };
+  const f = { line_id: m.line_id || '', display_name: m.display_name || '', brand_id: m.brand_id || '', scale_id: m.scale_id || '', product_code: m.product_code || '', variant: m.variant || '', series: m.series || '', notes: m.notes || '', barcode: bc0?.value_raw || '', barcode_absent: m.barcode_absent || '', code_absent: m.code_absent || '', second_code: sc0?.value_raw || '' };
   let productDirty = false;
   const set = (k) => (e) => { f[k] = e.target.value; productDirty = true; markDirty(); };
   const markDirty = () => $('#pdpSave')?.classList.remove('quiet');
@@ -2895,7 +2896,14 @@ async function renderItem(v, modelId) {
   field('Name', h('input', { value: f.display_name, oninput: set('display_name') }));
   field('Brand', h('select', { onchange: async (e) => { const v = e.target.value; const id = v.startsWith('known:') || v === '__new' ? await pickedBrandId(v, ref.brands, e.target) : v; if (v && !id) { e.target.value = f.brand_id; return; } if (f.brand_id !== id) f.line_id = ''; f.brand_id = id; productDirty = true; markDirty(); drawLine(); } }, brandOptions(ref.brands, f.brand_id, '—')));
   field('Scale', h('select', { onchange: set('scale_id') }, h('option', { value: '' }, '—'), ref.scales.map(s => h('option', { value: s.scale_id, selected: s.scale_id === f.scale_id ? true : undefined }, s.label))));
-  field('Product code (exactly as printed)', h('input', { value: f.product_code, autocapitalize: 'characters', oninput: (e) => { set('product_code')(e); drawLine(); } }));
+  // "No product code on this box" (s1-0.58.0, B 28 Nov): some boxes print no code at all. Shown only while the code is
+  // empty; typing a code clears it on save. Stops To check / Data health / Ask Gemini again treating the car as unfinished.
+  const noCode = h('label', { class: 'checkline', style: 'display:flex;gap:8px;align-items:center;margin:-4px 0 10px' },
+    h('input', { type: 'checkbox', 'aria-label': 'No product code on this box', checked: f.code_absent === 'yes' ? true : undefined, onchange: (e) => { f.code_absent = e.target.checked ? 'yes' : ''; productDirty = true; markDirty(); } }),
+    'No product code printed on this box? Tick so the app stops asking.');
+  const showNoCode = () => { noCode.style.display = String(f.product_code || '').trim() ? 'none' : 'flex'; };
+  field('Product code (exactly as printed)', h('input', { value: f.product_code, autocapitalize: 'characters', oninput: (e) => { set('product_code')(e); drawLine(); showNoCode(); } }));
+  form.append(noCode); showNoCode();
   // Product line (s1-0.47.0): lines of the chosen brand; a hint when the code starts like a known line (one tap)
   const lineWrap = h('div');
   form.append(h('label', { class: 'f' }, 'Product line (optional)'), lineWrap);
@@ -2959,10 +2967,11 @@ async function renderItem(v, modelId) {
     const brand = ref.brands.find(b => b.brand_id === f.brand_id);
     const ns = assignNamespace(brand, null);
     const { barcode: _bc, second_code: _sc, ...fields } = f;
-    const patch = { ...fields, product_code: f.product_code.trim(), product_code_cmp: codeCmp(f.product_code), printed_brand_text: m.printed_brand_text || brand?.name || '',
+    if (f.product_code.trim()) f.code_absent = ''; // a typed code wins over "no code on this box"
+    const patch = { ...fields, code_absent: f.code_absent || '', product_code: f.product_code.trim(), product_code_cmp: codeCmp(f.product_code), printed_brand_text: m.printed_brand_text || brand?.name || '',
       code_namespace_type: ns.type, code_namespace_id: ns.id, namespace_status: ns.status };
     patch.duplicate_check_status = duplicateCheckStatus(patch);
-    for (const k of ['brand_id', 'product_code', 'line_id']) if (String(m[k] || '') !== String(patch[k] || '')) await store.logChange('models', modelId, k, m[k], patch[k], 'edited in app');
+    for (const k of ['brand_id', 'product_code', 'line_id', 'code_absent']) if (String(m[k] || '') !== String(patch[k] || '')) await store.logChange('models', modelId, k, m[k], patch[k], 'edited in app');
     await store.update('models', modelId, patch);
     Object.assign(m, patch); productDirty = false;
     if (bc0) bc0.value_raw = f.barcode.trim();
@@ -3109,7 +3118,7 @@ function recheckCard(redraw) {
 const CHECKS = [
   ['nobrand', 'No brand', (m) => !m.brand_id],
   ['noscale', 'No scale', (m) => !m.scale_id],
-  ['nocode', 'No product code', (m) => !String(m.product_code || '').trim()],
+  ['nocode', 'No product code', (m) => !String(m.product_code || '').trim() && m.code_absent !== 'yes'],
   // a box with no barcode printed on it is marked on the car page and leaves this list
   ['nobarcode', 'No barcode', (m, x) => !x.withBarcode.has(m.model_id) && m.barcode_absent !== 'yes'],
   ['nobox', 'Not in a storage box', (m, x) => x.ownedNoBox.has(m.model_id)],
