@@ -22,12 +22,13 @@ import { SORTS, sortCompare } from './sort.js';
 import { buildReview } from './review.js';
 import { suggestLine, cleanLineName } from './lines.js';
 import { extractCodes, imagesOnly } from './share.js';
+import { recheckTargets, runRecheck, recheckSummary } from './recheck.js';
 import { EVENT_TYPES, DISPOSALS, eventLabel, copyMoney, splitByPrice, totals as moneyTotals, num as moneyNum } from './money.js';
 import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn } from './moments.js';
 import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.53.0';
+export const APP_VERSION = 's1-0.54.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -1152,6 +1153,7 @@ async function renderGarage(v) {
     .filter(([k, , c]) => c === undefined || c > 0 || garageFilter === k);
   const chips = h('div', { class: 'chips scroll', style: 'margin:10px 0' }, filters.map(([k, label]) => h('button', { class: `chip ${garageFilter === k ? 'on' : ''}`, onclick: () => { garageFilter = garageFilter === k && CHECKS.some(c => c[0] === k) ? 'all' : k; route(); } }, label)));
   v.append(chips);
+  if (garageFilter === 'nobarcode') v.append(recheckCard(draw)); // s1-0.54.0: re-read saved rear photos
   // View + sort bar (s1-0.44.0)
   const sortSel = h('select', { class: 'sortsel', 'aria-label': 'Sort cars', onchange: (e) => { garageSort = e.target.value; lsSet('smg.garageSort', garageSort); draw(); } },
     SORTS.map(([k, label]) => h('option', { value: k, selected: k === garageSort ? true : undefined }, label)));
@@ -2962,6 +2964,56 @@ async function renderItem(v, modelId) {
 
 // ---------- To check (roadmap DR-0.2 next build #2) ----------
 // One place for every gap, each opening the matching Garage list. Cheap checks only, so it stays fast at 1,000+ cars.
+// Re-check barcodes on saved cars (s1-0.54.0, B 28 Nov); logic in recheck.js. Shown on Garage → To check → No barcode.
+let recheckStop = false;
+function recheckCard(redraw) {
+  const card = h('div', { class: 'card recheck' });
+  (async () => {
+    const [models, ids, photos] = await Promise.all([store.list('models'), store.list('product_identifiers'), store.list('photos')]);
+    // Photos already re-checked with this reader and nothing found aren't downloaded again (meta, per device)
+    const done = new Set(await meta.get('recheckNone_v1', []));
+    const all = recheckTargets(models, ids, photos), targets = all.filter(t => !done.has(t.photo.photo_id));
+    if (!all.length) { card.remove(); return; }
+    if (!targets.length) { card.append(h('p', { class: 'muted small', style: 'margin:0' }, `${plural(all.length, 'rear photo was', 'rear photos were')} already re-checked: no barcode found. Type it on the car page, or tick "No barcode on this box".`)); return; }
+    const status = h('p', { class: 'muted small', 'aria-live': 'polite', style: 'margin:6px 0 0' });
+    const stopBtn = h('button', { type: 'button', class: 'small quiet', hidden: true, onclick: () => { recheckStop = true; stopBtn.disabled = true; stopBtn.textContent = 'Stopping…'; } }, 'Stop');
+    const go = h('button', { type: 'button', class: 'small', onclick: async () => {
+      recheckStop = false; go.disabled = true; stopBtn.hidden = false;
+      const owners = new Map(); ids.filter(i => !i.deleted_at && i.identifier_type === 'barcode' && i.value_cmp).forEach(i => owners.set(i.value_cmp, i.model_id));
+      const sum = await runRecheck(targets, {
+        getOriginal: async (p) => { // on the phone if not yet synced; otherwise fetched from Drive (signs in once if needed)
+          const local = await blobs.get(`${p.photo_id}:original`); if (local) return local;
+          if (!p.original_file_id || !navigator.onLine) return null;
+          if (!hasToken()) await signIn();
+          return drive.download(p.original_file_id);
+        },
+        scan: (b) => scanPhoto(b),
+        cmp: barcodeCmp, checkOk: gtinCheckOk,
+        otherOwner: (cmp, mid) => { const o = owners.get(cmp); return o && o !== mid ? { model_id: o } : null; },
+        save: async (m, f, p) => {
+          await store.create('product_identifiers', { model_id: m.model_id, identifier_type: 'barcode', value_raw: f.raw, value_cmp: f.cmp, barcode_format: f.format, check_digit_ok: f.checkOk === null ? '' : (f.checkOk ? 'yes' : 'no'), source: 'rear_photo_recheck', evidence_photo_id: p.photo_id });
+          await store.logChange('models', m.model_id, 'barcode', '', f.raw, 'read again from the rear photo (re-check)');
+          owners.set(f.cmp, owners.get(f.cmp) || m.model_id);
+        },
+        onProgress: ({ i, n, found }) => { status.textContent = `Checking ${i} of ${n}… found ${found}`; },
+        onNone: (p) => done.add(p.photo_id),
+        stopped: () => recheckStop,
+      });
+      await meta.set('recheckNone_v1', [...done]);
+      toast(recheckSummary(sum), 6000);
+      if (sum.found) autoSyncSoon();
+      redraw();
+    } }, `🔁 Re-check ${plural(targets.length, 'rear photo', 'rear photos')}`);
+    const skipped = all.length - targets.length;
+    card.append(
+      h('p', { style: 'margin:0' }, h('b', {}, 'Barcode missed?'), ' The app reads photos better since s1-0.53.0. Re-check these cars\' rear photos; a barcode found is added, never replaces one.'),
+      h('p', { class: 'muted small', style: 'margin:4px 0 8px' }, `Synced photos are downloaded from your Drive (about 3 MB each, up to ~${Math.max(1, Math.round(targets.length * 2.9))} MB in all) and not kept on the phone. Best on Wi-Fi.`),
+      h('div', { class: 'row', style: 'gap:8px;justify-content:flex-start' }, go, stopBtn), status,
+      skipped ? h('p', { class: 'muted small', style: 'margin:6px 0 0' }, `${plural(skipped, 'other car was', 'other cars were')} already re-checked: no barcode found.`) : '');
+  })().catch(() => card.remove());
+  return card;
+}
+
 const CHECKS = [
   ['nobrand', 'No brand', (m) => !m.brand_id],
   ['noscale', 'No scale', (m) => !m.scale_id],
