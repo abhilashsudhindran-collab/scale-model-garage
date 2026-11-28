@@ -52,7 +52,7 @@ def main():
         page.get_by_role('button', name='1:64', exact=True).click(); page.wait_for_timeout(200)
         page.get_by_role('button', name='Car visible', exact=True).click(); page.wait_for_timeout(200)
         page.get_by_role('button', name='Done: start shooting').click(); page.wait_for_timeout(200)
-        for role, f in [('Box front', 'front'), ('Box rear', 'rear')]:
+        for role, f in [('Box front', 'front'), ('Barcode side', 'rear')]:
             with page.expect_file_chooser() as fc: page.get_by_role('button', name=role).click()
             fc.value.set_files(f'/tmp/smg-crop/{f}.jpg'); page.wait_for_timeout(900)
         page.wait_for_selector('text=Car 2 of this run', timeout=8000)

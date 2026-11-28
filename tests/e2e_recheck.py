@@ -57,8 +57,8 @@ def main():
         lnk = page.locator('text=No barcode').first
         lnk.click(); page.wait_for_selector('.card.recheck', timeout=10000)
         txt = page.inner_text('.card.recheck')
-        check('Re-check 2 rear photos' in txt and 'Wi-Fi' in txt, f'No barcode list offers the re-check for both cars ({txt[:90]!r})')
-        page.get_by_role('button', name='🔁 Re-check 2 rear photos').click()
+        check('Re-check 2 barcode-side photos' in txt and 'Wi-Fi' in txt, f'No barcode list offers the re-check for both cars ({txt[:90]!r})')
+        page.get_by_role('button', name='🔁 Re-check 2 barcode-side photos').click()
         page.wait_for_selector('.toast:has-text("Found")', timeout=60000)
         toast = page.inner_text('.toast')
         check('Found 1 barcode in 2 photos' in toast, f'result: one barcode found, the other photo has none ({toast!r})')

@@ -29,7 +29,7 @@ import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from '
 import { LOOKUP_KIND, INBOX_KIND, FORMAT as HELPER_FORMAT, LOOKUP_ENTITIES, buildLookup, helperBoxes, boxRecords, planImport, applyPlan, unzip, fileText, photoPath, PHOTO_VARIANTS, cleanInboxRecord } from './helper.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.55.0';
+export const APP_VERSION = 's1-0.55.1';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -628,7 +628,7 @@ async function renderDash(v) {
     const unsynced = new Set(photos.filter(p => !p.deleted_at && !p.original_file_id).map(p => p.model_id));
     const live = active.map(r => ({ ...r.data, _dirty: r.dirty || unsynced.has(r.id) }));
     const parts = [
-      ['photos', 'Front + back photo', (m) => ctx.bothPhotos.has(m.model_id), 'nophoto'],
+      ['photos', 'Front + barcode-side photo', (m) => ctx.bothPhotos.has(m.model_id), 'nophoto'],
       ['name', 'Name', (m) => !!String(m.display_name || '').trim(), 'noname'],
       ['brand', 'Brand', (m) => !!m.brand_id, 'nobrand'],
       ['scale', 'Scale', (m) => !!m.scale_id, 'noscale'],
@@ -1457,7 +1457,7 @@ async function renderAdd(v) {
     const b = cap.barcode;
     if (!b) { bcInfo.textContent = ''; return; }
     if (b.source === 'typed' && b.checkOk === false) { bcInfo.textContent = '⚠ These digits don\'t add up (check digit). Please re-check, or scan instead.'; bcInfo.style.color = 'var(--warn)'; }
-    else { bcInfo.textContent = b.source === 'scan' ? `✓ Scanned ${b.format || ''}` : b.source === 'rear_photo' ? '✓ Read from the box rear photo. Check it matches the box.' : (b.checkOk ? '✓ Check digit OK' : ''); bcInfo.style.color = 'var(--ok)'; }
+    else { bcInfo.textContent = b.source === 'scan' ? `✓ Scanned ${b.format || ''}` : b.source === 'rear_photo' ? '✓ Read from the barcode-side photo. Check it matches the box.' : (b.checkOk ? '✓ Check digit OK' : ''); bcInfo.style.color = 'var(--ok)'; }
   }
   updateBc();
   async function doLiveScan() {
@@ -1547,7 +1547,7 @@ async function renderAdd(v) {
 
   // --- Save ---
   // Always-visible Save bar (audit C3): no scrolling down to save each box.
-  const missing = [!cap.photos.box_front && 'box front photo', !cap.photos.box_rear && 'box rear photo', !cap.brandId && 'brand', !cap.scaleId && 'scale'].filter(Boolean);
+  const missing = [!cap.photos.box_front && 'box front photo', !cap.photos.box_rear && 'barcode-side photo', !cap.brandId && 'brand', !cap.scaleId && 'scale'].filter(Boolean);
   v.append(h('div', { class: 'savebar' },
     h('div', { class: 'need' }, missing.length ? `Still needed: ${missing.join(', ')}` : 'Ready to save'),
     h('button', { class: 'save', disabled: missing.length ? true : undefined, onclick: () => saveCapture() }, 'Save & next box')));
@@ -1703,6 +1703,7 @@ async function renderRun(v) {
     strip.append(h(p ? 'button' : 'div', { type: p ? 'button' : undefined, class: `shot ${p ? 'done' : ''} ${role === next ? 'nextshot' : ''} ${shotSel === role ? 'sel' : ''}`, onclick: retake, 'aria-label': p ? `${SHOT_ROLES[role].label}: options` : undefined }, p?.url ? h('img', { src: p.url, alt: '' }) : h('span', {}, SHOT_ROLES[role].label), p ? h('span', { class: 'tag' }, `${SHOT_ROLES[role].label} ✓`) : null));
   }
   v.append(strip);
+  if (!cap.photos.box_rear) v.append(h('p', { class: 'muted small', style: 'margin:4px 0 0' }, 'Front = the side showing the car. Barcode side = wherever the barcode is: usually the back, sometimes the bottom.'));
   { const row = shotActionsRow(afterRunPhoto); if (row) v.append(row); }
   const nPhotos = Object.keys(cap.photos).length;
   if (nPhotos && !runSaving) v.append(h('div', { class: 'row shotacts' },
@@ -1716,7 +1717,7 @@ async function renderRun(v) {
       await saveDraft(); toast('Car discarded'); route();
     } }, 'Discard this car')));
   if (cap.restored && !next && nPhotos) v.append(h('div', { class: 'banner info' }, 'This car was kept while the app reloaded. Check the photos, then save it or discard it.'));
-  if (cap.barcode) v.append(h('p', { class: 'muted' }, `Barcode ${cap.barcode.raw} (read from the rear photo)`));
+  if (cap.barcode) v.append(h('p', { class: 'muted' }, `Barcode ${cap.barcode.raw} (read from the barcode-side photo)`));
   v.append(say);
 
   if (cap.runDecision) {
@@ -2046,7 +2047,7 @@ async function nameList(cars, sugg, ref, models, inv, ids) {
     // the back (where the code is) beside the front, so it can be checked without a tap
     const back = rear ? h('img', { alt: 'Box back', class: 'nl-ph nl-back' }) : null;
     if (back) { photoUrl(rear, 'display').then(u => { if (u) back.src = u; }); back.addEventListener('click', () => back.classList.toggle('big')); }
-    const flip = rear ? h('button', { type: 'button', class: 'ghost small nl-flip', onclick: () => { showing = showing === 'front' ? 'rear' : 'front'; flip.textContent = showing === 'front' ? 'See back' : 'See front'; photoUrl(showing === 'front' ? front : rear, 'display').then(u => { if (u) img.src = u; }); } }, 'See back') : null;
+    const flip = rear ? h('button', { type: 'button', class: 'ghost small nl-flip', onclick: () => { showing = showing === 'front' ? 'rear' : 'front'; flip.textContent = showing === 'front' ? 'See barcode side' : 'See front'; photoUrl(showing === 'front' ? front : rear, 'display').then(u => { if (u) img.src = u; }); } }, 'See back') : null;
     const dr = nameDrafts.get(m.model_id) || {};
     const nameIn = h('input', { value: dr.name ?? (m.display_name || sg.name || ''), 'aria-label': 'Name', autocapitalize: 'words' });
     const codeIn = h('input', { value: dr.code ?? (m.product_code || sg.code || ''), 'aria-label': 'Product code', autocapitalize: 'characters', placeholder: 'Code (optional)' });
@@ -2061,7 +2062,7 @@ async function nameList(cars, sugg, ref, models, inv, ids) {
     const notes = [...(sg.notes || []), brandNote(sg.brand, brand?.name), codeNote, nameNote].filter(Boolean);
     const fam = familyFrom(sg.colour);
     const card = h('div', { class: 'nl-row' },
-      h('div', { class: 'nl-top' }, h('div', { class: 'nl-left' }, h('div', { class: 'nl-pair' }, img, back), h('span', { class: 'muted small' }, back ? 'Front · Back' : 'Front')),
+      h('div', { class: 'nl-top' }, h('div', { class: 'nl-left' }, h('div', { class: 'nl-pair' }, img, back), h('span', { class: 'muted small' }, back ? 'Front · Barcode side' : 'Front')),
         h('div', { class: 'nl-f' },
           h('div', { class: 'muted small' }, [brand?.name || (sg.brand ? `${sg.brand}?` : 'Brand not set'), ref.scales.find(x => x.scale_id === m.scale_id)?.label, inv.find(i => i.model_id === m.model_id && i.storage_location)?.storage_location].filter(Boolean).join(' · ')),
           nameIn, codeIn, chk,
@@ -2468,7 +2469,7 @@ async function renderImport(v) {
   const per = sealed ? 3 : 2;
   v.append(h('a', { href: '#/run', class: 'back' }, '← Photo run'), h('h2', {}, '📥 Import from gallery'),
     h('div', { class: 'banner info' }, h('div', { class: 'hd' }, 'How it works'),
-      h('div', {}, `1. With your phone's camera app, photograph each box: front, then back${sealed ? ', then the box art' : ''}. Keep that order.`),
+      h('div', {}, `1. With your phone's camera app, photograph each box: front, then the side with the barcode (usually the back, sometimes the bottom)${sealed ? ', then the box art' : ''}. Keep that order.`),
       h('div', {}, '2. Pick all those photos here. The app pairs them in the order they were taken.'),
       h('div', {}, '3. Check the pairs, then import. Name them with Gemini afterwards.')));
   if (importBusy) { v.append(h('p', { id: 'importMsg' }, 'Importing…')); return; }
@@ -2482,7 +2483,7 @@ async function renderImport(v) {
     h('div', { class: 'chips' }, ref.scales.slice(0, 8).map(sc => h('button', { type: 'button', class: `chip ${scaleId === sc.scale_id ? 'on' : ''}`, onclick: () => { importSave({ scaleId: sc.scale_id }); route(); } }, sc.label)),
       h('button', { type: 'button', class: `chip ${!scaleId ? 'on' : ''}`, onclick: () => { importSave({ scaleId: '' }); route(); } }, 'Mixed: later')),
     h('div', { class: 'chips', style: 'margin-top:10px' },
-      h('button', { type: 'button', class: `chip ${!sealed ? 'on' : ''}`, onclick: () => { importSave({ sealed: false }); route(); } }, '2 photos per car (front, back)'),
+      h('button', { type: 'button', class: `chip ${!sealed ? 'on' : ''}`, onclick: () => { importSave({ sealed: false }); route(); } }, '2 photos per car (front, barcode side)'),
       h('button', { type: 'button', class: `chip ${sealed ? 'on' : ''}`, onclick: () => { importSave({ sealed: true }); route(); } }, '3 photos (+ box art)')));
   v.append(set);
   v.append(h('button', { type: 'button', class: importFiles ? 'quiet wide' : 'wide', onclick: async () => {
@@ -2497,7 +2498,7 @@ async function renderImport(v) {
   const left = importFiles.length % per;
   v.append(h('div', { class: 'row', style: 'align-items:center;margin:12px 0 6px' },
     h('b', { style: 'flex:1' }, `${importFiles.length} photos → ${plural(groups.length, 'car', 'cars')}`),
-    h('button', { type: 'button', class: 'quiet small', onclick: () => { importSwap = !importSwap; route(); } }, importSwap ? '↺ Undo swap' : '⇄ Swap front and back')));
+    h('button', { type: 'button', class: 'quiet small', onclick: () => { importSwap = !importSwap; route(); } }, importSwap ? '↺ Undo swap' : '⇄ Swap front and barcode side')));
   if (left) v.append(h('div', { class: 'banner warn' }, `${plural(left, 'photo is', 'photos are')} left over at the end and won't be imported. Check the order, or pick again.`));
   const grid = h('div', { class: 'importgrid' });
   groups.forEach((g, k) => {
@@ -2984,7 +2985,7 @@ function recheckCard(redraw) {
     const done = new Set(await meta.get('recheckNone_v1', []));
     const all = recheckTargets(models, ids, photos), targets = all.filter(t => !done.has(t.photo.photo_id));
     if (!all.length) { card.remove(); return; }
-    if (!targets.length) { card.append(h('p', { class: 'muted small', style: 'margin:0' }, `${plural(all.length, 'rear photo was', 'rear photos were')} already re-checked: no barcode found. Type it on the car page, or tick "No barcode on this box".`)); return; }
+    if (!targets.length) { card.append(h('p', { class: 'muted small', style: 'margin:0' }, `${plural(all.length, 'barcode-side photo was', 'barcode-side photos were')} already re-checked: no barcode found. Type it on the car page, or tick "No barcode on this box".`)); return; }
     const status = h('p', { class: 'muted small', 'aria-live': 'polite', style: 'margin:6px 0 0' });
     const stopBtn = h('button', { type: 'button', class: 'small quiet', hidden: true, onclick: () => { recheckStop = true; stopBtn.disabled = true; stopBtn.textContent = 'Stopping…'; } }, 'Stop');
     const go = h('button', { type: 'button', class: 'small', onclick: async () => {
@@ -3013,10 +3014,10 @@ function recheckCard(redraw) {
       toast(recheckSummary(sum), 6000);
       if (sum.found) autoSyncSoon();
       redraw();
-    } }, `🔁 Re-check ${plural(targets.length, 'rear photo', 'rear photos')}`);
+    } }, `🔁 Re-check ${plural(targets.length, 'barcode-side photo', 'barcode-side photos')}`);
     const skipped = all.length - targets.length;
     card.append(
-      h('p', { style: 'margin:0' }, h('b', {}, 'Barcode missed?'), ' The app reads photos better since s1-0.53.0. Re-check these cars\' rear photos; a barcode found is added, never replaces one.'),
+      h('p', { style: 'margin:0' }, h('b', {}, 'Barcode missed?'), ' The app reads photos better since s1-0.53.0. Re-check these cars\' barcode-side photos; a barcode found is added, never replaces one.'),
       h('p', { class: 'muted small', style: 'margin:4px 0 8px' }, `Synced photos are downloaded from your Drive (about 3 MB each, up to ~${Math.max(1, Math.round(targets.length * 2.9))} MB in all) and not kept on the phone. Best on Wi-Fi.`),
       h('div', { class: 'row', style: 'gap:8px;justify-content:flex-start' }, go, stopBtn), status,
       skipped ? h('p', { class: 'muted small', style: 'margin:6px 0 0' }, `${plural(skipped, 'other car was', 'other cars were')} already re-checked: no barcode found.`) : '');
@@ -3032,7 +3033,7 @@ const CHECKS = [
   ['nobarcode', 'No barcode', (m, x) => !x.withBarcode.has(m.model_id) && m.barcode_absent !== 'yes'],
   ['nobox', 'Not in a storage box', (m, x) => x.ownedNoBox.has(m.model_id)],
   ['nocolour', 'No colour', (m) => !m.colour_family],
-  ['nophoto', 'Missing front or back photo', (m, x) => !x.bothPhotos.has(m.model_id)],
+  ['nophoto', 'Missing front or barcode-side photo', (m, x) => !x.bothPhotos.has(m.model_id)],
   ['dupes', 'Possible duplicates', (m, x) => x.dupes.has(m.model_id)],
 ];
 function checkContext(models, inventory, ids, photos = []) {
@@ -3671,7 +3672,7 @@ async function renderHelperStart(v) {
   v.append(h('p', {}, 'You\'re helping someone catalogue their scale model collection.'),
     h('ol', { class: 'steps' },
       h('li', {}, h('b', {}, 'Load the file'), ' the owner sent you (a .zip). It shows what they already own, so you can spot duplicates. Nothing is uploaded and you don\'t sign in.'),
-      h('li', {}, h('b', {}, 'Fill a storage box: '), 'Garage → tap the box → Fill box. Take the box front and back for each car.'),
+      h('li', {}, h('b', {}, 'Fill a storage box: '), 'Garage → tap the box → Fill box. For each car take the front, then the side with the barcode (back or bottom).'),
       h('li', {}, h('b', {}, 'Send the box'), ' from the Send tab when it\'s done. Send each box when you finish it, so nothing is lost.')),
     h('p', { class: 'muted small' }, 'Tip: install this page on your home screen (browser menu → Install app / Add to Home Screen) so it opens like an app.'),
     inp, h('button', { type: 'button', class: 'wide', onclick: pickFile }, "Load the owner's file"));

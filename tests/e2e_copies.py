@@ -50,7 +50,7 @@ def main():
         page.locator('.boxcard button', has_text='Fill Box').click(); page.wait_for_selector('.banner.fill')
         if page.is_visible('text=Done: start shooting'):
             page.get_by_role('button', name='Car visible', exact=True).click(); page.get_by_role('button', name='Done: start shooting').click(); page.wait_for_timeout(200)
-        for role, f in (('Box front', 'f'), ('Box rear', 'r')):
+        for role, f in (('Box front', 'f'), ('Barcode side', 'r')):
             with page.expect_file_chooser() as fc: page.get_by_role('button', name=role).click()
             fc.value.set_files(f'{d}/{f}.jpg'); page.wait_for_timeout(1000)
         page.wait_for_selector('.plusone', timeout=8000)

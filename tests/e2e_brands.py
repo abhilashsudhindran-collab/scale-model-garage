@@ -40,7 +40,7 @@ def main():
             with page.expect_file_chooser() as fc: page.get_by_role('button', name=role).click()
             fc.value.set_files(f'{d}/{f}.jpg'); page.wait_for_timeout(900)
         def car(i):
-            shoot('Box front', f'f{i}'); shoot('Box rear', f'r{i}'); page.wait_for_selector('text=Which brand is this car?', timeout=8000)
+            shoot('Box front', f'f{i}'); shoot('Barcode side', f'r{i}'); page.wait_for_selector('text=Which brand is this car?', timeout=8000)
         def pick_other(value):
             page.locator('select[aria-label="Brand for this car"]').select_option(value); page.wait_for_timeout(1200)
 

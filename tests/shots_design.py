@@ -40,7 +40,7 @@ def main():
             if page.is_visible('text=Done: start shooting'):
                 page.get_by_role('button', name='Car visible', exact=True).click(); page.wait_for_timeout(200)
                 page.get_by_role('button', name='Done: start shooting').click(); page.wait_for_timeout(200)
-            for role, s in [('Box front', 'f'), ('Box rear', 'r')]:
+            for role, s in [('Box front', 'f'), ('Barcode side', 'r')]:
                 with page.expect_file_chooser() as fc: page.get_by_role('button', name=f'{role}').click()
                 fc.value.set_files(f'{IMG}/c{i}{s}.jpg'); page.wait_for_timeout(900)
             if page.is_visible('text=Which brand is this car?'):

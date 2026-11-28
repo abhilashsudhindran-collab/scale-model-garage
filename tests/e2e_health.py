@@ -44,8 +44,8 @@ def main():
         page.evaluate("""(async () => { const st = await import('./js/store.js'); const ph = (await st.list('photos')).find(p => p.shot_role === 'box_rear');
           await st.archive('photos', ph.photo_id); })()""")
         page.goto(base + '#/dash'); page.wait_for_selector('.health')
-        check(page.locator('.tocheck .checkrow', has_text='Missing front or back photo').count() == 1, 'To check lists the missing photo')
-        page.locator('.health .checkrow', has_text='Front + back photo').click(); page.wait_for_selector('text=My Garage'); page.wait_for_timeout(400)
+        check(page.locator('.tocheck .checkrow', has_text='Missing front or barcode-side photo').count() == 1, 'To check lists the missing photo')
+        page.locator('.health .checkrow', has_text='Front + barcode-side photo').click(); page.wait_for_selector('text=My Garage'); page.wait_for_timeout(400)
         check(page.locator('.grid .tile').count() == 1, f'Garage → Missing photo shows the one car ({page.locator(".grid .tile").count()})')
         check(not errors, f'no page errors {errors[:2]}')
         b.close()
