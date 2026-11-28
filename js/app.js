@@ -29,7 +29,7 @@ import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from '
 import { LOOKUP_KIND, INBOX_KIND, FORMAT as HELPER_FORMAT, LOOKUP_ENTITIES, buildLookup, helperBoxes, boxRecords, planImport, applyPlan, unzip, fileText, photoPath, PHOTO_VARIANTS, cleanInboxRecord } from './helper.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.58.0';
+export const APP_VERSION = 's1-0.59.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -3073,9 +3073,12 @@ function recheckCard(redraw) {
     const [models, ids, photos] = await Promise.all([store.list('models'), store.list('product_identifiers'), store.list('photos')]);
     // Photos already re-checked with this reader and nothing found aren't downloaded again (meta, per device)
     const done = new Set(await meta.get('recheckNone_v1', []));
-    const all = recheckTargets(models, ids, photos), targets = all.filter(t => !done.has(t.photo.photo_id));
+    // s1-0.59.0: every photo that can carry a barcode (close-up, then extra sides); a car is offered again when it
+    // gets a photo that hasn't been read yet (e.g. a Bottom photo added later)
+    const all = recheckTargets(models, ids, photos, done), targets = all.filter(t => !t.done);
+    const nPhotos = targets.reduce((a, t) => a + t.photos.length, 0);
     if (!all.length) { card.remove(); return; }
-    if (!targets.length) { card.append(h('p', { class: 'muted small', style: 'margin:0' }, `${plural(all.length, 'barcode photo was', 'barcode photos were')} already re-checked: no barcode found. Type it on the car page, or tick "No barcode on this box".`)); return; }
+    if (!targets.length) { card.append(h('p', { class: 'muted small', style: 'margin:0' }, `${plural(all.length, 'car was', 'cars were')} already re-checked: no barcode found in their photos. Add a closer photo of the barcode, type it on the car page, or tick "No barcode on this box".`)); return; }
     const status = h('p', { class: 'muted small', 'aria-live': 'polite', style: 'margin:6px 0 0' });
     const stopBtn = h('button', { type: 'button', class: 'small quiet', hidden: true, onclick: () => { recheckStop = true; stopBtn.disabled = true; stopBtn.textContent = 'Stopping…'; } }, 'Stop');
     const go = h('button', { type: 'button', class: 'small', onclick: async () => {
@@ -3093,7 +3096,7 @@ function recheckCard(redraw) {
         otherOwner: (cmp, mid) => { const o = owners.get(cmp); return o && o !== mid ? { model_id: o } : null; },
         save: async (m, f, p) => {
           await store.create('product_identifiers', { model_id: m.model_id, identifier_type: 'barcode', value_raw: f.raw, value_cmp: f.cmp, barcode_format: f.format, check_digit_ok: f.checkOk === null ? '' : (f.checkOk ? 'yes' : 'no'), source: 'rear_photo_recheck', evidence_photo_id: p.photo_id });
-          await store.logChange('models', m.model_id, 'barcode', '', f.raw, 'read again from the rear photo (re-check)');
+          await store.logChange('models', m.model_id, 'barcode', '', f.raw, `read again from the ${(SHOT_ROLES[p.shot_role]?.label || 'barcode').toLowerCase()} photo (re-check)`);
           owners.set(f.cmp, owners.get(f.cmp) || m.model_id);
         },
         onProgress: ({ i, n, found }) => { status.textContent = `Checking ${i} of ${n}… found ${found}`; },
@@ -3104,11 +3107,11 @@ function recheckCard(redraw) {
       toast(recheckSummary(sum), 6000);
       if (sum.found) autoSyncSoon();
       redraw();
-    } }, `🔁 Re-check ${plural(targets.length, 'barcode photo', 'barcode photos')}`);
+    } }, `🔁 Re-check ${plural(targets.length, 'car', 'cars')}`);
     const skipped = all.length - targets.length;
     card.append(
-      h('p', { style: 'margin:0' }, h('b', {}, 'Barcode missed?'), ' The app reads photos better since s1-0.53.0. Re-check these cars\' barcode photos; a barcode found is added, never replaces one.'),
-      h('p', { class: 'muted small', style: 'margin:4px 0 8px' }, `Synced photos are downloaded from your Drive (about 3 MB each, up to ~${Math.max(1, Math.round(targets.length * 2.9))} MB in all) and not kept on the phone. Best on Wi-Fi.`),
+      h('p', { style: 'margin:0' }, h('b', {}, 'Barcode missed?'), ' The app reads photos better since s1-0.53.0. Re-check these cars\' barcode close-up and any extra side photos (Back, Bottom, End, Top); the first barcode found is added, never replaces one.'),
+      h('p', { class: 'muted small', style: 'margin:4px 0 8px' }, `${plural(nPhotos, 'photo', 'photos')} to read at most; synced ones are downloaded from your Drive (about 3 MB each, up to ~${Math.max(1, Math.round(nPhotos * 2.9))} MB) and not kept on the phone. Best on Wi-Fi.`),
       h('div', { class: 'row', style: 'gap:8px;justify-content:flex-start' }, go, stopBtn), status,
       skipped ? h('p', { class: 'muted small', style: 'margin:6px 0 0' }, `${plural(skipped, 'other car was', 'other cars were')} already re-checked: no barcode found.`) : '');
   })().catch(() => card.remove());
