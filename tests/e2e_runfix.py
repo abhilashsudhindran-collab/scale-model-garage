@@ -43,7 +43,7 @@ def main():
         shoot('Box front', 'f')
         page.reload(); page.wait_for_selector('text=Photo run')
         check('Box front ✓' in page.inner_text('.shots') and 'Bburago' not in page.inner_text('.runhead'), 'half-done car survives a reload, still without a brand')
-        shoot('Barcode side', 'r')
+        shoot('Barcode close-up', 'r')
         try: page.wait_for_selector('text=Which brand is this car?', timeout=8000); asked = True
         except Exception: asked = False
         check(asked and nmod() == 0, 'mixed box: asks the brand (nothing saved with an old brand)')
@@ -64,13 +64,13 @@ def main():
         check(old != new and 'Box front ✓' in page.inner_text('.shots') and page.is_visible('text=Which brand is this car?'), 'Retake: camera opens and the photo is replaced, flow continues')
         page.get_by_role('button', name='Box front: options').click(); page.wait_for_selector('.shotsel')
         page.locator('.shotsel').get_by_role('button', name='Remove').click(); page.wait_for_timeout(500)
-        check('Box front ✓' not in page.inner_text('.shots') and 'Barcode side ✓' in page.inner_text('.shots'), 'Remove: just that photo goes')
+        check('Box front ✓' not in page.inner_text('.shots') and 'Barcode close-up ✓' in page.inner_text('.shots'), 'Remove: just that photo goes')
         shoot('Box front', 'f'); page.wait_for_selector('text=Which brand is this car?')
         # Discard the whole car
         page.get_by_role('button', name='Discard this car').click(); page.wait_for_timeout(500)
         check('✓' not in page.inner_text('.shots') and nmod() == 0 and page.is_visible('text=Car discarded'), 'Discard this car: photos gone, nothing saved')
         # A normal car afterwards still works: brand asked, then saved
-        shoot('Box front', 'f'); shoot('Barcode side', 'r'); page.wait_for_selector('text=Which brand is this car?')
+        shoot('Box front', 'f'); shoot('Barcode close-up', 'r'); page.wait_for_selector('text=Which brand is this car?')
         page.select_option('select[aria-label="Brand for this car"]', label='Mini GT'); page.wait_for_timeout(1200)
         if page.is_visible('text=Different model: save new'): page.get_by_role('button', name='Different model: save new').click(); page.wait_for_timeout(800)
         got = page.evaluate("(async () => { const st = await import('./js/store.js'); const m = (await st.list('models'))[0]; const br = await st.list('brands'); const sc = await st.list('scales'); return m ? br.find(b => b.brand_id === m.brand_id).name + ' ' + sc.find(s => s.scale_id === m.scale_id).label : null; })()")

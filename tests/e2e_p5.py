@@ -149,7 +149,7 @@ def main():
             page.get_by_role('button', name='Car visible', exact=True).click(); page.wait_for_timeout(200)
             page.get_by_role('button', name='Done: start shooting').click(); page.wait_for_timeout(300)
         page.screenshot(path=f'{SHOTS}/08-filling.png')
-        for label, f in [('Box front', 'f'), ('Barcode side', 'r')]:
+        for label, f in [('Box front', 'f'), ('Barcode close-up', 'r')]:
             with page.expect_file_chooser() as fc: page.get_by_role('button', name=f'{label}').click()
             fc.value.set_files(f'{tmp}/{f}.jpg'); page.wait_for_timeout(700)
         page.wait_for_selector('text=Car 2 of this run', timeout=8000)
@@ -168,7 +168,7 @@ def main():
         check('Mini GT' in txt('.runsum') and not page.is_visible('text=Which brand is this car?'), 'brand box: run preset to Mini GT, no brand question')
         nmod = lambda: page.evaluate("(async () => (await (await import('./js/store.js')).list('models')).length)()")
         before = nmod()
-        for label, f in [('Box front', 'f'), ('Barcode side', 'r')]:
+        for label, f in [('Box front', 'f'), ('Barcode close-up', 'r')]:
             with page.expect_file_chooser() as fc: page.get_by_role('button', name=f'{label}').click()
             fc.value.set_files(f'{tmp}/{f}.jpg'); page.wait_for_timeout(700)
         if page.is_visible('text=Different model: save new'): page.get_by_role('button', name='Different model: save new').click(); page.wait_for_timeout(700)
@@ -182,7 +182,7 @@ def main():
         check('Mixed brands' in txt('.runsum'), 'mixed box: run shows "Mixed brands"')
         brands_seen = []
         for want in ['Bburago', 'Hot Wheels']:
-            for label, f in [('Box front', 'f'), ('Barcode side', 'r')]:
+            for label, f in [('Box front', 'f'), ('Barcode close-up', 'r')]:
                 with page.expect_file_chooser() as fc: page.get_by_role('button', name=f'{label}').click()
                 fc.value.set_files(f'{tmp}/{f}.jpg'); page.wait_for_timeout(700)
             page.wait_for_selector('text=Which brand is this car?', timeout=8000)
@@ -200,7 +200,7 @@ def main():
 
         # Brand and scale per box: "Mixed brands, only 1:43" and "only Bburago, mixed scales"
         def shoot_car():
-            for label, f in [('Box front', 'f'), ('Barcode side', 'r')]:
+            for label, f in [('Box front', 'f'), ('Barcode close-up', 'r')]:
                 with page.expect_file_chooser() as fc: page.get_by_role('button', name=f'{label}').click()
                 fc.value.set_files(f'{tmp}/{f}.jpg'); page.wait_for_timeout(700)
         def after_save():

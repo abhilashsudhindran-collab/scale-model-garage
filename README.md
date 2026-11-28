@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.55.1
+## Status: Stage 1 (quick-capture slice), version s1-0.56.0
+
+**s1-0.56.0 (28 Nov 2026): extra sides + barcode from any photo.** B's first full box (Hot Wheels Premium sets: barcode on the bottom; the car list on the front). The second required photo is now **"Barcode close-up"** (fill about a quarter of the photo; no barcode → photograph the back). After a car saves in the Photo run, **＋ Another side** (Back, Bottom, Top, End, Damage) adds optional photos to it before the next car; the car page's ＋ Photo offers the same new roles. **Any photo can supply a missing barcode** (never replaces one, never on a box marked "no barcode"; logged). Gallery import stays at 2 photos per car. New shot roles: `box_back`, `box_bottom`, `box_top` (stored role `box_rear` unchanged).
 
 **s1-0.55.1 (28 Nov 2026): "Box rear" is now "Barcode side".** B, filling his first full box: on Hot Wheels Premium sets the barcode is on the bottom, not the back. The second required photo is the side with the barcode (usually the back, sometimes the bottom); the app reads the barcode from it. Wording only: stored shot role stays `box_rear`, so saved photos are unchanged. Photo run shows a one-line hint until that photo is taken.
 

@@ -51,7 +51,7 @@ def main():
         def box(name, brand, front='a', rear='b'):
             page.goto(base + '#/add'); page.wait_for_selector('text=Quick capture')
             pick('Box front', f'{tmp}/{front}.jpg'); page.wait_for_selector('text=Box front ✓')
-            pick('Barcode side', f'{tmp}/{rear}.jpg'); page.wait_for_selector('text=Barcode side ✓')
+            pick('Barcode close-up', f'{tmp}/{rear}.jpg'); page.wait_for_selector('text=Barcode close-up ✓')
             page.select_option('select', label=brand); page.wait_for_timeout(200)
             page.get_by_role('button', name='1:64', exact=True).click(); page.wait_for_timeout(200)
             page.fill('input[placeholder^="e.g. Range Rover"]', name)
