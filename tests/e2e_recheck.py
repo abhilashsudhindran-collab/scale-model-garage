@@ -1,4 +1,4 @@
-"""Developer test for s1-0.54.0: re-check barcodes on saved cars. A car is imported (barcode read), synced to the fake
+"""Developer test for s1-0.54.0 / s1-0.59.0: re-check barcodes on saved cars (incl. extra side photos). A car is imported (barcode read), synced to the fake
 Drive (the phone then drops its full-size rear photo), and its barcode is removed, so it lands in To check → No
 barcode. The re-check card downloads the rear photo from Drive, reads it (zoomed retry), and adds the barcode back
 (source rear_photo_recheck, logged), leaving cars without a readable barcode alone. Fake Google; NOT a phone test.
@@ -57,11 +57,11 @@ def main():
         lnk = page.locator('text=No barcode').first
         lnk.click(); page.wait_for_selector('.card.recheck', timeout=10000)
         txt = page.inner_text('.card.recheck')
-        check('Re-check 2 barcode photos' in txt and 'Wi-Fi' in txt, f'No barcode list offers the re-check for both cars ({txt[:90]!r})')
-        page.get_by_role('button', name='🔁 Re-check 2 barcode photos').click()
+        check('Re-check 2 cars' in txt and 'Bottom' in txt and 'Wi-Fi' in txt, f'No barcode list offers the re-check for both cars ({txt[:120]!r})')
+        page.get_by_role('button', name='🔁 Re-check 2 cars').click()
         page.wait_for_selector('.toast:has-text("Found")', timeout=60000)
         toast = page.inner_text('.toast')
-        check('Found 1 barcode in 2 photos' in toast, f'result: one barcode found, the other photo has none ({toast!r})')
+        check('Found 1 barcode · 2 cars, 2 photos read' in toast, f'result: one barcode found, the other photo has none ({toast!r})')
         page.wait_for_timeout(500)
         res = ev("""(async () => { const st = await import('./js/store.js'); const ids = (await st.list('product_identifiers')).filter(i => i.identifier_type === 'barcode' && !i.deleted_at);
           const log = (await st.list('change_log')).filter(c => c.field === 'barcode');
@@ -72,6 +72,21 @@ def main():
         except Exception: pass
         txt2 = page.inner_text('.card.recheck') if page.locator('.card.recheck').count() else ''
         check('Re-check' not in txt2 and 'already re-checked' in txt2, f'the photo already re-checked is not downloaded again ({txt2[:80]!r})')
+        # s1-0.59.0: a Bottom photo added later to the car with no readable close-up → offered again, barcode found there
+        mid2 = ev("""(async () => { const st = await import('./js/store.js'); const ids = (await st.list('product_identifiers')).filter(i => i.identifier_type === 'barcode' && !i.deleted_at).map(i => i.model_id);
+          return (await st.list('models')).find(m => !ids.includes(m.model_id)).model_id; })()""")
+        ev("""async ([mid, bytes]) => { const st = await import('./js/store.js'); const { blobs } = await import('./js/idb.js');
+          const p = await st.create('photos', { model_id: mid, shot_role: 'box_bottom', file_name: 'bottom.jpg', file_type: 'image/jpeg' });
+          await blobs.put(p.photo_id + ':original', new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' })); }""", [mid2, list(open(r1, 'rb').read())])
+        page.goto(base + '#/dash'); page.wait_for_selector('.card.hero'); page.wait_for_timeout(300)
+        page.locator('text=No barcode').first.click(); page.wait_for_selector('.card.recheck button', timeout=10000)
+        txt3 = page.inner_text('.card.recheck')
+        check('Re-check 1 car' in txt3 and '1 photo to read' in txt3, f'a new Bottom photo brings the car back, only the unread photo counted ({txt3[:120]!r})')
+        page.get_by_role('button', name='🔁 Re-check 1 car').click()
+        page.wait_for_selector('.toast:has-text("Found 1 barcode · 1 car, 1 photo read")', timeout=60000)
+        got = ev(f"""(async () => {{ const st = await import('./js/store.js'); const ph = await st.list('photos');
+          return (await st.list('product_identifiers')).filter(i => i.model_id === '{mid2}' && i.identifier_type === 'barcode' && !i.deleted_at).map(i => [i.value_raw, ph.find(p => p.photo_id === i.evidence_photo_id)?.shot_role]); }})()""")
+        check(got == [[EAN, 'box_bottom']], f'barcode found on the Bottom photo, with it as evidence {got}')
         check(not errors, f'no page errors {errors[:2]}')
         b.close()
     httpd.shutdown()

@@ -5,7 +5,9 @@ A personal, mobile-first app for cataloguing a scale model collection. First app
 - Installable web app (PWA) hosted on GitHub Pages: https://abhilashsudhindran-collab.github.io/scale-model-garage/
 - **This repository contains code only.** No collection data, photos, credentials, tokens or personal information are ever stored here. All data lives in the owner's own Google Drive (`SCALE GARAGE/`) and Google Sheet (`SCALE_GARAGE_MASTER`), reached with the `drive.file` scope only.
 
-## Status: Stage 1 (quick-capture slice), version s1-0.58.0
+## Status: Stage 1 (quick-capture slice), version s1-0.59.0
+
+**s1-0.59.0 (28 Nov 2026): the barcode re-check reads extra side photos too.** Since s1-0.56.0 a barcode can be on an extra photo (Back, Bottom, End, Top) or a code label, but Garage → To check → No barcode → Re-check only read the barcode close-up. It now reads, per car, the close-up first and then those photos, stopping at the first barcode found (the rest aren't downloaded); front, box art and car photos aren't read. Photos already read with nothing found are skipped, so a car comes back when it gets a new photo (e.g. a Bottom photo added later). The card counts cars and photos; the change log names the photo the barcode came from.
 
 **s1-0.58.0 (28 Nov 2026): "No product code on this box".** Some boxes print no product code at all (B's Stance Hunters transporters, Tesla Cybertruck set). Car page: a tick under the product code (shown while it's empty) marks the box as having none, so the car leaves To check → No product code, counts as complete in Data health, and isn't sent to Gemini again or listed under "Ask Gemini again". Typing a code later clears the tick. Logged in CHANGE_LOG; new MODELS column `code_absent` (added to the sheet on the next sync). Duplicates for such cars can only be spotted by barcode, or by name and photo.
 
