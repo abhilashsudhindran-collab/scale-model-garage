@@ -25,11 +25,12 @@ import { extractCodes, imagesOnly } from './share.js';
 import { recheckTargets, runRecheck, recheckSummary } from './recheck.js';
 import { EVENT_TYPES, DISPOSALS, eventLabel, copyMoney, splitByPrice, totals as moneyTotals, num as moneyNum } from './money.js';
 import { driveIn, packed as packedMoment, checkMilestone, lightsHtml, motionOn } from './moments.js';
-import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup } from './backup.js';
+import { backupIfDue, backupNow, lastBackup, listBackups, restoreBackup, photoBackupLocal, photoBackupFromSheet, recordPhotoBackup } from './backup.js';
+import { photoBackupDue, folderSizeGB, newest, EVERY_DAYS } from './photobackup.js';
 import { LOOKUP_KIND, INBOX_KIND, FORMAT as HELPER_FORMAT, LOOKUP_ENTITIES, buildLookup, helperBoxes, boxRecords, planImport, applyPlan, unzip, fileText, photoPath, PHOTO_VARIANTS, cleanInboxRecord } from './helper.js';
 import { buildPrompt, parseAnswer, brandNote, noteParts, PROMPT_VERSION, MAX_BATCH, MAX_BATCH_COMBINED, COMBINED_SUFFIX } from './ai.js';
 
-export const APP_VERSION = 's1-0.59.0';
+export const APP_VERSION = 's1-0.60.0';
 const $ = (s, r = document) => r.querySelector(s);
 const view = () => $('#view');
 // Line icons instead of emoji (DV-0.1: no decorative clutter). Fixed markup, no user data.
@@ -618,6 +619,14 @@ async function renderDash(v) {
     v.append(h('a', { href: '#/review', class: `card navlink reviewlink${items.length ? ' has' : ''}` }, h('span', { class: 'wl-ic', 'aria-hidden': 'true' }, items.length ? '🔎' : '✓'),
       h('span', { class: 'wl-tx' }, h('b', {}, 'Needs review'), h('span', { class: 'muted small' }, items.length ? `${plural(items.length, 'thing', 'things')} the app isn't sure about` : 'Nothing the app is unsure about')),
       items.length ? h('span', { class: 'g-count' }, String(items.length)) : null, h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
+  }
+
+  // Photo backup due (s1-0.60.0, D25): only shown when due; opens Settings → Backups
+  {
+    const pb = await photoBackupState();
+    if (pb.due) v.append(h('a', { href: '#/settings', class: 'card navlink photodue has' }, h('span', { class: 'wl-ic', 'aria-hidden': 'true' }, '📸'),
+      h('span', { class: 'wl-tx' }, h('b', {}, 'Photo backup due'), h('span', { class: 'muted small' }, pb.lastAt ? `Last downloaded ${fmtDay(pb.lastAt)} · Settings → Backups` : 'Download your photos to a computer · Settings → Backups')),
+      h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')));
   }
 
   // To check: every gap in one list, each opens the matching Garage list
@@ -3065,6 +3074,46 @@ async function renderItem(v, modelId) {
 
 // ---------- To check (roadmap DR-0.2 next build #2) ----------
 // One place for every gap, each opening the matching Garage list. Cheap checks only, so it stays fast at 1,000+ cars.
+// Photo backup reminder (s1-0.60.0, D25 quarterly). The sheet's date is read once per session when signed in, so
+// a backup marked on another device counts here too.
+let photoSheetChecked = false;
+async function photoBackupState() {
+  let lastAt = await photoBackupLocal();
+  if (!photoSheetChecked && hasToken() && navigator.onLine) {
+    photoSheetChecked = true;
+    try { const cfg = await getConfig(); if (cfg?.workbookId) { const sh = await photoBackupFromSheet(cfg); const nw = newest(lastAt, sh); if (nw && nw !== lastAt) { lastAt = nw; await meta.set('photoBackupAt', nw); } } } catch { /* offline or sheet unreachable: use this phone's date */ }
+  }
+  const photos = (await store.list('photos')).filter(p => !p.deleted_at && p.original_file_id);
+  const firstPhotoAt = photos.reduce((a, p) => (!a || (p.created_at && p.created_at < a) ? p.created_at : a), '');
+  return { lastAt, photos, ...photoBackupDue({ lastAt, firstPhotoAt }) };
+}
+const fmtDay = (d) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+
+function photoBackupBlock(st) {
+  const gb = folderSizeGB(st.photos);
+  const size = gb >= 1 ? `about ${gb.toFixed(1)} GB` : `about ${Math.max(1, Math.round(gb * 1024))} MB`;
+  const line = !st.dueAt ? 'Nothing to back up yet: no photos have been synced.'
+    : st.due ? `⏰ Due${st.lastAt ? ` (last done ${fmtDay(st.lastAt)})` : ''}. Every ${EVERY_DAYS} days.`
+    : `Next by ${fmtDay(st.dueAt)} (in ${plural(st.days, 'day', 'days')})${st.lastAt ? ` · last done ${fmtDay(st.lastAt)}` : ' · not done yet'}.`;
+  return h('div', { class: 'photobackup', id: 'photobackup', style: 'margin-top:14px' },
+    h('h3', {}, 'Photo backup'),
+    h('p', { class: st.due ? '' : 'muted', style: 'margin:0 0 6px' }, line),
+    st.dueAt ? h('details', { class: 'more', open: st.due ? true : undefined }, h('summary', {}, 'How (on a computer, ~10 minutes)'),
+      h('ol', { class: 'small', style: 'margin:6px 0 8px;padding-left:20px' },
+        h('li', {}, 'Open drive.google.com on your computer.'),
+        h('li', {}, 'Right-click the SCALE GARAGE folder → Download. Google zips it (', size, '; a big folder comes as several zip files).'),
+        h('li', {}, 'Keep the zips off Google Drive: on the computer or an external drive. That copy is what protects you if the Google account is ever lost.'),
+        h('li', {}, 'Come back here and tap "I\'ve downloaded them".')),
+      h('p', { class: 'muted small', style: 'margin:0 0 8px' }, 'Google\'s menus may be worded slightly differently. Google Takeout (takeout.google.com → Drive) works too.')) : '',
+    st.dueAt ? h('button', { type: 'button', class: st.due ? 'small' : 'small quiet', onclick: async (e) => {
+      if (!confirm('Mark the photo backup as done today?\n\nOnly do this once the zip files are saved off Google Drive.')) return;
+      e.target.disabled = true; const at = new Date().toISOString();
+      let inSheet = false; try { if (hasToken()) inSheet = await recordPhotoBackup(await getConfig(), at); else await meta.set('photoBackupAt', at); } catch { await meta.set('photoBackupAt', at); }
+      await store.logChange('workbook', (await getConfig())?.workbookId || 'local', 'last_photo_backup_at', st.lastAt || '', at, 'photo backup marked done');
+      toast(inSheet ? 'Photo backup marked done ✓' : 'Marked done on this phone ✓ (saved to your sheet when you\'re signed in)', 4000); route();
+    } }, 'I\'ve downloaded them') : '');
+}
+
 // Re-check barcodes on saved cars (s1-0.54.0, B 28 Nov); logic in recheck.js. Shown on Garage → To check → No barcode.
 let recheckStop = false;
 function recheckCard(redraw) {
@@ -3559,7 +3608,7 @@ async function renderSettings(v) {
       h('dt', {}, 'Daily copy'), h('dd', {}, when(lb.dailyAt)),
       h('dt', {}, 'Monthly copy'), h('dd', {}, lb.monthlyMonth || 'not yet'),
       h('dt', {}, 'Manual copy'), h('dd', {}, when(lb.manualAt))),
-    h('p', { class: 'muted' }, 'A copy of your sheet goes to SCALE GARAGE › 06_BACKUPS after a sync, once a day (7 kept) and once a month (12 kept). Photos stay in Drive and are not copied.'),
+    h('p', { class: 'muted' }, 'A copy of your sheet goes to SCALE GARAGE › 06_BACKUPS after a sync, once a day (7 kept) and once a month (12 kept). Photos stay in Drive and are not copied: download them every 3 months (below).'),
     h('button', { class: 'quiet', disabled: config?.workbookId ? undefined : true, onclick: async (e) => {
       e.target.disabled = true; e.target.textContent = 'Backing up…';
       try { if (!hasToken()) await signIn(); await backupNow(await getConfig()); toast('Backup made ✓'); }
@@ -3579,7 +3628,8 @@ async function renderSettings(v) {
             h('div', {}, h('b', {}, b.at ? new Date(b.at.length > 10 ? b.at : b.at + 'T00:00').toLocaleString('en-IN', b.at.length > 10 ? { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' } : { day: 'numeric', month: 'short', year: 'numeric' }) : b.name),
               h('div', { class: 'muted small' }, { manual: 'Made with "Back up now"', daily: 'Daily copy', monthly: 'Monthly copy' }[b.kind])),
             h('button', { type: 'button', class: 'small quiet', onclick: (e) => doRestore(b, e.target) }, 'Restore'))) : h('p', { class: 'muted' }, 'No backups yet. They appear after your first sync.'),
-          h('button', { type: 'button', class: 'small ghost', style: 'margin-top:8px', onclick: () => { restoreList = null; route(); } }, 'Cancel'))));
+          h('button', { type: 'button', class: 'small ghost', style: 'margin-top:8px', onclick: () => { restoreList = null; route(); } }, 'Cancel')),
+    photoBackupBlock(await photoBackupState())));
 
   async function doRestore(b, btn) {
     const p = await store.pendingSummary();
